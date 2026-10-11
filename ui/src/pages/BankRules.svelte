@@ -64,9 +64,9 @@
       <button class="btn btn-sm" onclick={() => r.conditions.push({ field: 'any', op: 'contains', value: '' })}><Icon name="plus" size={14} />Add condition</button>
     </div>
     {#if r.type === 'TRANSFER'}
-      <div><span class="label">2. Transfer to / from</span><Combo bind:value={r.transfer_account_id} options={bankAccounts()} /></div>
+      <div><label class="label" for="cb-bankrule-2-transfer-to-from-1">2. Transfer to / from</label><Combo id="cb-bankrule-2-transfer-to-from-1" bind:value={r.transfer_account_id} options={bankAccounts()} /></div>
     {:else}
-      <div><span class="label">2. Set the contact (optional)</span><ContactSelect bind:value={r.contact_id} /></div>
+      <div><label class="label" for="cb-bankrule-2-set-the-contact-op-2">2. Set the contact (optional)</label><ContactSelect id="cb-bankrule-2-set-the-contact-op-2" bind:value={r.contact_id} /></div>
       <div>
         <div class="mb-1 text-[13px] font-semibold">3. Allocate</div>
         {#each r.fixed_lines as l, i}
@@ -80,7 +80,7 @@
       </div>
     {/if}
     <div class="grid grid-cols-2 gap-3">
-      <div><span class="label">Run this rule on</span><Combo bind:value={r.account_id} options={bankAccounts()} placeholder="All bank accounts" /></div>
+      <div><label class="label" for="cb-bankrule-run-this-rule-on-3">Run this rule on</label><Combo id="cb-bankrule-run-this-rule-on-3" bind:value={r.account_id} options={bankAccounts()} placeholder="All bank accounts" /></div>
       <label class="mt-5 flex items-center gap-2"><input type="checkbox" bind:checked={r.active} class="accent-[var(--accent)]" />Rule is active</label>
     </div>
   </div>

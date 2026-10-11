@@ -84,7 +84,7 @@
     <div><span class="label">Account type</span><select class="select" bind:value={f.type} disabled={!!f.system_account}>{#each TYPES as [k, c, l]}<option value={k}>{l} ({c.toLowerCase()})</option>{/each}</select></div>
     <div class="grid grid-cols-3 gap-3"><div><label class="label" for="ac">Code</label><input id="ac" class="input" bind:value={f.code} maxlength="10" /></div><div class="col-span-2"><label class="label" for="an">Name</label><input id="an" class="input" bind:value={f.name} /></div></div>
     <div><label class="label" for="ad">Description</label><textarea id="ad" rows="2" class="textarea" bind:value={f.description}></textarea></div>
-    <div><span class="label">Default tax rate</span><Combo bind:value={f.tax_rate_id} options={taxOptions()} /></div>
+    <div><label class="label" for="cb-chart-default-tax-rate-1">Default tax rate</label><Combo id="cb-chart-default-tax-rate-1" bind:value={f.tax_rate_id} options={taxOptions()} /></div>
     <label class="flex items-center gap-2"><input type="checkbox" bind:checked={f.dashboard_watch} class="accent-[var(--accent)]" />Show on dashboard watchlist</label>
     <label class="flex items-center gap-2"><input type="checkbox" bind:checked={f.show_in_expense_claims} class="accent-[var(--accent)]" />Show in expense claims</label>
     <label class="flex items-center gap-2"><input type="checkbox" bind:checked={f.enable_payments} class="accent-[var(--accent)]" />Enable payments to this account</label>

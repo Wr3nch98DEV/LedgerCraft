@@ -21,9 +21,9 @@
 
 <PageHeader title="Find and recode" crumbs={[{ label: 'Accounting', href: '/reports' }]} />
 <div class="card mb-4 grid gap-3 p-4 md:grid-cols-6">
-  <div class="md:col-span-2"><span class="label">Account</span><Combo bind:value={f.account_id} options={accountOptions()} placeholder="Any" /></div>
-  <div><span class="label">Tax rate</span><Combo bind:value={f.tax_rate_id} options={taxOptions()} placeholder="Any" /></div>
-  <div><span class="label">Contact</span><ContactSelect bind:value={f.contact_id} placeholder="Any" /></div>
+  <div class="md:col-span-2"><label class="label" for="cb-recode-account-1">Account</label><Combo id="cb-recode-account-1" bind:value={f.account_id} options={accountOptions()} placeholder="Any" /></div>
+  <div><label class="label" for="cb-recode-tax-rate-2">Tax rate</label><Combo id="cb-recode-tax-rate-2" bind:value={f.tax_rate_id} options={taxOptions()} placeholder="Any" /></div>
+  <div><label class="label" for="cb-recode-contact-3">Contact</label><ContactSelect id="cb-recode-contact-3" bind:value={f.contact_id} placeholder="Any" /></div>
   <div><label class="label" for="ff">From</label><input id="ff" type="date" class="input" bind:value={f.from} /></div>
   <div><label class="label" for="ft">To</label><input id="ft" type="date" class="input" bind:value={f.to} /></div>
   <div class="md:col-span-4"><label class="label" for="fq">Description contains</label><input id="fq" class="input" bind:value={f.q} /></div>
@@ -33,9 +33,9 @@
   {#if sel.size}
     <div class="card mb-3 flex flex-wrap items-end gap-3 p-4">
       <div class="text-muted">Recode {sel.size} selected line(s) to:</div>
-      <div class="w-60"><span class="label">Account</span><Combo bind:value={to.account_id} options={accountOptions()} placeholder="Keep" /></div>
-      <div class="w-48"><span class="label">Tax rate</span><Combo bind:value={to.tax_rate_id} options={taxOptions()} placeholder="Keep" /></div>
-      {#each cats as c, k}<div class="w-40"><span class="label">{c.name}</span><Combo value={k === 0 ? to.tracking1 : to.tracking2} options={trackingOptions(c)} placeholder="Keep" onchange={(v) => { if (k === 0) to.tracking1 = v; else to.tracking2 = v; }} /></div>{/each}
+      <div class="w-60"><label class="label" for="cb-recode-account-4">Account</label><Combo id="cb-recode-account-4" bind:value={to.account_id} options={accountOptions()} placeholder="Keep" /></div>
+      <div class="w-48"><label class="label" for="cb-recode-tax-rate-5">Tax rate</label><Combo id="cb-recode-tax-rate-5" bind:value={to.tax_rate_id} options={taxOptions()} placeholder="Keep" /></div>
+      {#each cats as c, k}<div class="w-40"><label class="label" for="cb-recode-to-tc-{k}">{c.name}</label><Combo id="cb-recode-to-tc-{k}" value={k === 0 ? to.tracking1 : to.tracking2} options={trackingOptions(c)} placeholder="Keep" onchange={(v) => { if (k === 0) to.tracking1 = v; else to.tracking2 = v; }} /></div>{/each}
       <button class="btn btn-primary" onclick={apply}>Recode</button>
     </div>
   {/if}

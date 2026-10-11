@@ -41,7 +41,7 @@
 <Modal bind:open title="New project">
   <div class="space-y-3">
     <div><label class="label" for="pn">Project name</label><input id="pn" class="input" bind:value={f.name} /></div>
-    <div><span class="label">Contact</span><ContactSelect bind:value={f.contact_id} /></div>
+    <div><label class="label" for="cb-projects-contact-1">Contact</label><ContactSelect id="cb-projects-contact-1" bind:value={f.contact_id} /></div>
     <div class="grid grid-cols-2 gap-3"><div><label class="label" for="pd">Deadline</label><input id="pd" type="date" class="input" bind:value={f.deadline} /></div><div><label class="label" for="pe">Estimate</label><input id="pe" class="input num" bind:value={f.estimate} /></div></div>
   </div>
   {#snippet footer()}<button class="btn" onclick={() => (open = false)}>Cancel</button><button class="btn btn-primary" disabled={!f.name} onclick={create}>Create</button>{/snippet}

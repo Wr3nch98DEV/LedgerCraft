@@ -50,7 +50,7 @@
     <div><label class="label" for="bt">Account type</label><select id="bt" class="select" bind:value={add.bank_type}><option value="BANK">Everyday / savings account</option><option value="CREDITCARD">Credit card</option><option value="PAYPAL">PayPal / Stripe / payment service</option><option value="CASH">Cash / petty cash</option></select></div>
     <div><label class="label" for="bn">Account name</label><input id="bn" class="input" bind:value={add.name} placeholder="e.g. Business Everyday" /></div>
     <div class="grid grid-cols-2 gap-3"><div><label class="label" for="bc">Code</label><input id="bc" class="input" bind:value={add.code} placeholder="e.g. 092" /></div>
-      <div><span class="label">Currency</span><Combo bind:value={add.currency} options={currencyOptions()} clearable={false} /></div></div>
+      <div><label class="label" for="cb-banking-currency-1">Currency</label><Combo id="cb-banking-currency-1" bind:value={add.currency} options={currencyOptions()} clearable={false} /></div></div>
     <div><label class="label" for="bnum">Account number</label><input id="bnum" class="input" bind:value={add.bank_account_number} /></div>
     <p class="text-[12px] text-muted">Import statements as CSV, OFX/QFX, QIF, CAMT.053 or MT940. Live bank feeds can be added through the bank-feed plugin interface (see PLUGINS.md).</p>
   </div>

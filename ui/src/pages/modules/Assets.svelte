@@ -58,9 +58,9 @@
 <Modal bind:open={typeOpen} title="Asset type">
   <div class="space-y-3">
     <div><label class="label" for="tn">Name</label><input id="tn" class="input" bind:value={tf.name} /></div>
-    <div><span class="label">Asset account</span><Combo bind:value={tf.asset_account_id} options={accountOptions((a) => a.type === 'FIXED' || a.type === 'NONCURRENT')} /></div>
-    <div><span class="label">Accumulated depreciation account</span><Combo bind:value={tf.accum_dep_account_id} options={accountOptions((a) => a.type === 'FIXED' || a.type === 'NONCURRENT')} /></div>
-    <div><span class="label">Depreciation expense account</span><Combo bind:value={tf.dep_expense_account_id} options={accountOptions((a) => a.class === 'EXPENSE')} /></div>
+    <div><label class="label" for="cb-assets-asset-account-1">Asset account</label><Combo id="cb-assets-asset-account-1" bind:value={tf.asset_account_id} options={accountOptions((a) => a.type === 'FIXED' || a.type === 'NONCURRENT')} /></div>
+    <div><label class="label" for="cb-assets-accumulated-deprecia-2">Accumulated depreciation account</label><Combo id="cb-assets-accumulated-deprecia-2" bind:value={tf.accum_dep_account_id} options={accountOptions((a) => a.type === 'FIXED' || a.type === 'NONCURRENT')} /></div>
+    <div><label class="label" for="cb-assets-depreciation-expense-3">Depreciation expense account</label><Combo id="cb-assets-depreciation-expense-3" bind:value={tf.dep_expense_account_id} options={accountOptions((a) => a.class === 'EXPENSE')} /></div>
     <div><span class="label">Method</span><select class="select" bind:value={tf.method}>{#each Object.entries(METHODS) as [k, v]}<option value={k}>{v}</option>{/each}</select></div>
     <div class="grid grid-cols-2 gap-3"><div><label class="label" for="tr">Rate % p.a.</label><input id="tr" class="input" bind:value={tf.rate} /></div><div><label class="label" for="tl">or effective life (years)</label><input id="tl" class="input" bind:value={tf.life_years} /></div></div>
   </div>

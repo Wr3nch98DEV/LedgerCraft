@@ -61,15 +61,15 @@
       <div class="sm:col-span-2"><label class="label" for="in">Item name</label><input id="in" class="input" bind:value={f.name} /></div>
     </div>
     <label class="flex items-center gap-2"><input type="checkbox" bind:checked={f.is_tracked} disabled={!!item?.movements?.length} class="accent-[var(--accent)]" />Track inventory for this item (quantity on hand and average cost)</label>
-    {#if f.is_tracked}<div class="grid grid-cols-2 gap-3"><div><span class="label">Inventory asset account</span><Combo bind:value={f.inventory_account_id} options={accountOptions((a) => a.class === 'ASSET' && a.type !== 'BANK')} placeholder="Default inventory account" /></div>
+    {#if f.is_tracked}<div class="grid grid-cols-2 gap-3"><div><label class="label" for="cb-producte-inventory-asset-acco-1">Inventory asset account</label><Combo id="cb-producte-inventory-asset-acco-1" bind:value={f.inventory_account_id} options={accountOptions((a) => a.class === 'ASSET' && a.type !== 'BANK')} placeholder="Default inventory account" /></div>
       <div><label class="label" for="rl">Reorder level</label><input id="rl" class="input num" bind:value={f.reorder_level} /></div></div>{/if}
   </section>
   <section class="card space-y-3 p-5">
     <label class="flex items-center gap-2 font-semibold"><input type="checkbox" bind:checked={f.is_purchased} class="accent-[var(--accent)]" />I purchase this item</label>
     {#if f.is_purchased}
       <div><label class="label" for="pp">Cost price</label><input id="pp" class="input num" bind:value={f.purchase_price} /></div>
-      <div><span class="label">{f.is_tracked ? 'Cost of goods sold account' : 'Purchases account'}</span><Combo bind:value={f.purchase_account_id} options={accountOptions((a) => a.type !== 'BANK')} /></div>
-      <div><span class="label">Tax rate</span><Combo bind:value={f.purchase_tax_rate_id} options={taxOptions()} /></div>
+      <div><label class="label" for="cb-producte-f-is-tracked-cost-of-2">{f.is_tracked ? 'Cost of goods sold account' : 'Purchases account'}</label><Combo id="cb-producte-f-is-tracked-cost-of-2" bind:value={f.purchase_account_id} options={accountOptions((a) => a.type !== 'BANK')} /></div>
+      <div><label class="label" for="cb-producte-tax-rate-3">Tax rate</label><Combo id="cb-producte-tax-rate-3" bind:value={f.purchase_tax_rate_id} options={taxOptions()} /></div>
       <div><label class="label" for="pd">Purchase description</label><textarea id="pd" rows="2" class="textarea" bind:value={f.purchase_description}></textarea></div>
     {/if}
   </section>
@@ -77,8 +77,8 @@
     <label class="flex items-center gap-2 font-semibold"><input type="checkbox" bind:checked={f.is_sold} class="accent-[var(--accent)]" />I sell this item</label>
     {#if f.is_sold}
       <div><label class="label" for="sp">Sale price</label><input id="sp" class="input num" bind:value={f.sale_price} /></div>
-      <div><span class="label">Sales account</span><Combo bind:value={f.sale_account_id} options={accountOptions((a) => a.type !== 'BANK')} /></div>
-      <div><span class="label">Tax rate</span><Combo bind:value={f.sale_tax_rate_id} options={taxOptions()} /></div>
+      <div><label class="label" for="cb-producte-sales-account-4">Sales account</label><Combo id="cb-producte-sales-account-4" bind:value={f.sale_account_id} options={accountOptions((a) => a.type !== 'BANK')} /></div>
+      <div><label class="label" for="cb-producte-tax-rate-5">Tax rate</label><Combo id="cb-producte-tax-rate-5" bind:value={f.sale_tax_rate_id} options={taxOptions()} /></div>
       <div><label class="label" for="sd">Sales description</label><textarea id="sd" rows="2" class="textarea" bind:value={f.sales_description}></textarea></div>
     {/if}
   </section>
@@ -98,7 +98,7 @@
     <div class="grid grid-cols-2 gap-3"><div><label class="label" for="aq">Quantity change (+ add / − remove)</label><input id="aq" class="input num" bind:value={adj.quantity} placeholder="-2" /></div>
       <div><label class="label" for="ad">Date</label><input id="ad" type="date" class="input" bind:value={adj.date} /></div></div>
     {#if !adj.quantity.startsWith('-')}<div><label class="label" for="au">Unit cost (for added stock)</label><input id="au" class="input num" bind:value={adj.unit_cost} /></div>{/if}
-    <div><span class="label">Adjustment account</span><Combo bind:value={adj.account_id} options={accountOptions((a) => a.type !== 'BANK')} placeholder="e.g. Cost of Goods Sold" /></div>
+    <div><label class="label" for="cb-producte-adjustment-account-6">Adjustment account</label><Combo id="cb-producte-adjustment-account-6" bind:value={adj.account_id} options={accountOptions((a) => a.type !== 'BANK')} placeholder="e.g. Cost of Goods Sold" /></div>
     <div><label class="label" for="ar">Reason</label><input id="ar" class="input" bind:value={adj.reason} /></div>
   </div>
   {#snippet footer()}<button class="btn" onclick={() => (adj.open = false)}>Cancel</button><button class="btn btn-primary" disabled={!adj.account_id || !adj.quantity} onclick={adjust}>Adjust</button>{/snippet}

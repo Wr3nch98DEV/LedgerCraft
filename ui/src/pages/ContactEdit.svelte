@@ -47,11 +47,11 @@
     <div class="grid grid-cols-2 gap-3"><div><label class="label" for="tn">Tax / business number</label><input id="tn" class="input" bind:value={f.tax_number} /></div><div><label class="label" for="an">Account number</label><input id="an" class="input" bind:value={f.account_number} /></div></div>
     <div><label class="label" for="ba">Bank account (for batch payments)</label><input id="ba" class="input" bind:value={f.bank_account} placeholder="BSB / sort code + account" /></div>
     <div class="grid grid-cols-2 gap-3">
-      <div><span class="label">Default sales account</span><Combo bind:value={f.sales_account_id} options={accountOptions((a) => a.type !== 'BANK')} /></div>
-      <div><span class="label">Default sales tax</span><Combo bind:value={f.sales_tax_rate_id} options={taxOptions()} /></div>
-      <div><span class="label">Default purchases account</span><Combo bind:value={f.purchase_account_id} options={accountOptions((a) => a.type !== 'BANK')} /></div>
-      <div><span class="label">Default purchases tax</span><Combo bind:value={f.purchase_tax_rate_id} options={taxOptions()} /></div>
-      <div><span class="label">Currency</span><Combo bind:value={f.default_currency} options={currencyOptions()} /></div>
+      <div><label class="label" for="cb-contacte-default-sales-accoun-1">Default sales account</label><Combo id="cb-contacte-default-sales-accoun-1" bind:value={f.sales_account_id} options={accountOptions((a) => a.type !== 'BANK')} /></div>
+      <div><label class="label" for="cb-contacte-default-sales-tax-2">Default sales tax</label><Combo id="cb-contacte-default-sales-tax-2" bind:value={f.sales_tax_rate_id} options={taxOptions()} /></div>
+      <div><label class="label" for="cb-contacte-default-purchases-ac-3">Default purchases account</label><Combo id="cb-contacte-default-purchases-ac-3" bind:value={f.purchase_account_id} options={accountOptions((a) => a.type !== 'BANK')} /></div>
+      <div><label class="label" for="cb-contacte-default-purchases-ta-4">Default purchases tax</label><Combo id="cb-contacte-default-purchases-ta-4" bind:value={f.purchase_tax_rate_id} options={taxOptions()} /></div>
+      <div><label class="label" for="cb-contacte-currency-5">Currency</label><Combo id="cb-contacte-currency-5" bind:value={f.default_currency} options={currencyOptions()} /></div>
     </div>
     <div><span class="label">Invoices due</span><div class="flex gap-2"><input class="input w-20" type="number" min="0" bind:value={f.sales_terms_days} /><select class="select" bind:value={f.sales_terms_type}>{#each termTypes as [k, l]}<option value={k}>{l}</option>{/each}</select></div></div>
     <div><span class="label">Bills due</span><div class="flex gap-2"><input class="input w-20" type="number" min="0" bind:value={f.bill_terms_days} /><select class="select" bind:value={f.bill_terms_type}>{#each termTypes as [k, l]}<option value={k}>{l}</option>{/each}</select></div></div>

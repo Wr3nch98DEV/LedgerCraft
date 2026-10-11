@@ -78,7 +78,7 @@
 
 <div class="no-print card mb-4 flex flex-wrap items-end gap-3 p-4">
   {#if needsAccount}
-    <div class="w-72"><span class="label">Account</span><Combo bind:value={p.account_id} options={name === 'bank-reconciliation' ? bankAccounts() : accountOptions()} placeholder="Choose an account" onchange={run} /></div>
+    <div class="w-72"><label class="label" for="cb-reportvi-account-1">Account</label><Combo id="cb-reportvi-account-1" bind:value={p.account_id} options={name === 'bank-reconciliation' ? bankAccounts() : accountOptions()} placeholder="Choose an account" onchange={run} /></div>
   {/if}
   {#if pointInTime}
     <div><label class="label" for="dt">{name.startsWith('aged') ? 'Ageing as at' : 'As at'}</label><input id="dt" type="date" class="input" bind:value={p.date} /></div>
@@ -97,7 +97,7 @@
   {#if canMonthly}<label class="mb-2 flex items-center gap-1.5 text-[13px]"><input type="checkbox" bind:checked={p.monthly} class="accent-[var(--accent)]" />Monthly columns</label>{/if}
   {#if canBasis}<div><label class="label" for="bs">Basis</label><select id="bs" class="select w-28" bind:value={p.basis}><option value="ACCRUAL">Accrual</option><option value="CASH">Cash</option></select></div>{/if}
   {#if name.startsWith('aged')}<div><label class="label" for="ab">Ageing by</label><select id="ab" class="select w-36" bind:value={p.ageing_by}><option value="DUE">Due date</option><option value="INVOICE">Invoice date</option></select></div>{/if}
-  {#if canTracking && trackingOpts.length}<div class="w-48"><span class="label">Tracking</span><Combo bind:value={p.tracking} options={trackingOpts} placeholder="All" /></div>{/if}
+  {#if canTracking && trackingOpts.length}<div class="w-48"><label class="label" for="cb-reportvi-tracking-2">Tracking</label><Combo id="cb-reportvi-tracking-2" bind:value={p.tracking} options={trackingOpts} placeholder="All" /></div>{/if}
   {#if (name === 'profit-and-loss' || name.startsWith('budget')) && budgets.length}
     <div><label class="label" for="bud">{name === 'profit-and-loss' ? 'Compare to budget' : 'Budget'}</label><select id="bud" class="select w-44" bind:value={p.budget_id}><option value={null}>{name === 'profit-and-loss' ? 'None' : 'Default'}</option>{#each budgets as b}<option value={b.id}>{b.name}</option>{/each}</select></div>
   {/if}

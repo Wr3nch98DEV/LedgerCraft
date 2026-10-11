@@ -45,8 +45,8 @@
 </PageHeader>
 <div class="card p-5">
   <div class="grid grid-cols-1 gap-4 md:grid-cols-12">
-    <div class="md:col-span-3"><span class="label">{receive ? 'Received into' : 'Paid from'}</span><Combo bind:value={f.account_id} options={bankAccounts()} clearable={false} /></div>
-    <div class="md:col-span-3"><span class="label">{receive ? 'From' : 'To'}</span><ContactSelect bind:value={f.contact_id} /></div>
+    <div class="md:col-span-3"><label class="label" for="cb-banktxfo-receive-received-int-1">{receive ? 'Received into' : 'Paid from'}</label><Combo id="cb-banktxfo-receive-received-int-1" bind:value={f.account_id} options={bankAccounts()} clearable={false} /></div>
+    <div class="md:col-span-3"><label class="label" for="cb-banktxfo-receive-from-to-2">{receive ? 'From' : 'To'}</label><ContactSelect id="cb-banktxfo-receive-from-to-2" bind:value={f.contact_id} /></div>
     <div class="md:col-span-2"><label class="label" for="d">Date</label><input id="d" type="date" class="input" bind:value={f.date} /></div>
     <div class="md:col-span-2"><label class="label" for="r">Reference</label><input id="r" class="input" bind:value={f.reference} /></div>
     <div class="md:col-span-2"><label class="label" for="l">Amounts are</label><select id="l" class="select" bind:value={f.line_amount_type}><option value="INCLUSIVE">Tax inclusive</option><option value="EXCLUSIVE">Tax exclusive</option><option value="NOTAX">No tax</option></select></div>

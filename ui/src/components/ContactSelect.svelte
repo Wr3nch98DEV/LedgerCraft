@@ -2,8 +2,8 @@
   import Combo from './Combo.svelte';
   import { rpc } from '../lib/api';
   import { toastError } from '../lib/stores.svelte';
-  let { value = $bindable(null), onchange, placeholder = 'Find or add a contact', kind = 'all', invalid = false, compact = false }:
-    { value?: number | null; onchange?: (id: number | null, contact?: any) => void; placeholder?: string; kind?: string; invalid?: boolean; compact?: boolean } = $props();
+  let { value = $bindable(null), onchange, placeholder = 'Find or add a contact', kind = 'all', invalid = false, compact = false, id = undefined }:
+    { id?: string; value?: number | null; onchange?: (id: number | null, contact?: any) => void; placeholder?: string; kind?: string; invalid?: boolean; compact?: boolean } = $props();
   let contacts = $state<any[]>([]);
   async function load() { contacts = await rpc('contacts.list', { filter: 'all' }); }
   load();
@@ -18,4 +18,4 @@
   }
 </script>
 
-<Combo bind:value {options} {placeholder} {invalid} {compact} allowCreate oncreate={create} onchange={(v) => onchange?.(v, contacts.find((c) => c.id === v))} />
+<Combo bind:value {id} {options} {placeholder} {invalid} {compact} allowCreate oncreate={create} onchange={(v) => onchange?.(v, contacts.find((c) => c.id === v))} />

@@ -56,6 +56,6 @@
     {/each}</tbody></table>
 </div>
 {#if r.status === 'DRAFT' && can('payroll:write')}
-  <div class="mt-4 flex flex-wrap items-end justify-end gap-3"><div class="w-64"><span class="label">Pay net wages from</span><Combo bind:value={bank} options={bankAccounts()} placeholder="Don't record payment" /></div><button class="btn btn-primary" onclick={post}>Post pay run</button></div>
+  <div class="mt-4 flex flex-wrap items-end justify-end gap-3"><div class="w-64"><label class="label" for="cb-payrun-pay-net-wages-from-1">Pay net wages from</label><Combo id="cb-payrun-pay-net-wages-from-1" bind:value={bank} options={bankAccounts()} placeholder="Don't record payment" /></div><button class="btn btn-primary" onclick={post}>Post pay run</button></div>
 {/if}
 {/if}

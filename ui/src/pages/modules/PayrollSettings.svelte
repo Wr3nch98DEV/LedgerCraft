@@ -45,8 +45,8 @@
   <div class="space-y-3">
     <div class="grid grid-cols-2 gap-3"><div><span class="label">Type</span><select class="select" bind:value={it.kind} disabled={!!it.id}><option value="EARNINGS">Earnings</option><option value="DEDUCTION">Deduction</option><option value="REIMBURSEMENT">Reimbursement</option></select></div>
       <div><label class="label" for="pn">Name</label><input id="pn" class="input" bind:value={it.name} /></div></div>
-    {#if it.kind !== 'DEDUCTION'}<div><span class="label">Expense account</span><Combo bind:value={it.account_id} options={accountOptions((a) => a.class === 'EXPENSE')} /></div>{/if}
-    {#if it.kind === 'DEDUCTION'}<div><span class="label">Liability account</span><Combo bind:value={it.liability_account_id} options={accountOptions((a) => a.class === 'LIABILITY')} /></div>{/if}
+    {#if it.kind !== 'DEDUCTION'}<div><label class="label" for="cb-payrolls-expense-account-1">Expense account</label><Combo id="cb-payrolls-expense-account-1" bind:value={it.account_id} options={accountOptions((a) => a.class === 'EXPENSE')} /></div>{/if}
+    {#if it.kind === 'DEDUCTION'}<div><label class="label" for="cb-payrolls-liability-account-2">Liability account</label><Combo id="cb-payrolls-liability-account-2" bind:value={it.liability_account_id} options={accountOptions((a) => a.class === 'LIABILITY')} /></div>{/if}
     {#if it.kind === 'EARNINGS'}<div class="flex gap-5"><label class="flex items-center gap-2"><input type="checkbox" bind:checked={it.taxable} class="accent-[var(--accent)]" />Taxable</label><label class="flex items-center gap-2"><input type="checkbox" bind:checked={it.super_eligible} class="accent-[var(--accent)]" />Retirement contributions apply</label></div>{/if}
   </div>
   {#snippet footer()}<button class="btn" onclick={() => (itemOpen = false)}>Cancel</button><button class="btn btn-primary" onclick={saveItem}>Save</button>{/snippet}

@@ -200,7 +200,7 @@
   <!-- ================= EDIT MODE ================= -->
   <div class="card p-5">
     <div class="grid grid-cols-1 gap-4 md:grid-cols-12">
-      <div class="md:col-span-4"><span class="label">{sales ? 'To' : 'From'}</span><ContactSelect bind:value={f.contact_id} onchange={onContact} invalid={errors.contact} kind={otherSide} /></div>
+      <div class="md:col-span-4"><label class="label" for="cb-docedit-sales-to-from-1">{sales ? 'To' : 'From'}</label><ContactSelect id="cb-docedit-sales-to-from-1" bind:value={f.contact_id} onchange={onContact} invalid={errors.contact} kind={otherSide} /></div>
       <div class="md:col-span-2"><label class="label" for="dt">{type === 'QUOTE' ? 'Date' : type === 'PO' ? 'Date' : credit ? 'Date' : 'Issue date'}</label><input id="dt" type="date" class="input" bind:value={f.date} /></div>
       {#if type === 'QUOTE'}<div class="md:col-span-2"><label class="label" for="ex">Expiry</label><input id="ex" type="date" class="input" bind:value={f.expiry_date} /></div>
       {:else if type === 'PO'}<div class="md:col-span-2"><label class="label" for="dd">Delivery date</label><input id="dd" type="date" class="input" bind:value={f.delivery_date} /></div>
@@ -330,7 +330,7 @@
           <div class="space-y-2.5">
             <div><label class="label" for="pa">Amount {doc.currency}</label><input id="pa" class="input num" bind:value={pay.amount} /></div>
             <div><label class="label" for="pd">Date</label><input id="pd" type="date" class="input" bind:value={pay.date} /></div>
-            <div><span class="label">{credit ? (sales ? 'Paid from' : 'Received into') : sales ? 'Paid to' : 'Paid from'}</span><Combo bind:value={pay.account_id} options={bankAccounts()} placeholder="Bank account" /></div>
+            <div><label class="label" for="cb-docedit-credit-sales-paid-fr-2">{credit ? (sales ? 'Paid from' : 'Received into') : sales ? 'Paid to' : 'Paid from'}</label><Combo id="cb-docedit-credit-sales-paid-fr-2" bind:value={pay.account_id} options={bankAccounts()} placeholder="Bank account" /></div>
             {#if doc.currency !== baseCur}<div><label class="label" for="pr">Rate (1 {baseCur} =)</label><input id="pr" class="input num" bind:value={pay.rate} placeholder={fmtRate(doc.rate_e8)} /></div>{/if}
             <div><label class="label" for="pref">Reference</label><input id="pref" class="input" bind:value={pay.reference} /></div>
             <button class="btn btn-primary w-full justify-center" disabled={!pay.account_id} onclick={addPayment}>Add {credit ? 'refund' : 'payment'}</button>

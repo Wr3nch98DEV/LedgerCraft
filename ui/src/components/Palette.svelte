@@ -29,7 +29,8 @@
   let timer: any;
 
   const cmdMatches = $derived(q ? commands.filter((c) => c.label.toLowerCase().includes(q.toLowerCase())).slice(0, 6) : []);
-  const items = $derived([
+  type PaletteItem = { kind: string; label: string; href: string; sub?: string };
+  const items: PaletteItem[] = $derived([
     ...cmdMatches.map((c) => ({ kind: 'Go to', label: c.label, href: c.href })),
     ...results.map((r) => ({ kind: r.entity, label: r.title, href: hrefFor(r), sub: r.snippet })),
     ...(!q ? recent.items.map((r) => ({ kind: 'Recent', label: r.label, href: r.path })) : [])

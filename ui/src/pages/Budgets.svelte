@@ -58,7 +58,7 @@
 <div class="card mb-4 flex flex-wrap items-end gap-3 p-4">
   <div><span class="label">Budget</span><select class="select w-56" value={current} onchange={(e) => open(Number((e.target as HTMLSelectElement).value))}>{#each budgets as b}<option value={b.id}>{b.name}</option>{/each}{#if current === null}<option value={null}>(new)</option>{/if}</select></div>
   <div><label class="label" for="bn">Name</label><input id="bn" class="input w-56" bind:value={name} /></div>
-  {#if trackingOpts.length}<div class="w-56"><span class="label">For tracking option</span><Combo bind:value={tracking} options={trackingOpts} placeholder="Overall budget" /></div>{/if}
+  {#if trackingOpts.length}<div class="w-56"><label class="label" for="cb-budgets-for-tracking-option-1">For tracking option</label><Combo id="cb-budgets-for-tracking-option-1" bind:value={tracking} options={trackingOpts} placeholder="Overall budget" /></div>{/if}
   <div><label class="label" for="by">Financial year starting</label><input id="by" type="month" class="input" value={year.slice(0, 7)} onchange={(e) => (year = (e.target as HTMLInputElement).value + '-01')} /></div>
 </div>
 <div class="card overflow-x-auto">

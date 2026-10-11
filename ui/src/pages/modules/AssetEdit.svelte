@@ -83,8 +83,8 @@
 <Modal bind:open={disp.open} title="Sell or dispose of asset">
   <div class="space-y-3">
     <div class="grid grid-cols-2 gap-3"><div><label class="label" for="dd">Date</label><input id="dd" type="date" class="input" bind:value={disp.date} /></div><div><label class="label" for="dp">Sale price (0 if scrapped)</label><input id="dp" class="input num" bind:value={disp.sale_price} /></div></div>
-    {#if disp.sale_price && Number(disp.sale_price) > 0}<div><span class="label">Proceeds received into</span><Combo bind:value={disp.proceeds_account_id} options={bankAccounts()} /></div>{/if}
-    <div><span class="label">Gain / loss account</span><Combo bind:value={disp.gain_loss_account_id} options={accountOptions((x) => x.class === 'REVENUE' || x.class === 'EXPENSE')} /></div>
+    {#if disp.sale_price && Number(disp.sale_price) > 0}<div><label class="label" for="cb-assetedi-proceeds-received-in-1">Proceeds received into</label><Combo id="cb-assetedi-proceeds-received-in-1" bind:value={disp.proceeds_account_id} options={bankAccounts()} /></div>{/if}
+    <div><label class="label" for="cb-assetedi-gain-loss-account-2">Gain / loss account</label><Combo id="cb-assetedi-gain-loss-account-2" bind:value={disp.gain_loss_account_id} options={accountOptions((x) => x.class === 'REVENUE' || x.class === 'EXPENSE')} /></div>
     <p class="text-[12px] text-muted">Depreciation is brought up to the end of the previous month first. The asset's cost and accumulated depreciation are removed and the gain or loss is posted.</p>
   </div>
   {#snippet footer()}<button class="btn" onclick={() => (disp.open = false)}>Cancel</button><button class="btn btn-primary" disabled={!disp.gain_loss_account_id} onclick={dispose}>Dispose</button>{/snippet}

@@ -51,7 +51,7 @@
 
 <Modal bind:open title={editId ? 'Edit repeating template' : 'New repeating template'} width={1100}>
   <div class="grid grid-cols-2 gap-3 md:grid-cols-6">
-    <div class="col-span-2"><span class="label">{sales ? 'To' : 'From'}</span><ContactSelect bind:value={f.template.contact_id} /></div>
+    <div class="col-span-2"><label class="label" for="cb-repeatin-sales-to-from-1">{sales ? 'To' : 'From'}</label><ContactSelect id="cb-repeatin-sales-to-from-1" bind:value={f.template.contact_id} /></div>
     <div><label class="label" for="sd">{editId ? 'Next date' : 'Start date'}</label>{#if editId}<input id="sd" type="date" class="input" bind:value={f.next_date} />{:else}<input id="sd" type="date" class="input" bind:value={f.start_date} />{/if}</div>
     <div><span class="label">Repeat every</span><div class="flex gap-1"><input type="number" min="1" class="input w-16" bind:value={f.period_count} /><select class="select" bind:value={f.period_unit}><option value="MONTHLY">month(s)</option><option value="WEEKLY">week(s)</option></select></div></div>
     <div><label class="label" for="ed">End date (optional)</label><input id="ed" type="date" class="input" bind:value={f.end_date} /></div>

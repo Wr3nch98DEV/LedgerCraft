@@ -18,8 +18,8 @@
 <PageHeader title="Transfer money" crumbs={[{ label: 'Bank accounts', href: '/banking' }]} />
 <form class="card max-w-2xl space-y-4 p-5" onsubmit={save}>
   <div class="grid grid-cols-2 gap-4">
-    <div><span class="label">From</span><Combo bind:value={f.from_account_id} options={bankAccounts()} /></div>
-    <div><span class="label">To</span><Combo bind:value={f.to_account_id} options={bankAccounts().filter((o) => o.value !== f.from_account_id)} /></div>
+    <div><label class="label" for="cb-transfer-from-1">From</label><Combo id="cb-transfer-from-1" bind:value={f.from_account_id} options={bankAccounts()} /></div>
+    <div><label class="label" for="cb-transfer-to-2">To</label><Combo id="cb-transfer-to-2" bind:value={f.to_account_id} options={bankAccounts().filter((o) => o.value !== f.from_account_id)} /></div>
     <div><label class="label" for="d">Date</label><input id="d" type="date" class="input" bind:value={f.date} /></div>
     <div><label class="label" for="a">Amount {cur(f.from_account_id) ?? ''}</label><input id="a" class="input num" bind:value={f.amount} required /></div>
     {#if fx}<div><label class="label" for="ta">Amount received {cur(f.to_account_id)}</label><input id="ta" class="input num" bind:value={f.to_amount} required /></div>{/if}
