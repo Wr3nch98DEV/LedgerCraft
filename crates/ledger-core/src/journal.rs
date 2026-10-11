@@ -99,9 +99,9 @@ impl Ledger {
 
     /// Reverse a posted journal on `date` (defaults to the original date).
     pub fn reverse_journal(&self, journal_id: i64, date: Option<&str>, source_type: Option<&str>) -> Result<i64> {
-        let (orig_date, st, sid, reference, reversed): (String, String, Option<i64>, String, i64) = self.conn.query_row(
-            "SELECT date, source_type, source_id, reference, reversed FROM journals WHERE id = ?1 AND posted = 1",
-            [journal_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        let (orig_date, st, sid, reference, reversed, cash): (String, String, Option<i64>, String, i64, i64) = self.conn.query_row(
+            "SELECT date, source_type, source_id, reference, reversed, cash_basis FROM journals WHERE id = ?1 AND posted = 1",
+            [journal_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
         )?;
         if reversed != 0 { return invalid("journal is already reversed"); }
         let lines = self.journal_lines(journal_id)?;
@@ -114,7 +114,8 @@ impl Ledger {
                 reference,
                 narration: format!("Reversal of journal #{journal_id}"),
                 lines: lines.into_iter().map(|mut l| { l.amount = -l.amount; l.tax_amount = -l.tax_amount; l.fx_amount = l.fx_amount.map(|x| -x); l }).collect(),
-                cash_basis: true,
+                // A reversal shows on cash-basis reports exactly when the original does.
+                cash_basis: cash != 0,
                 reverses: Some(journal_id),
             })?;
             self.conn.execute("UPDATE journals SET reversed = 1 WHERE id = ?1", [journal_id])?;

@@ -14,7 +14,7 @@
   const pointInTime = ['balance-sheet', 'trial-balance', 'aged-receivables', 'aged-payables', 'bank-reconciliation', 'inventory-summary', 'fixed-asset-register', 'leave-balances'].includes(name);
   const canCompare = ['profit-and-loss', 'balance-sheet', 'cash-summary'].includes(name);
   const canMonthly = ['profit-and-loss', 'cash-summary'].includes(name);
-  const canBasis = ['profit-and-loss', 'tax-reconciliation', 'cash-summary'].includes(name);
+  const canBasis = ['profit-and-loss', 'balance-sheet', 'tax-reconciliation', 'cash-summary'].includes(name);
   const canTracking = ['profit-and-loss', 'balance-sheet', 'trial-balance', 'account-transactions', 'general-ledger', 'general-ledger-detail', 'cash-summary', 'budget-variance'].includes(name);
   const needsAccount = name === 'account-transactions' || name === 'bank-reconciliation';
 

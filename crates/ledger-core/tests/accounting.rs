@@ -31,6 +31,8 @@ fn assert_invariants(l: &Ledger) {
     assert!(bs["check"].as_array().unwrap().iter().all(|v| v.as_i64() == Some(0)), "A != L + E: {:?}", bs["check"]);
     let tb = l.trial_balance(&ReportParams { date: Some("2099-12-31".into()), ..Default::default() }).unwrap();
     assert_eq!(tb["balanced"], Value::Bool(true));
+    let bsc = l.balance_sheet(&ReportParams { date: Some("2099-12-31".into()), basis: Some("CASH".into()), ..Default::default() }).unwrap();
+    assert!(bsc["check"].as_array().unwrap().iter().all(|v| v.as_i64() == Some(0)), "cash basis A != L + E: {:?}", bsc["check"]);
 }
 
 #[test]
@@ -255,6 +257,23 @@ fn reports_add_up() {
     assert_eq!(tax["difference"], 0, "tax report reconciles to GL");
     let aged = l.aged(true, &ReportParams { date: Some("2026-08-31".into()), ..Default::default() }).unwrap();
     assert_eq!(aged["sections"][0]["total"]["values"][5], 110000);
+    assert_invariants(&l);
+}
+
+#[test]
+fn cash_basis_balance_sheet_keeps_opening_balances() {
+    let l = org();
+    let bank = acct(&l, "090");
+    let sales = acct(&l, "200");
+    let cap = acct(&l, "970");
+    l.save_conversion_balances("2026-06-30", &[serde_json::json!({"account_id": bank, "debit": "5000"}), serde_json::json!({"account_id": cap, "credit": "5000"})]).unwrap();
+    let id = invoice(&l, "2026-07-01", vec![line(sales, Some(tax(&l, "GST on Income")), "3", "33.33")], "AUTHORISED");
+    l.add_payment(&PaymentInput { document_id: id, account_id: bank, date: "2026-07-05".into(), amount: "40".into(), ..Default::default() }).unwrap();
+    let p = ReportParams { date: Some("2026-07-31".into()), basis: Some("CASH".into()), ..Default::default() };
+    let bs = l.balance_sheet(&p).unwrap();
+    assert_eq!(bs["check"][0], 0);
+    let bank_row = bs["sections"].as_array().unwrap().iter().flat_map(|s| s["rows"].as_array().cloned().unwrap_or_default()).find(|r| r["account_id"] == bank).unwrap();
+    assert_eq!(bank_row["values"][0], 504000, "opening balance + receipt on cash basis");
     assert_invariants(&l);
 }
 

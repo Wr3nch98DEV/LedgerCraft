@@ -184,6 +184,9 @@ impl Ledger {
             self.write_lines("MJ", mid, &computed)?;
             if m.status.as_deref() == Some("POSTED") { self.post_manual_journal(mid)?; }
             self.audit(if id.is_some() { "UPDATE" } else { "CREATE" }, "manual_journal", Some(mid), None, Some(json!({"narration": m.narration})))?;
+            let posted = m.status.as_deref() == Some("POSTED");
+            let what = match (id.is_some(), posted) { (false, true) => "Journal created and posted", (false, false) => "Draft journal created", (true, true) => "Journal edited and reposted", (true, false) => "Journal edited (saved as draft)" };
+            self.add_note("manual_journal", mid, "HISTORY", &format!("{} — total {}", what, money::fmt_money(computed.iter().filter(|c| c.net + c.tax > 0).map(|c| c.net + c.tax).sum())))?;
             self.index_search("manual_journal", mid, &format!("Manual journal {}", m.narration), "")?;
             Ok(mid)
         })
@@ -215,6 +218,8 @@ impl Ledger {
                 if let Some(j) = rjid { self.reverse_journal(j, None, None)?; }
             }
             self.conn.execute("UPDATE manual_journals SET status = ?2 WHERE id = ?1", params![id, if st == "DRAFT" { "DELETED" } else { "VOIDED" }])?;
+            self.add_note("manual_journal", id, "HISTORY", if st == "DRAFT" { "Draft journal deleted" } else { "Journal voided (reversed in the ledger)" })?;
+            self.audit(if st == "DRAFT" { "DELETE" } else { "VOID" }, "manual_journal", Some(id), None, None)?;
             Ok(())
         })
     }

@@ -58,40 +58,53 @@ impl Ledger {
             for r in st.query_map(params![from, to, tracking], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))? { let (a, v) = r?; m.insert(a, v); }
             return Ok(m);
         }
-        // Cash basis: non-document journals as-is, minus the AR/AP leg of settlement journals,
-        // plus document lines recognised in proportion to settlements.
+        // Cash basis: non-document journals as-is (opening balances included), minus the AR/AP leg of
+        // settlement journals, plus document lines recognised in proportion to settlements.
+        let ar = self.sys_account("AR")?; let ap = self.sys_account("AP")?;
         let mut st = self.conn.prepare_cached(
             "SELECT jl.account_id, SUM(jl.amount) FROM journal_lines jl JOIN journals j ON j.id = jl.journal_id
              WHERE j.posted = 1 AND j.date >= ?1 AND j.date <= ?2 AND (?3 IS NULL OR jl.tracking1 = ?3 OR jl.tracking2 = ?3)
                AND j.source_type NOT IN ('ACCREC','ACCPAY','ACCRECCREDIT','ACCPAYCREDIT')
                AND NOT (j.reverses_journal_id IS NOT NULL AND (SELECT source_type FROM journals o WHERE o.id = j.reverses_journal_id) IN ('ACCREC','ACCPAY','ACCRECCREDIT','ACCPAYCREDIT'))
-               AND j.cash_basis = 1
+               AND (j.cash_basis = 1 OR j.source_type = 'CONVERSION')
+               AND NOT (jl.account_id IN (?4, ?5) AND j.source_type <> 'CONVERSION')
              GROUP BY jl.account_id")?;
-        for r in st.query_map(params![from, to, tracking], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))? { let (a, v) = r?; *m.entry(a).or_default() += v; }
-        let ar = self.sys_account("AR")?; let ap = self.sys_account("AP")?;
-        m.remove(&ar); m.remove(&ap);
+        for r in st.query_map(params![from, to, tracking, ar, ap], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))? { let (a, v) = r?; *m.entry(a).or_default() += v; }
         let mut st = self.conn.prepare_cached(
-            "SELECT document_id, amount FROM payments WHERE status <> 'DELETED' AND date >= ?1 AND date <= ?2
-             UNION ALL SELECT document_id, amount FROM credit_allocations WHERE status <> 'DELETED' AND date >= ?1 AND date <= ?2
-             UNION ALL SELECT credit_note_id, amount FROM credit_allocations WHERE status <> 'DELETED' AND date >= ?1 AND date <= ?2
-             UNION ALL SELECT document_id, amount FROM prepayment_allocations WHERE status <> 'DELETED' AND date >= ?1 AND date <= ?2")?;
-        let settlements = st.query_map(params![from, to], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        for (doc, amt) in settlements {
+            "SELECT document_id, amount, control_base FROM payments WHERE status <> 'DELETED' AND date >= ?1 AND date <= ?2
+             UNION ALL SELECT document_id, amount, doc_base FROM credit_allocations WHERE status <> 'DELETED' AND date >= ?1 AND date <= ?2
+             UNION ALL SELECT credit_note_id, amount, cn_base FROM credit_allocations WHERE status <> 'DELETED' AND date >= ?1 AND date <= ?2
+             UNION ALL SELECT document_id, amount, doc_base FROM prepayment_allocations WHERE status <> 'DELETED' AND date >= ?1 AND date <= ?2")?;
+        let settlements = st.query_map(params![from, to], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        for (doc, amt, base) in settlements {
             let (total, jid): (i64, Option<i64>) = self.conn.query_row("SELECT total, journal_id FROM documents WHERE id = ?1", [doc], |r| Ok((r.get(0)?, r.get(1)?)))?;
             let Some(jid) = jid else { continue };
             if total == 0 { continue; }
             let mut st2 = self.conn.prepare_cached("SELECT account_id, amount, tracking1, tracking2 FROM journal_lines WHERE journal_id = ?1")?;
-            for r in st2.query_map([jid], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, Option<i64>>(2)?, r.get::<_, Option<i64>>(3)?)))? {
-                let (a, v, t1, t2) = r?;
+            let lines = st2.query_map([jid], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, Option<i64>>(2)?, r.get::<_, Option<i64>>(3)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            // Recognise each line pro rata; the rounding residual goes to the largest line so the
+            // recognised amounts always sum exactly to the settled share of the AR/AP leg.
+            let control: i64 = lines.iter().filter(|l| l.0 == ar || l.0 == ap).map(|l| l.1).sum();
+            // Prefer the exact base amount the settlement cleared from AR/AP (it absorbs FX and rounding).
+            let target = if base != 0 { -control.signum() * base.abs() } else { -money::div_round(control as i128 * amt as i128, total as i128) as i64 };
+            let mut parts: Vec<(i64, i64, bool)> = Vec::new();
+            for (a, v, t1, t2) in lines {
                 if a == ar || a == ap { continue; }
-                if let Some(t) = tracking { if t1 != Some(t) && t2 != Some(t) { continue; } }
-                *m.entry(a).or_default() += money::div_round(v as i128 * amt as i128, total as i128) as i64;
+                let keep = match tracking { Some(t) => t1 == Some(t) || t2 == Some(t), None => true };
+                parts.push((a, money::div_round(v as i128 * amt as i128, total as i128) as i64, keep));
             }
+            let residual = target - parts.iter().map(|x| x.1).sum::<i64>();
+            if residual != 0 && tracking.is_none() {
+                if let Some(big) = parts.iter_mut().max_by_key(|x| x.1.abs()) { big.1 += residual; }
+            }
+            for (a, v, keep) in parts { if keep { *m.entry(a).or_default() += v; } }
         }
         Ok(m)
     }
 
     fn balances_at(&self, date: &str, tracking: Option<i64>) -> Result<HashMap<i64, i64>> { self.account_movements(None, date, false, tracking) }
+    fn balances_at_basis(&self, date: &str, cash: bool, tracking: Option<i64>) -> Result<HashMap<i64, i64>> { self.account_movements(None, date, cash, tracking) }
 
     /// Build comparison periods ending at `to`.
     pub fn periods(&self, from: &str, to: &str, compare: i64, period: &str, monthly: bool) -> Result<Vec<Period>> {
@@ -187,11 +200,12 @@ impl Ledger {
         let mut cye = Vec::new();
         let mut prior_pl = Vec::new();
         let is_pl = |a: &Acct| a.class == "REVENUE" || a.class == "EXPENSE";
+        let cash = p.basis.as_deref() == Some("CASH");
         for dt in &dates {
-            bals.push(self.balances_at(dt, p.tracking)?);
+            bals.push(self.balances_at_basis(dt, cash, p.tracking)?);
             let fy = self.fy_start(dt)?;
-            let pl_this = self.account_movements(Some(&fy), dt, false, p.tracking)?;
-            let pl_before = self.account_movements(None, &util::add_days(&fy, -1)?, false, p.tracking)?;
+            let pl_this = self.account_movements(Some(&fy), dt, cash, p.tracking)?;
+            let pl_before = self.account_movements(None, &util::add_days(&fy, -1)?, cash, p.tracking)?;
             cye.push(-accts.iter().filter(|a| is_pl(a)).map(|a| pl_this.get(&a.id).copied().unwrap_or(0)).sum::<i64>());
             prior_pl.push(-accts.iter().filter(|a| is_pl(a)).map(|a| pl_before.get(&a.id).copied().unwrap_or(0)).sum::<i64>());
         }
@@ -245,6 +259,7 @@ impl Ledger {
         let _ = equity;
         Ok(json!({
             "title": "Balance Sheet", "org": self.setting_or("org_name", "")?, "subtitle": String::from("As at ") + &fmt_long(&date),
+            "basis": if cash { "Cash" } else { "Accrual" },
             "columns": dates.iter().map(|d| fmt_long(d)).collect::<Vec<_>>(), "sections": out,
             "check": (0..n).map(|i| net_assets[i] - equity[i]).collect::<Vec<_>>(),
         }))
