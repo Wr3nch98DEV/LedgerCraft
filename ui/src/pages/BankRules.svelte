@@ -35,10 +35,8 @@
     const q = route.query;
     const payee = q.get('payee') ?? '', desc = q.get('description') ?? '';
     tab = q.get('type') === 'RECEIVE' ? 'RECEIVE' : 'SPEND';
-    r = blank();
-    r.name = payee || desc;
-    r.conditions = [payee ? { field: 'payee', op: 'contains', value: payee } : { field: 'description', op: 'contains', value: desc }];
-    r.account_id = q.get('account') ? Number(q.get('account')) : null;
+    r = { ...blank(), name: payee || desc, account_id: q.get('account') ? Number(q.get('account')) : null,
+      conditions: [payee ? { field: 'payee', op: 'contains', value: payee } : { field: 'description', op: 'contains', value: desc }] };
     editId = null;
     open = true;
   }
