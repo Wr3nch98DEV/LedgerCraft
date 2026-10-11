@@ -38,7 +38,7 @@ async fn main() {
         .route("/api/rpc/{method}", post(rpc_handler))
         .route("/api/session", get(session_handler))
         .route("/view/{kind}/{id}", get(view_handler))
-        .route("/online/{token}", get(online_handler))
+        .route("/online/{token}", get(online_handler).post(online_respond))
         .route("/download/{kind}", get(download_handler))
         .route("/api/v1/{*path}", get(rest_get).post(rest_post))
         .fallback(get(static_handler))
@@ -165,6 +165,24 @@ async fn online_handler(State(st): State<Arc<AppState>>, Path(token): Path<Strin
     match tokio::task::spawn_blocking(move || render::online(&st2, &token)).await {
         Ok(Ok(html)) => ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response(),
         Ok(Err(e)) => (StatusCode::NOT_FOUND, e).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn online_respond(State(st): State<Arc<AppState>>, Path(token): Path<String>, axum::Form(f): axum::Form<std::collections::HashMap<String, String>>) -> Response {
+    let st2 = st.clone();
+    let accept = f.get("action").map(|a| a == "accept").unwrap_or(false);
+    let name = f.get("name").cloned().unwrap_or_default();
+    let r = tokio::task::spawn_blocking(move || {
+        let guard = st2.org.lock().unwrap();
+        let org = guard.as_ref().ok_or("no organisation open".to_string())?;
+        org.ledger.respond_to_quote(&token, accept, &name).map_err(|e| e.to_string())?;
+        drop(guard);
+        render::online(&st2, &token)
+    }).await;
+    match r {
+        Ok(Ok(html)) => ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response(),
+        Ok(Err(e)) => (StatusCode::BAD_REQUEST, e).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }

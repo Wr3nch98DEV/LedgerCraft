@@ -443,3 +443,11 @@ fn csv_import_dry_run_then_real() {
     assert!(l.export_csv("invoices").unwrap().contains("X-1"));
     assert_invariants(&l);
 }
+
+#[test]
+fn cash_flow_statement_ties_to_bank() {
+    let l = org();
+    ledger_core::demo::seed_demo(&l).unwrap();
+    let r = ledger_core::extra_reports::run_any(&l, "cash-flow-statement", &ReportParams { from: Some("2020-01-01".into()), ..Default::default() }).unwrap();
+    assert_eq!(r["check"][0], 0, "indirect cash flow reconciles to the change in bank balances");
+}

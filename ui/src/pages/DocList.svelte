@@ -50,8 +50,10 @@
     const ok = await confirm(`${label} ${selected.size} item${selected.size === 1 ? '' : 's'}?`, '', label, status === 'DELETED' || status === 'VOIDED');
     if (!ok) return;
     let n = 0, errs: string[] = [];
-    for (const r of selRows) { try { await rpc('docs.setStatus', { id: r.id, status }); n++; } catch (e: any) { errs.push(`${r.number}: ${e.message}`); } }
-    toast(`${n} updated${errs.length ? `, ${errs.length} skipped` : ''}`, errs.length ? 'info' : 'ok');
+    const done: number[] = [];
+    for (const r of selRows) { try { await rpc('docs.setStatus', { id: r.id, status }); n++; done.push(r.id); } catch (e: any) { errs.push(`${r.number}: ${e.message}`); } }
+    const undo = status === 'DELETED' ? { label: 'Undo', run: async () => { for (const id of done) await rpc('docs.setStatus', { id, status: 'DRAFT' }).catch(() => {}); load(); } } : undefined;
+    toast(`${n} ${status === 'DELETED' ? 'deleted' : 'updated'}${errs.length ? `, ${errs.length} skipped` : ''}`, errs.length ? 'info' : 'ok', undo, undo ? 8000 : 4500);
     if (errs.length) toastError(errs.slice(0, 3).join('; '));
     load();
   }

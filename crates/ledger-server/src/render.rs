@@ -120,7 +120,14 @@ pub fn document_html(l: &Ledger, id: i64, online: bool) -> Result<String, String
         format!("<div class='advice'><b>PAYMENT ADVICE</b><div style='display:flex;justify-content:space-between;margin-top:8px'><div>To: {}<br><span class='muted'>{}</span></div><div class='meta'><b>Customer</b><span>{}</span><b>Invoice Number</b><span>{}</span><b>Amount Due</b><span>{}</span><b>Due Date</b><span>{}</span></div></div></div>",
             esc(&l.setting_or("org_name", "").unwrap_or_default()), nl(instr), esc(d["contact_name"].as_str().unwrap_or("")), esc(d["number"].as_str().unwrap_or("")), m(&d["amount_due"]), d["due_date"].as_str().map(fmt_long).unwrap_or_default())
     } else { String::new() };
-    let status = if online {
+    let quote_form = if online && kind == "QUOTE" && d["status"] == "SENT" {
+        "<form method='post' class='bar' style='justify-content:flex-start;gap:8px;margin-top:16px'><input name='name' placeholder='Your name' style='padding:8px;border:1px solid #d1d5db;border-radius:6px'><button name='action' value='accept'>Accept quote</button><button name='action' value='decline' style='background:#6b7280'>Decline</button></form>".to_string()
+    } else if online && kind == "QUOTE" && (d["status"] == "ACCEPTED" || d["status"] == "INVOICED") {
+        "<div style='margin-top:12px'><span class='status'>Accepted — thank you</span></div>".to_string()
+    } else if online && kind == "QUOTE" && d["status"] == "DECLINED" {
+        "<div style='margin-top:12px'><span class='status due'>Declined</span></div>".to_string()
+    } else { String::new() };
+    let status = if online && kind == "QUOTE" { quote_form } else if online {
         let due = d["amount_due"].as_i64().unwrap_or(0);
         format!("<div style='margin-top:8px'>{}</div>", if d["status"] == "PAID" { "<span class='status'>Paid</span>".to_string() } else if due > 0 { format!("<span class='status due'>{} due {}</span>", m(&d["amount_due"]), d["due_date"].as_str().map(fmt_long).unwrap_or_default()) } else { String::new() })
     } else { String::new() };

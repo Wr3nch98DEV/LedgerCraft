@@ -19,8 +19,10 @@
   function toggle(id: number) { const s = new Set(sel); s.has(id) ? s.delete(id) : s.add(id); sel = s; }
   async function archive(status: string) {
     if (!(await confirm(`${status === 'ARCHIVED' ? 'Archive' : 'Restore'} ${sel.size} contact(s)?`, '', status === 'ARCHIVED' ? 'Archive' : 'Restore'))) return;
-    for (const id of sel) await rpc('contacts.setStatus', { id, status }).catch(toastError);
-    toast('Contacts updated'); load();
+    const ids = [...sel];
+    for (const id of ids) await rpc('contacts.setStatus', { id, status }).catch(toastError);
+    toast(`${ids.length} contact(s) ${status === 'ARCHIVED' ? 'archived' : 'restored'}`, 'ok', { label: 'Undo', run: async () => { for (const id of ids) await rpc('contacts.setStatus', { id, status: status === 'ARCHIVED' ? 'ACTIVE' : 'ARCHIVED' }).catch(() => {}); load(); } });
+    load();
   }
   async function merge() {
     const ids = [...sel];
@@ -28,6 +30,9 @@
     const [a, b] = ids.map((id) => rows!.find((r) => r.id === id));
     if (!(await confirm(`Merge "${a.name}" into "${b.name}"?`, `All transactions for ${a.name} will move to ${b.name}, and ${a.name} will be archived.`, 'Merge'))) return;
     try { await rpc('contacts.merge', { from: a.id, into: b.id }); toast('Contacts merged'); load(); } catch (e) { toastError(e); }
+  }
+  async function statements() {
+    try { const r = await rpc('statements.email', { contact_ids: [...sel] }); toast(r.queued ? `${r.queued} statement(s) queued — see Settings → Outbox` : 'No statements sent (contacts need an email address and an outstanding balance)', r.queued ? 'ok' : 'info'); } catch (e) { toastError(e); }
   }
   function exportCsv() { location.href = `/download/contacts.csv`; }
 </script>
@@ -47,6 +52,7 @@
     <span class="ml-2 text-muted">{sel.size} selected</span>
     {#if filter === 'archived'}<button class="btn btn-sm" onclick={() => archive('ACTIVE')}>Restore</button>{:else}<button class="btn btn-sm" onclick={() => archive('ARCHIVED')}>Archive</button>{/if}
     {#if sel.size === 2}<button class="btn btn-sm" onclick={merge}>Merge</button>{/if}
+    <button class="btn btn-sm" onclick={statements}><Icon name="mail" size={14} />Email statements</button>
   {/if}
 </div>
 

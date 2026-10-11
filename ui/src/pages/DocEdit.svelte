@@ -80,7 +80,7 @@
       if (full.default_currency) f.currency = full.default_currency;
       const defAcct = sales ? full.sales_account_id : full.purchase_account_id;
       const defTax = sales ? full.sales_tax_rate_id : full.purchase_tax_rate_id;
-      for (const l of f.lines) { if (!l.account_id && defAcct) l.account_id = defAcct; if (!l.tax_rate_id && defTax) l.tax_rate_id = defTax; }
+      for (const l of f.lines) { if (!l.account_id && defAcct) l.account_id = defAcct; if (!l.tax_rate_id && defTax) l.tax_rate_id = defTax; if (sales && full.discount_bp && !l.discount) l.discount = String(full.discount_bp / 100); }
       if (defAcct && f.lines.length <= 1 && !f.lines[0]?.account_id) { f.lines = [{ item_id: null, description: '', quantity: '1', unit_price: '', discount: '', account_id: defAcct, tax_rate_id: defTax ?? lookups.accounts.find((a) => a.id === defAcct)?.tax_rate_id, tracking1: null, tracking2: null }]; }
     } catch {}
   }
@@ -192,7 +192,7 @@
   {#if doc}
     <button class="btn" onclick={() => openView(`/view/doc/${doc.id}`)}><Icon name="print" />Print / PDF</button>
     {#if doc.status !== 'DRAFT' && doc.status !== 'DELETED' && (sales || type === 'PO')}<button class="btn" onclick={openEmail}><Icon name="mail" />Email</button>{/if}
-    {#if type === 'ACCREC' && doc.status !== 'DRAFT'}<a class="btn" href="/online/{doc.online_token}" target="_blank" rel="noopener"><Icon name="globe" />Online invoice</a>{/if}
+    {#if (type === 'ACCREC' || type === 'QUOTE') && doc.status !== 'DRAFT'}<a class="btn" href="/online/{doc.online_token}" target="_blank" rel="noopener"><Icon name="globe" />Online {type === 'QUOTE' ? 'quote' : 'invoice'}</a>{/if}
   {/if}
 </PageHeader>
 

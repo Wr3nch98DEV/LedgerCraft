@@ -28,13 +28,32 @@
     const lines = Object.entries(grid).filter(([, v]) => v !== '' && v !== undefined).map(([k, v]) => { const [a, p] = k.split('|'); return { account_id: Number(a), period: p, amount: v }; });
     try { const r = await rpc('budgets.save', { id: current, name, tracking_option_id: tracking, lines }); toast('Budget saved'); current = r.id; load(); } catch (e) { toastError(e); }
   }
+  async function importCsv(file: File) {
+    const text = await file.text();
+    const rows = text.split(/\r?\n/).map((l) => l.split(',').map((c) => c.replace(/^"|"$/g, '').trim())).filter((r) => r.length > 1);
+    let n = 0;
+    for (const r of rows) {
+      const code = r[0].split(' ')[0];
+      const a = lookups.accounts.find((x) => x.code === code || x.name.toLowerCase() === r[0].toLowerCase());
+      if (!a) continue;
+      months.forEach((m, i) => { const v = (r[i + 1] ?? '').replace(/[$,]/g, ''); if (v !== '' && !isNaN(Number(v))) grid[`${a.id}|${m}`] = v; });
+      n++;
+    }
+    toast(`Imported ${n} account row(s) — review and Save`);
+  }
+  function exportCsv() {
+    const lines = ['Account,' + months.join(',')];
+    for (const a of plAccounts) { const vals = months.map((m) => grid[`${a.id}|${m}`] ?? ''); if (vals.some((v) => v !== '')) lines.push(`"${a.code} ${a.name}",` + vals.join(',')); }
+    const el = document.createElement('a'); el.href = URL.createObjectURL(new Blob([lines.join('\r\n')], { type: 'text/csv' })); el.download = `${name}.csv`; el.click();
+  }
   const rowTotal = (a: number) => months.reduce((s, m) => s + Math.round(Number(grid[`${a}|${m}`] || 0) * 100), 0);
   const trackingOpts = $derived(lookups.tracking.flatMap((c) => c.options.map((o: any) => ({ value: o.id, label: o.name, group: c.name }))));
 </script>
 
 <PageHeader title="Budget manager" crumbs={[{ label: 'Accounting', href: '/reports' }]}>
   <a class="btn" href="/reports/budget-variance">Budget variance report</a>
-  {#if can('accounting:write')}<button class="btn" onclick={newBudget}><Icon name="plus" />New budget</button><button class="btn btn-primary" onclick={save}>Save</button>{/if}
+  <button class="btn" onclick={exportCsv}><Icon name="download" />Export CSV</button>
+  {#if can('accounting:write')}<label class="btn cursor-pointer"><Icon name="upload" />Import CSV<input type="file" accept=".csv" class="hidden" onchange={(e) => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) importCsv(f); }} /></label><button class="btn" onclick={newBudget}><Icon name="plus" />New budget</button><button class="btn btn-primary" onclick={save}>Save</button>{/if}
 </PageHeader>
 <div class="card mb-4 flex flex-wrap items-end gap-3 p-4">
   <div><span class="label">Budget</span><select class="select w-56" value={current} onchange={(e) => open(Number((e.target as HTMLSelectElement).value))}>{#each budgets as b}<option value={b.id}>{b.name}</option>{/each}{#if current === null}<option value={null}>(new)</option>{/if}</select></div>

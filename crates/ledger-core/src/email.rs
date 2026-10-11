@@ -106,3 +106,27 @@ pub fn run_reminders(l: &Ledger) -> Result<i64> {
     }
     Ok(n)
 }
+
+/// Queue statement emails for contacts that owe money. Returns number queued.
+pub fn email_statements(l: &Ledger, contact_ids: &[i64]) -> Result<i64> {
+    let (subject, body): (String, String) = l.conn.query_row("SELECT subject, body FROM email_templates WHERE kind = 'STATEMENT' ORDER BY is_default DESC LIMIT 1", [], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let org = l.setting_or("org_name", "")?;
+    let mut n = 0;
+    for cid in contact_ids {
+        let c = l.get_contact(*cid)?;
+        let to = c["email"].as_str().unwrap_or("").to_string();
+        if to.is_empty() { continue; }
+        let docs = util::query_json(&l.conn, "SELECT number, date, due_date, total - amount_paid - amount_credited AS due, currency FROM documents WHERE contact_id = ?1 AND type = 'ACCREC' AND status = 'AUTHORISED' ORDER BY date", [cid])?;
+        if docs.is_empty() { continue; }
+        let total: i64 = docs.iter().map(|d| d["due"].as_i64().unwrap_or(0)).sum();
+        let lines: Vec<String> = docs.iter().map(|d| format!("  {}  {}  due {}  {}", d["number"].as_str().unwrap_or(""), d["date"].as_str().unwrap_or(""), d["due_date"].as_str().unwrap_or(""), money::fmt_money(d["due"].as_i64().unwrap_or(0)))).collect();
+        let first = c["first_name"].as_str().filter(|s| !s.is_empty()).or(c["name"].as_str()).unwrap_or("").to_string();
+        let f = vec![("Trading Name", org.clone()), ("Contact Name", c["name"].as_str().unwrap_or("").to_string()), ("Contact First Name", first),
+            ("Amount Due", money::fmt_money(total)), ("Currency Code", docs[0]["currency"].as_str().unwrap_or("").to_string())];
+        let text = merge(&body, &f) + "\n\nOutstanding invoices:\n" + &lines.join("\n");
+        queue_email(l, &to, &merge(&subject, &f), &text, "contact", *cid)?;
+        l.add_note("contact", *cid, "HISTORY", "Statement emailed")?;
+        n += 1;
+    }
+    Ok(n)
+}

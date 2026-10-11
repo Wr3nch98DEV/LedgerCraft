@@ -295,11 +295,11 @@ impl Ledger {
         let name = entity_name(&kind);
         let ok = match kind.as_str() {
             "QUOTE" => matches!((from.as_str(), to), ("DRAFT", "SENT") | ("DRAFT", "DELETED") | ("SENT", "ACCEPTED") | ("SENT", "DECLINED") | ("SENT", "DELETED")
-                | ("ACCEPTED", "INVOICED") | ("DECLINED", "SENT") | ("ACCEPTED", "SENT") | ("SENT", "DRAFT") | ("DRAFT", "DRAFT") | ("SENT", "SENT")),
+                | ("ACCEPTED", "INVOICED") | ("SENT", "INVOICED") | ("DELETED", "DRAFT") | ("DECLINED", "SENT") | ("ACCEPTED", "SENT") | ("SENT", "DRAFT") | ("DRAFT", "DRAFT") | ("SENT", "SENT")),
             "PO" => matches!((from.as_str(), to), ("DRAFT", "SUBMITTED") | ("DRAFT", "AUTHORISED") | ("SUBMITTED", "AUTHORISED") | ("DRAFT", "DELETED")
-                | ("SUBMITTED", "DELETED") | ("AUTHORISED", "BILLED") | ("AUTHORISED", "DELETED") | ("BILLED", "AUTHORISED") | ("SUBMITTED", "DRAFT") | ("DRAFT", "DRAFT") | ("SUBMITTED", "SUBMITTED")),
+                | ("SUBMITTED", "DELETED") | ("AUTHORISED", "BILLED") | ("AUTHORISED", "DELETED") | ("DELETED", "DRAFT") | ("BILLED", "AUTHORISED") | ("SUBMITTED", "DRAFT") | ("DRAFT", "DRAFT") | ("SUBMITTED", "SUBMITTED")),
             _ => matches!((from.as_str(), to), ("DRAFT", "SUBMITTED") | ("DRAFT", "AUTHORISED") | ("SUBMITTED", "AUTHORISED") | ("SUBMITTED", "DRAFT")
-                | ("DRAFT", "DELETED") | ("SUBMITTED", "DELETED") | ("AUTHORISED", "VOIDED") | ("DRAFT", "DRAFT") | ("SUBMITTED", "SUBMITTED")),
+                | ("DRAFT", "DELETED") | ("SUBMITTED", "DELETED") | ("AUTHORISED", "VOIDED") | ("DRAFT", "DRAFT") | ("SUBMITTED", "SUBMITTED") | ("DELETED", "DRAFT")),
         };
         if !ok { return invalid(format!("cannot change a {} {name} to {}", from.to_lowercase(), to.to_lowercase())); }
         if to == "AUTHORISED" && is_ledger_doc(&kind) {
@@ -318,6 +318,7 @@ impl Ledger {
             return Ok(());
         }
         if to == "DELETED" { self.unindex_search("document", id)?; }
+        if from == "DELETED" { self.conn.execute("UPDATE documents SET status = ?2 WHERE id = ?1", params![id, to])?; self.reindex_document(id)?; self.add_note("document", id, "HISTORY", "Restored")?; return Ok(()); }
         self.conn.execute("UPDATE documents SET status = ?2, updated_at = datetime('now') WHERE id = ?1", params![id, to])?;
         let verb = match to { "SUBMITTED" => "submitted for approval", "DELETED" => "deleted", "SENT" => "marked as sent", "ACCEPTED" => "marked as accepted",
             "DECLINED" => "marked as declined", "INVOICED" => "marked as invoiced", "BILLED" => "marked as billed", "DRAFT" => "returned to draft", _ => "updated" };
@@ -507,7 +508,7 @@ impl Ledger {
         self.atomic(|| {
             let nid = self.save_document(None, &input)?;
             match (from_kind.as_str(), to_kind) {
-                ("QUOTE", "ACCREC") => { let st = d["status"].as_str().unwrap_or(""); if st == "ACCEPTED" { self.set_document_status_inner(id, "INVOICED", false)?; } }
+                ("QUOTE", "ACCREC") => { let st = d["status"].as_str().unwrap_or(""); if st == "ACCEPTED" || st == "SENT" { self.set_document_status_inner(id, "INVOICED", false)?; } }
                 ("PO", "ACCPAY") => { if d["status"] == "AUTHORISED" { self.set_document_status_inner(id, "BILLED", false)?; } }
                 _ => {}
             }
@@ -523,6 +524,20 @@ impl Ledger {
         if kind == "QUOTE" && status == "DRAFT" { self.set_document_status(id, "SENT")?; }
         self.add_note("document", id, "HISTORY", "Marked as sent")?;
         Ok(())
+    }
+
+    /// Customer accepts or declines a quote from the online link.
+    pub fn respond_to_quote(&self, token: &str, accept: bool, name: &str) -> Result<()> {
+        let id = self.document_by_token(token)?;
+        let (kind, status): (String, String) = self.conn.query_row("SELECT type, status FROM documents WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        if kind != "QUOTE" || status != "SENT" { return invalid("this quote can no longer be accepted or declined online"); }
+        self.atomic(|| {
+            self.set_document_status_inner(id, if accept { "ACCEPTED" } else { "DECLINED" }, false)?;
+            let who: String = name.chars().filter(|c| !c.is_control()).take(80).collect();
+            let by = if who.trim().is_empty() { String::new() } else { String::from(" by ") + who.trim() };
+            self.add_note("document", id, "HISTORY", &(String::from("Quote ") + if accept { "accepted" } else { "declined" } + " online" + &by))?;
+            Ok(())
+        })
     }
 
     pub fn document_by_token(&self, token: &str) -> Result<i64> {

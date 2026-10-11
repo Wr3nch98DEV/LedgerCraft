@@ -10,6 +10,7 @@ pub const CATALOGUE: &[(&str, &str, &str, &str)] = &[
     ("balance-sheet", "Balance Sheet", "Financial", "Assets, liabilities and equity at a point in time"),
     ("profit-and-loss", "Profit and Loss", "Financial", "Income and expenses over a period, with comparisons and budgets"),
     ("cash-summary", "Cash Summary", "Financial", "Where cash came from and went"),
+    ("cash-flow-statement", "Statement of Cash Flows", "Financial", "Operating, investing and financing cash flows (indirect method)"),
     ("executive-summary", "Executive Summary", "Financial", "Key metrics and ratios over three months"),
     ("budget-summary", "Budget Summary", "Financial", "Budgeted amounts by month"),
     ("budget-variance", "Budget Variance", "Financial", "Actuals vs budget"),
@@ -41,6 +42,53 @@ pub const CATALOGUE: &[(&str, &str, &str, &str)] = &[
     ("fx-gains-losses", "Foreign Currency Gains and Losses", "Accounting", "Realised and unrealised currency gains"),
     ("income-by-contact", "Income by Contact", "Receivables", "Income per contact (cash and accrual)"),
 ];
+
+/// Statement of cash flows, indirect method.
+pub fn cash_flow_statement(l: &Ledger, p: &ReportParams) -> Result<Value> {
+    let to = p.to.clone().unwrap_or_else(util::today);
+    let from = p.from.clone().unwrap_or(l.fy_start(&to)?);
+    let mv = l.account_movements(Some(&from), &to, false, None)?;
+    let accts = util::query_json(&l.conn, "SELECT id, code, name, type, class, system_account FROM accounts ORDER BY code", [])?;
+    let accum: Vec<i64> = util::query_json(&l.conn, "SELECT DISTINCT accum_dep_account_id AS id FROM asset_types", [])?.iter().filter_map(|r| r["id"].as_i64()).collect();
+    let is_accum = |a: &Value| accum.contains(&a["id"].as_i64().unwrap_or(0)) || a["name"].as_str().unwrap_or("").to_lowercase().contains("accumulated depreciation");
+    let m = |a: &Value| mv.get(&a["id"].as_i64().unwrap_or(0)).copied().unwrap_or(0);
+    let net_profit: i64 = -accts.iter().filter(|a| a["class"] == "REVENUE" || a["class"] == "EXPENSE").map(|a| m(a)).sum::<i64>();
+    let mut op = vec![json!({"label": "Net profit", "values": [net_profit]})];
+    let mut op_total = net_profit;
+    let dep: i64 = -accts.iter().filter(|a| is_accum(a)).map(|a| m(a)).sum::<i64>();
+    if dep != 0 { op.push(json!({"label": "Add back depreciation", "values": [dep]})); op_total += dep; }
+    for a in accts.iter().filter(|a| matches!(a["type"].as_str(), Some("CURRENT" | "INVENTORY" | "PREPAYMENT" | "CURRLIAB"))) {
+        let v = -m(a);
+        if v == 0 { continue; }
+        let verb = if a["class"] == "ASSET" { if v < 0 { "Increase in " } else { "Decrease in " } } else if v > 0 { "Increase in " } else { "Decrease in " };
+        op.push(json!({"label": String::from(verb) + a["name"].as_str().unwrap_or(""), "account_id": a["id"], "values": [v]}));
+        op_total += v;
+    }
+    let mut inv = Vec::new(); let mut inv_total = 0;
+    for a in accts.iter().filter(|a| matches!(a["type"].as_str(), Some("FIXED" | "NONCURRENT")) && !is_accum(a)) {
+        let v = -m(a); if v == 0 { continue; }
+        inv.push(json!({"label": String::from(if v < 0 { "Purchase of " } else { "Sale of " }) + a["name"].as_str().unwrap_or(""), "account_id": a["id"], "values": [v]})); inv_total += v;
+    }
+    let mut fin = Vec::new(); let mut fin_total = 0;
+    for a in accts.iter().filter(|a| matches!(a["type"].as_str(), Some("TERMLIAB" | "LIABILITY" | "EQUITY"))) {
+        let v = -m(a); if v == 0 { continue; }
+        fin.push(json!({"label": a["name"], "account_id": a["id"], "values": [v]})); fin_total += v;
+    }
+    let bank_ids: Vec<i64> = accts.iter().filter(|a| a["type"] == "BANK").filter_map(|a| a["id"].as_i64()).collect();
+    let open_bal = l.account_movements(None, &util::add_days(&from, -1)?, false, None)?;
+    let close_bal = l.account_movements(None, &to, false, None)?;
+    let opening: i64 = bank_ids.iter().map(|b| open_bal.get(b).copied().unwrap_or(0)).sum();
+    let closing: i64 = bank_ids.iter().map(|b| close_bal.get(b).copied().unwrap_or(0)).sum();
+    let net = op_total + inv_total + fin_total;
+    Ok(json!({"title": "Statement of Cash Flows", "org": l.setting_or("org_name", "")?, "subtitle": format!("{} to {} · indirect method", fmt_long(&from), fmt_long(&to)), "columns": ["Amount"],
+        "sections": [
+            {"title": "Operating activities", "rows": op, "total": {"label": "Net cash from operating activities", "values": [op_total]}},
+            {"title": "Investing activities", "rows": inv, "total": {"label": "Net cash from investing activities", "values": [inv_total]}},
+            {"title": "Financing activities", "rows": fin, "total": {"label": "Net cash from financing activities", "values": [fin_total]}},
+            {"title": "", "summary": true, "grand": true, "total": {"label": "Net change in cash", "values": [net]}},
+            {"title": "", "rows": [{"label": "Cash at the start of the period", "values": [opening]}, {"label": "Cash at the end of the period", "values": [closing]}]},
+        ], "check": [closing - opening - net]}))
+}
 
 pub fn inventory_report(l: &Ledger) -> Result<Value> {
     let v = l.inventory_valuation()?;
@@ -147,6 +195,7 @@ pub fn run_extra(l: &Ledger, name: &str, p: &ReportParams) -> Result<Value> {
                 "columns": ["Gain / (loss)"], "sections": [{"title": "", "rows": rows.iter().map(|r| json!({"label": r["name"], "values": [r["amount"]]})).collect::<Vec<_>>(), "total": {"label": "Net gain / (loss)", "values": [total]}}]}))
         }
         "income-by-contact" => l.sales_by_contact(true, p),
+        "cash-flow-statement" => cash_flow_statement(l, p),
         _ => crate::modules::report(l, name, p),
     }
 }
