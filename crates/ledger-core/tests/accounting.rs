@@ -393,12 +393,16 @@ fn payroll_run_posts_balanced_journal() {
     let cal: i64 = l.conn.query_row("SELECT id FROM pay_calendars WHERE frequency = 'FORTNIGHTLY'", [], |r| r.get(0)).unwrap();
     l.save_employee(None, &ledger_core::payroll::EmployeeInput { first_name: "A".into(), last_name: "B".into(), start_date: "2020-01-01".into(), pay_calendar_id: Some(cal),
         pay_basis: "SALARY".into(), annual_salary: Some("78000".into()), employment_type: "FULLTIME".into(), ..Default::default() }).unwrap();
+    l.save_employee(None, &ledger_core::payroll::EmployeeInput { first_name: "H".into(), last_name: "Ourly".into(), start_date: "2020-01-01".into(), pay_calendar_id: Some(cal),
+        pay_basis: "HOURLY".into(), hourly_rate: Some("42.50".into()), hours_per_week: Some("24".into()), employment_type: "PARTTIME".into(), ..Default::default() }).unwrap();
     let rid = l.create_pay_run(cal, None).unwrap();
     let r = l.get_pay_run(rid).unwrap();
-    assert_eq!(r["wages"], 300000);
-    assert_eq!(r["super"], 36000);
+    let hourly = r["payslips"].as_array().unwrap().iter().find(|s| s["employee"] == "H Ourly").unwrap();
+    assert_eq!(hourly["gross"], 204000, "48 hours x 42.50 = 2,040.00");
+    assert_eq!(r["wages"], 300000 + 204000);
+    assert_eq!(r["super"], 36000 + 24480);
     let net = r["net_pay"].as_i64().unwrap();
-    assert_eq!(net, 300000 - r["tax"].as_i64().unwrap());
+    assert_eq!(net, 504000 - r["tax"].as_i64().unwrap());
     l.role = "ADVISER".into();
     l.post_pay_run(rid, Some(acct(&l, "090"))).unwrap();
     assert_eq!(bal(&l, acct(&l, "090")), -net);

@@ -369,7 +369,7 @@
   </div>
 {/if}
 
-{#if doc}<Attachments entity="document" id={doc.id} /><History entity="document" id={doc.id} />{/if}
+{#if doc}<Attachments entity="document" id={doc.id} />{#key doc}<History entity="document" id={doc.id} />{/key}{/if}
 {/if}
 
 <Modal bind:open={emailOpen} title="Send {DOC_LABEL[type].toLowerCase()}" width={620}>

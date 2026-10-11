@@ -336,7 +336,7 @@ impl Ledger {
         let ord: (i64, String) = self.conn.query_row("SELECT id, name FROM pay_items WHERE kind = 'EARNINGS' ORDER BY id LIMIT 1", [], |r| Ok((r.get(0)?, r.get(1)?)))?;
         let mut lines = Vec::new();
         let ts_hours: Option<i64> = self.conn.query_row("SELECT SUM(total_hours_e2) FROM timesheets WHERE employee_id = ?1 AND status = 'APPROVED' AND period_start >= ?2 AND period_end <= ?3", params![emp, from, to], |r| r.get(0))?;
-        let weeks_e2 = 5200 * 100 / ppy; // weeks per period ×100
+        let weeks_e2 = 5200 / ppy; // weeks per period ×100 (52.00 weeks a year)
         if basis == "HOURLY" {
             let units = ts_hours.unwrap_or(hpw * weeks_e2 / 100);
             lines.push(json!({"pay_item_id": ord.0, "name": ord.1, "kind": "EARNINGS", "units_e2": units, "rate_e2": hourly, "amount": money::div_round(units as i128 * hourly as i128, 10_000) as i64}));
