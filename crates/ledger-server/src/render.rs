@@ -162,18 +162,32 @@ pub fn statement_html(l: &Ledger, contact_id: i64, from: &str, to: &str, kind: &
         "SELECT d.id, d.type, d.number, d.reference, d.date, d.due_date, d.total, d.total - d.amount_paid - d.amount_credited AS due, d.currency FROM documents d
          WHERE d.contact_id = ?1 AND d.type IN ('ACCREC','ACCRECCREDIT') AND d.status IN ('AUTHORISED','PAID') AND (?4 = 'ACTIVITY' AND d.date >= ?2 AND d.date <= ?3 OR ?4 = 'OUTSTANDING' AND d.status = 'AUTHORISED' AND d.date <= ?3)
          ORDER BY d.date", ledger_core::rusqlite::params![contact_id, from, to, kind]).map_err(|e| e.to_string())?;
-    let pays = if kind == "ACTIVITY" { util::query_json(&l.conn, "SELECT p.date, p.amount, d.number FROM payments p JOIN documents d ON d.id = p.document_id WHERE d.contact_id = ?1 AND d.type = 'ACCREC' AND p.status <> 'DELETED' AND p.date >= ?2 AND p.date <= ?3 ORDER BY p.date",
+    let pays = if kind == "ACTIVITY" { util::query_json(&l.conn, "SELECT p.date, p.amount, d.number, d.type FROM payments p JOIN documents d ON d.id = p.document_id WHERE d.contact_id = ?1 AND d.type IN ('ACCREC','ACCRECCREDIT') AND p.status <> 'DELETED' AND p.date >= ?2 AND p.date <= ?3 ORDER BY p.date",
         ledger_core::rusqlite::params![contact_id, from, to]).map_err(|e| e.to_string())? } else { vec![] };
     let mut rows = String::new();
     let mut bal = 0i64;
+    if kind == "ACTIVITY" {
+        // Opening balance: what the customer owed before the period starts.
+        let opening: i64 = l.conn.query_row(
+            "SELECT COALESCE((SELECT SUM(CASE WHEN type = 'ACCREC' THEN total ELSE -total END) FROM documents WHERE contact_id = ?1 AND type IN ('ACCREC','ACCRECCREDIT') AND status IN ('AUTHORISED','PAID') AND date < ?2), 0)
+                  - COALESCE((SELECT SUM(CASE WHEN d.type = 'ACCREC' THEN p.amount ELSE -p.amount END) FROM payments p JOIN documents d ON d.id = p.document_id
+                              WHERE d.contact_id = ?1 AND d.type IN ('ACCREC','ACCRECCREDIT') AND p.status <> 'DELETED' AND p.date < ?2), 0)",
+            ledger_core::rusqlite::params![contact_id, from], |r| r.get(0)).map_err(|e| e.to_string())?;
+        bal = opening;
+        rows += &format!("<tr><td>{}</td><td>Opening Balance</td><td class='n'></td><td class='n'></td><td class='n'>{}</td></tr>", fmt_long(from), group(&fmt_money(opening)));
+    }
     let mut events: Vec<(String, String, i64, i64)> = Vec::new();
     for d in &docs {
         let credit = d["type"] == "ACCRECCREDIT";
         let amt = if kind == "OUTSTANDING" { d["due"].as_i64().unwrap_or(0) } else { d["total"].as_i64().unwrap_or(0) };
         events.push((d["date"].as_str().unwrap_or("").into(), format!("{} {}{}", if credit { "Credit Note" } else { "Invoice" }, d["number"].as_str().unwrap_or(""),
-            d["due_date"].as_str().map(|x| format!(" · due {}", fmt_long(x))).unwrap_or_default()), if credit { 0 } else { amt }, if credit { amt } else { 0 }));
+            if credit { String::new() } else { d["due_date"].as_str().map(|x| format!(" · due {}", fmt_long(x))).unwrap_or_default() }), if credit { 0 } else { amt }, if credit { amt } else { 0 }));
     }
-    for p in &pays { events.push((p["date"].as_str().unwrap_or("").into(), format!("Payment — {}", p["number"].as_str().unwrap_or("")), 0, p["amount"].as_i64().unwrap_or(0))); }
+    for p in &pays {
+        let amt = p["amount"].as_i64().unwrap_or(0);
+        if p["type"] == "ACCRECCREDIT" { events.push((p["date"].as_str().unwrap_or("").into(), format!("Refund — {}", p["number"].as_str().unwrap_or("")), amt, 0)); }
+        else { events.push((p["date"].as_str().unwrap_or("").into(), format!("Payment — {}", p["number"].as_str().unwrap_or("")), 0, amt)); }
+    }
     events.sort_by(|a, b| a.0.cmp(&b.0));
     for (date, desc, dr, cr) in events {
         bal += dr - cr;
