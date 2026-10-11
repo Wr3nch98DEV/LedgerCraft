@@ -41,6 +41,9 @@ pub enum Msg {
     Undo(i64),
     AcceptAll,
     Done(Result<Value, String>, &'static str),
+    /// Pick a statement file (CSV, OFX/QFX, QIF, CAMT.053, MT940) and import it.
+    Upload,
+    Uploaded(Result<Option<String>, String>),
 }
 
 fn i(v: &Value) -> i64 { v.as_i64().unwrap_or(0) }
@@ -120,6 +123,24 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             let Some(acc) = acc else { return Task::none() };
             app.be.call("rec.auto", json!({"account_id": acc}), |r| Message::Bank(Msg::Done(r, "auto")))
         }
+        Msg::Upload => {
+            let Some(acc) = acc else { return app.toast("Add a bank account first", true) };
+            let be = app.be.clone();
+            let us = app.country() == "US";
+            Task::perform(async move {
+                let Some(file) = rfd::AsyncFileDialog::new().set_title("Choose a bank statement")
+                    .add_filter("Bank statements", &["csv", "ofx", "qfx", "qif", "xml", "sta", "mt940", "txt"]).pick_file().await else { return Ok(None) };
+                let name = file.file_name();
+                let bytes = file.read().await;
+                let text = String::from_utf8_lossy(&bytes).to_string();
+                tokio::task::spawn_blocking(move || crate::import::import_file(&be, acc, &name, &text, us).map(Some)).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Bank(Msg::Uploaded(r)))
+        }
+        Msg::Uploaded(r) => match r {
+            Ok(None) => Task::none(),
+            Ok(Some(summary)) => { let t1 = app.toast(summary, false); Task::batch([t1, app.load()]) }
+            Err(e) => app.toast(e, true),
+        },
         Msg::Done(r, what) => {
             app.bank.busy = false;
             match r {
@@ -252,7 +273,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     })).spacing(10).padding([9, 14])).style(theme::header_row).width(Fill);
     let mut table = column![head];
     if lines.is_empty() {
-        table = table.push(container(ui::muted(if review { "Nothing to review — you're all caught up. Import a statement (web version for now) to get new lines." } else { "Nothing categorized yet." })).padding(28).center_x(Fill));
+        table = table.push(container(ui::muted(if review { "Nothing to review — you're all caught up. Use \"Upload from file\" to bring in a new statement." } else { "Nothing categorized yet." })).padding(28).center_x(Fill));
     }
     let busy = app.bank.busy;
     for l in lines {
@@ -284,7 +305,10 @@ pub fn view(app: &App) -> Element<'_, Message> {
     }
     let list: Element<Message> = if !qb && review { xero_cards(app, lines) } else { container(table).style(theme::card).width(Fill).clip(true).into() };
     let body = column![tiles, tabs, list].spacing(16);
-    let actions: Vec<Element<Message>> = vec![ui::btn(if qb { "Record expense" } else { "Spend money" }, Some(Message::Nav(Route::Spend(acc))))];
+    let actions: Vec<Element<Message>> = vec![
+        ui::btn(if qb { "Upload from file" } else { "Import a statement" }, acc.map(|_| Message::Bank(Msg::Upload))),
+        ui::btn(if qb { "Record expense" } else { "Spend money" }, Some(Message::Nav(Route::Spend(acc)))),
+    ];
     ui::page(ui::h1(title), actions, body.into())
 }
 
