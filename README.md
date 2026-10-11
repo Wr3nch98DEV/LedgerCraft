@@ -100,7 +100,7 @@ macOS / Linux: `cd ui && npm install && npm run build && cd .. && cargo run --re
 
 ## How it's built
 
-* **ledger-core** (Rust): the accounting engine — double-entry journals with database-enforced invariants, documents, payments, banking, reports, tax returns, payroll, assets, projects. No UI code; ~40 tests including a property test that random sequences of operations always leave the ledger balanced.
+* **ledger-core** (Rust): the accounting engine — double-entry journals with database-enforced invariants, documents, payments, banking, reports, tax returns, payroll, assets, projects. No UI code; 46 tests including a property test that random sequences of operations always leave the ledger balanced.
 * **ledger-server** (Rust, axum): serves the UI and a JSON API on `127.0.0.1` only.
 * **ui** (Svelte 5 + Tailwind 4 + Vite): the interface, embedded into the server binary at build time.
 

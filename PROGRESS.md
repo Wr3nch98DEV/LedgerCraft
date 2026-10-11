@@ -24,13 +24,30 @@ All ten phases of `LEDGERCRAFT_BUILD_PROMPT.md` were worked through, each one bu
 | 10. Polish — 100k-transaction performance test, docs, `start.bat` | ✅ (see limitations) |
 
 ### Numbers
-* **Release binary: 4.7 MB** including the whole UI (target was < 25 MB). No installer needed — it's one `.exe`.
-* **Tests:** 60+ automated tests including a property test that random sequences of invoices/bills/payments/voids always leave the ledger balanced and AR equal to outstanding invoices. Run with `start.bat test`.
-* **Performance:** with 10,000 transactions every report runs in < 50 ms; the 100k figures are in `crates/ledger-core/tests/perf.rs` output.
+* **Release binary: ~6.5 MB** including the whole UI (target was < 25 MB). No installer needed — it's one `.exe`.
+* **Tests:** 46 automated tests (Rust engine + UI) including a property test that random sequences of invoices/bills/payments/voids always leave the ledger balanced and AR equal to outstanding invoices. Run with `start.bat test`.
+* **Performance:** with 100,000 transactions every main report (P&L, Balance Sheet, Trial Balance, aged AR) runs in under 0.6 s; with 10,000 they're under 50 ms (`crates/ledger-core/tests/perf.rs`).
+
+## Added after the main build (second half of the night)
+
+* **Two-step sign-in (TOTP)** — Settings → Security; works with any authenticator app.
+* **Real email sending over SMTP** — Settings → Email (your own mail server or Gmail app password); invoices, statements, reminders and repeating invoices send from the background worker. "Send test email" button included.
+* **One-click exchange rates** from the European Central Bank (Accounting → Currencies).
+* **Custom report builder & report packs**, **Statement of Cash Flows** (indirect method), **cash-basis Balance Sheet**.
+* **Online quotes** — customers can accept or decline a quote from its online link.
+* **Logo upload** for branding themes, **cash coding** screen, **undo** toasts after deleting/archiving, budget CSV import/export, contact discounts, expected/planned payment dates feeding the cash flow forecast, reconciliation adjustments (bank fees/rounding).
+* **Security hardening:** the server only answers on 127.0.0.1 and rejects other hostnames (blocks DNS-rebinding); session cookie is HttpOnly; downloads and printable views require sign-in once passwords are set.
+
+### Bugs found and fixed while testing
+* **Hourly payroll was 100× too high** (weekly-hours conversion) — fixed, with a test.
+* Lines marked "No tax" kept the account's default tax rate and would have polluted the BAS — fixed.
+* Cash-basis reports dropped opening (conversion) balances, and reversals of journals hidden from cash basis still showed — both fixed; a property test now checks the cash-basis balance sheet balances after thousands of random operations.
+* Balance Sheet printed "Total Equity" twice; dates used UTC instead of local time near midnight; straight-line depreciation drifted by cents; default asset lives were wrong; a lock-up when switching organisations; slow imports at 100k rows — all fixed.
+* Wide tables pushed pages sideways on narrow windows — fixed.
 
 ## Things to try in the demo company
 
-1. **Dashboard** → "Reconcile 7 items" on Business Everyday — the reconcile screen suggests matching invoices; press **OK**. Bank rules auto-fill the coffee and Uber lines.
+1. **Dashboard** → "Reconcile N items" on Business Everyday — the reconcile screen suggests matching invoices; press **OK**. Bank rules auto-fill the coffee and Uber lines.
 2. **Business → Invoices → New invoice** — pick a contact and the item `DES-HR`, then **Approve & email** / **Print**.
 3. **Accounting → Reports** — Profit & Loss with monthly columns and budget comparison, Balance Sheet, Aged Receivables (expand a customer), drill into any number.
 4. **Accounting → Tax returns** → Prepare return → BAS boxes calculated from the ledger.
@@ -47,7 +64,8 @@ All ten phases of `LEDGERCRAFT_BUILD_PROMPT.md` were worked through, each one bu
 * **Payroll tax tables** are simplified approximations — verify before paying anyone.
 * **Online card payments** on invoices need a payment-gateway plugin (not bundled).
 * **OCR for photos** needs Tesseract installed (PDF invoices are read without it).
-* **Not built:** SQLCipher file encryption, a mobile app, Hubdoc-style email-in address, live webhook retry UI.
+* **Not built:** SQLCipher file encryption, a mobile app, Hubdoc-style email-in address, a webhook retry screen (failed deliveries are retried automatically).
+* **Exchange rates:** the free ECB feed covers ~30 major currencies; others are entered by hand.
 
 ## Where things are
 
