@@ -148,15 +148,19 @@ impl Ledger {
     }
 
     pub fn bank_accounts(&self) -> Result<Vec<Value>> {
-        util::query_json(&self.conn,
+        let mut rows = util::query_json(&self.conn,
             "SELECT a.id, a.code, a.name, a.bank_type, a.bank_account_number, a.currency, a.status,
                COALESCE((SELECT SUM(jl.amount) FROM journal_lines jl JOIN journals j ON j.id = jl.journal_id WHERE jl.account_id = a.id AND j.posted = 1), 0) AS ledger_balance,
                COALESCE((SELECT SUM(COALESCE(jl.fx_amount, jl.amount)) FROM journal_lines jl JOIN journals j ON j.id = jl.journal_id WHERE jl.account_id = a.id AND j.posted = 1), 0) AS ledger_balance_fx,
-               COALESCE((SELECT SUM(amount) FROM statement_lines s WHERE s.account_id = a.id AND s.status <> 'DELETED'), 0)
-                 + COALESCE((SELECT SUM(COALESCE(jl.fx_amount, jl.amount)) FROM journal_lines jl JOIN journals j ON j.id = jl.journal_id WHERE jl.account_id = a.id AND j.posted = 1
-                     AND j.date < (SELECT MIN(date) FROM statement_lines s WHERE s.account_id = a.id AND s.status <> 'DELETED')), 0) AS statement_balance,
+               COALESCE((SELECT SUM(amount) FROM statement_lines s WHERE s.account_id = a.id AND s.status <> 'DELETED'), 0) AS statement_balance,
                (SELECT COUNT(*) FROM statement_lines s WHERE s.account_id = a.id AND s.status = 'UNRECONCILED') AS unreconciled_count,
                (SELECT MAX(date) FROM statement_lines s WHERE s.account_id = a.id) AS last_statement_date
-             FROM accounts a WHERE a.type = 'BANK' ORDER BY a.status, a.code", [])
+             FROM accounts a WHERE a.type = 'BANK' ORDER BY a.status, a.code", [])?;
+        for r in rows.iter_mut() {
+            let id = r["id"].as_i64().unwrap_or(0);
+            let opening = self.statement_opening_balance(id)?;
+            r["statement_balance"] = Value::from(r["statement_balance"].as_i64().unwrap_or(0) + opening);
+        }
+        Ok(rows)
     }
 }

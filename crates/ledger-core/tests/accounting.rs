@@ -238,6 +238,26 @@ fn bank_import_and_reconcile() {
 }
 
 #[test]
+fn statement_balance_when_bank_clears_items_after_the_statement_starts() {
+    let l = org();
+    let bank = acct(&l, "090");
+    // Spent on 1 July in the ledger; the bank only clears it on 3 July — the first statement line.
+    let tx = l.save_bank_transaction(None, &BankTxInput { kind: "SPEND".into(), account_id: bank, date: "2026-07-01".into(), contact_name: Some("Supplier".into()), line_amount_type: Some("NOTAX".into()),
+        lines: vec![LineInput { amount: Some("100".into()), account_id: Some(acct(&l, "404")), ..Default::default() }], ..Default::default() }).unwrap();
+    l.import_lines(bank, "s.csv", "CSV", &[
+        StmtLine { date: "2026-07-03".into(), amount: -10000, payee: "Supplier".into(), ..Default::default() },
+        StmtLine { date: "2026-07-04".into(), amount: 5000, payee: "Customer".into(), ..Default::default() },
+    ]).unwrap();
+    let first = l.statement_lines(bank, "UNRECONCILED", 100).unwrap()[0]["id"].as_i64().unwrap();
+    l.reconcile_match(first, &[("BANKTX".into(), tx)]).unwrap();
+    let rec = l.reconciliation_report(bank, "2026-07-31").unwrap();
+    assert_eq!(rec["statement_balance"], -5000, "the cleared item is carried by its statement line, not the opening balance");
+    assert_eq!(rec["difference"], 0);
+    let acc = l.bank_accounts().unwrap().into_iter().find(|a| a["id"] == bank).unwrap();
+    assert_eq!(acc["statement_balance"], -5000);
+}
+
+#[test]
 fn reports_add_up() {
     let l = org();
     let sales = acct(&l, "200");

@@ -523,12 +523,31 @@ impl Ledger {
         })
     }
 
+    /// Opening balance of the imported statement: the ledger balance before the first statement line,
+    /// less any of those earlier ledger items that were later reconciled to a statement line (the bank
+    /// cleared them after the statement starts, so the statement line already carries them).
+    pub fn statement_opening_balance(&self, account: i64) -> Result<i64> {
+        let first: Option<String> = self.conn.query_row("SELECT MIN(date) FROM statement_lines WHERE account_id = ?1 AND status <> 'DELETED'", [account], |r| r.get(0))?;
+        let Some(first) = first else { return Ok(0) };
+        let before: i64 = self.conn.query_row("SELECT COALESCE(SUM(COALESCE(jl.fx_amount, jl.amount)), 0) FROM journal_lines jl JOIN journals j ON j.id = jl.journal_id
+            WHERE jl.account_id = ?1 AND j.posted = 1 AND j.date < ?2", params![account, first], |r| r.get(0))?;
+        let cleared_later: i64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(x), 0) FROM (
+               SELECT CASE WHEN a.currency = d.currency THEN p.amount ELSE p.base_amount END * CASE WHEN d.type IN ('ACCREC','ACCPAYCREDIT') THEN 1 ELSE -1 END AS x
+                 FROM payments p JOIN documents d ON d.id = p.document_id JOIN accounts a ON a.id = p.account_id
+                WHERE p.account_id = ?1 AND p.status <> 'DELETED' AND p.reconciled = 1 AND p.date < ?2
+               UNION ALL SELECT CASE WHEN b.type LIKE 'RECEIVE%' THEN b.total ELSE -b.total END FROM bank_transactions b
+                WHERE b.account_id = ?1 AND b.status <> 'DELETED' AND b.reconciled = 1 AND b.date < ?2
+               UNION ALL SELECT -t.amount FROM transfers t WHERE t.from_account_id = ?1 AND t.status <> 'DELETED' AND t.from_reconciled = 1 AND t.date < ?2
+               UNION ALL SELECT t.to_amount FROM transfers t WHERE t.to_account_id = ?1 AND t.status <> 'DELETED' AND t.to_reconciled = 1 AND t.date < ?2)",
+            params![account, first], |r| r.get(0))?;
+        Ok(before - cleared_later)
+    }
+
     /// Bank reconciliation report as at a date.
     pub fn reconciliation_report(&self, account: i64, date: &str) -> Result<Value> {
-        // Statement opening balance = ledger balance before the first imported statement line.
         let stmt_bal: i64 = self.conn.query_row("SELECT COALESCE(SUM(amount), 0) FROM statement_lines WHERE account_id = ?1 AND status <> 'DELETED' AND date <= ?2", params![account, date], |r| r.get::<_, i64>(0))?
-            + self.conn.query_row("SELECT COALESCE(SUM(COALESCE(jl.fx_amount, jl.amount)), 0) FROM journal_lines jl JOIN journals j ON j.id = jl.journal_id WHERE jl.account_id = ?1 AND j.posted = 1
-                AND j.date < (SELECT MIN(date) FROM statement_lines s WHERE s.account_id = ?1 AND s.status <> 'DELETED')", [account], |r| r.get::<_, i64>(0))?;
+            + self.statement_opening_balance(account)?;
         let unrec_stmt = util::query_json(&self.conn, "SELECT id, date, payee, description, reference, amount FROM statement_lines WHERE account_id = ?1 AND status = 'UNRECONCILED' AND date <= ?2 ORDER BY date", params![account, date])?;
         let mut unrec_ledger = self.unreconciled_ledger_items(account)?;
         unrec_ledger.retain(|l| l["date"].as_str().unwrap_or("") <= date);
