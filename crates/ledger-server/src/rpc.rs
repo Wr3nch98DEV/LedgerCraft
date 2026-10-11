@@ -245,6 +245,7 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
         "batch.get" => Ok(l.batch_payment_detail(id(p)?)?),
 
         // ---- banking ----
+        "banktx.nextCheck" => { need("banking:read")?; Ok(json!({"number": l.next_check_number(i(p, "account_id")?)?})) }
         "banktx.save" => { need("banking:write")?; Ok(json!({"id": l.save_bank_transaction(oi(p, "id"), &de::<BankTxInput>(&p["tx"])?)?})) }
         "banktx.get" => { need("banking:read")?; Ok(l.get_bank_transaction(id(p)?)?) }
         "banktx.void" => { need("banking:write")?; l.void_bank_transaction(id(p)?)?; ok() }

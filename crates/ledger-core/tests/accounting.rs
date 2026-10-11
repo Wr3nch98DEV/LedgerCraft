@@ -339,6 +339,22 @@ fn sales_receipt_is_a_paid_sale() {
 }
 
 #[test]
+fn checks_are_numbered_spend_money() {
+    let l = org();
+    let bank = acct(&l, "090");
+    assert_eq!(l.next_check_number(bank).unwrap(), "1001");
+    let chk = |n: &str, amt: &str| BankTxInput { kind: "SPEND".into(), account_id: bank, date: "2026-07-05".into(), contact_name: Some("Landlord".into()), line_amount_type: Some("NOTAX".into()),
+        lines: vec![LineInput { amount: Some(amt.into()), account_id: Some(acct(&l, "469")), ..Default::default() }], subtype: Some("CHECK".into()), check_number: Some(n.into()), ..Default::default() };
+    l.save_bank_transaction(None, &chk("1001", "500")).unwrap();
+    assert_eq!(l.next_check_number(bank).unwrap(), "1002");
+    l.save_bank_transaction(None, &chk("1002", "20")).unwrap();
+    let txs = l.bank_account_transactions(bank, 10).unwrap();
+    assert!(txs.iter().any(|t| t["description"] == "Check 1002"), "{txs:?}");
+    assert_eq!(bal(&l, bank), -52000);
+    assert_invariants(&l);
+}
+
+#[test]
 fn reports_add_up() {
     let l = org();
     let sales = acct(&l, "200");

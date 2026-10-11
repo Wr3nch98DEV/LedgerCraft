@@ -260,3 +260,29 @@ fn sales_receipt_from_new_menu() {
     assert_eq!((d["status"].as_str(), d["subtype"].as_str(), d["amount_due"].as_i64()), (Some("PAID"), Some("RECEIPT"), Some(0)));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn write_a_check() {
+    let (mut app, dir) = demo_app("check", Skin::QuickBooks);
+    let _ = app.update(Message::ToggleNew);
+    let msgs = click(&app, "Check");
+    let Some(Message::Nav(r)) = msgs.into_iter().next() else { panic!("Check is not enabled in + New") };
+    let _ = app.update(Message::Nav(r));
+    let acc = app.pay.as_ref().unwrap().account.as_ref().unwrap().id;
+    let next = app.be.call_now("banktx.nextCheck", json!({"account_id": acc}));
+    let _ = app.update(Message::Pay(crate::payments::Msg::NextCheck(next)));
+    assert_eq!(app.pay.as_ref().unwrap().check_no, "1001");
+    let rent = app.lk.account_opts(|a| a["code"] == "469").remove(0);
+    let _ = app.update(Message::Pay(crate::payments::Msg::LineAccount(0, rent.clone())));
+    let _ = app.update(Message::Pay(crate::payments::Msg::LineAmount(0, "1,200.00".into())));
+    let msgs = click(&app, "Save and close");
+    assert!(matches!(msgs.first(), Some(Message::Pay(crate::payments::Msg::Save))), "{msgs:?}");
+    // What Save sends for a check:
+    let tx = json!({"type": "SPEND", "account_id": acc, "date": "2026-10-12", "reference": "", "line_amount_type": "INCLUSIVE", "subtype": "CHECK", "check_number": "1001",
+        "lines": [{"account_id": rent.id, "description": "", "amount": "1200.00", "tax_rate_id": null}]});
+    app.be.call_now("banktx.save", json!({"tx": tx})).unwrap();
+    let txs = app.be.call_now("bank.transactions", json!({"id": acc, "limit": 50})).unwrap();
+    assert!(txs.as_array().unwrap().iter().any(|t| t["description"] == "Check 1001"));
+    assert_eq!(app.be.call_now("banktx.nextCheck", json!({"account_id": acc})).unwrap()["number"], "1002");
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -30,6 +30,9 @@ pub struct State {
     pub lines: Vec<SpendLine>,
     pub lat: String,
     pub busy: bool,
+    /// A check (QuickBooks) rather than a plain expense.
+    pub check: bool,
+    pub check_no: String,
 }
 
 #[derive(Debug, Clone)]
@@ -50,6 +53,8 @@ pub enum Msg {
     RemoveLine(usize),
     Save,
     Saved(Result<Value, String>),
+    CheckNo(String),
+    NextCheck(Result<Value, String>),
 }
 
 fn i(v: &Value) -> i64 { v.as_i64().unwrap_or(0) }
@@ -58,7 +63,7 @@ fn base(app: &App, mode: Mode, customers: bool) -> State {
     State {
         mode, contact: None, contact_text: String::new(), contacts: combo_box::State::new(app.lk.contact_opts(customers)),
         account: app.lk.bank_opts().into_iter().next(), date: ui::date(&ui::today_iso(), app.date_style()), reference: String::new(),
-        docs: vec![], lines: vec![], lat: "INCLUSIVE".into(), busy: false,
+        docs: vec![], lines: vec![], lat: "INCLUSIVE".into(), busy: false, check: false, check_no: String::new(),
     }
 }
 
@@ -76,13 +81,15 @@ pub fn open_pay_bills(app: &mut App) -> Task<Message> {
     load_docs(app, "ACCPAY", None)
 }
 
-pub fn open_spend(app: &mut App, account: Option<i64>) -> Task<Message> {
+pub fn open_spend(app: &mut App, account: Option<i64>, check: bool) -> Task<Message> {
     let mut s = base(app, Mode::Spend, false);
     if let Some(a) = account { s.account = app.lk.bank_opts().into_iter().find(|o| o.id == a); }
     s.lines = vec![SpendLine::default(), SpendLine::default()];
+    s.check = check;
+    let acc = s.account.as_ref().map(|a| a.id);
     app.pay = Some(s);
     app.data = Some(json!({}));
-    Task::none()
+    match (check, acc) { (true, Some(a)) => app.be.call("banktx.nextCheck", json!({"account_id": a}), |r| Message::Pay(Msg::NextCheck(r))), _ => Task::none() }
 }
 
 fn load_docs(app: &App, kind: &str, contact: Option<i64>) -> Task<Message> {
@@ -109,7 +116,14 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             Task::none()
         }
         Msg::ContactText(t) => { s.contact_text = t; s.contact = None; Task::none() }
-        Msg::Account(a) => { s.account = Some(a); Task::none() }
+        Msg::Account(a) => {
+            let id = a.id;
+            s.account = Some(a);
+            if s.check { app.pay = Some(s); return app.be.call("banktx.nextCheck", json!({"account_id": id}), |r| Message::Pay(Msg::NextCheck(r))); }
+            Task::none()
+        }
+        Msg::CheckNo(n) => { s.check_no = n; Task::none() }
+        Msg::NextCheck(r) => { if let Ok(v) = r { s.check_no = v["number"].as_str().unwrap_or("").to_string(); } Task::none() }
         Msg::Date(d) => { s.date = d; Task::none() }
         Msg::Reference(r) => { s.reference = r; Task::none() }
         Msg::Pick(n, on) => { let d = &mut s.docs[n]; d.pick = on; d.amount = if on { ui::plain(d.due) } else { String::new() }; Task::none() }
@@ -157,6 +171,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                     if lines.is_empty() { app.pay = Some(s); return app.toast("Add a category and amount", true); }
                     s.busy = true;
                     let mut tx = json!({"type": "SPEND", "account_id": acc.id, "date": date, "reference": s.reference, "line_amount_type": s.lat, "lines": lines});
+                    if s.check { tx["subtype"] = json!("CHECK"); tx["check_number"] = json!(s.check_no.trim()); }
                     match &s.contact { Some(c) => tx["contact_id"] = json!(c.id), None if !s.contact_text.trim().is_empty() => tx["contact_name"] = json!(s.contact_text.trim()), None => {} }
                     app.be.call("banktx.save", json!({"tx": tx}), |r| Message::Pay(Msg::Saved(r)))
                 }
@@ -166,7 +181,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             s.busy = false;
             match r {
                 Ok(_) => {
-                    let (msg, next) = match s.mode { Mode::Receive => ("Payment recorded", Route::Invoices), Mode::PayBills => ("Bills paid", Route::Bills), Mode::Spend => ("Expense saved", Route::Dashboard) };
+                    let (msg, next) = match s.mode { Mode::Receive => ("Payment recorded", Route::Invoices), Mode::PayBills => ("Bills paid", Route::Bills), Mode::Spend if s.check => ("Check saved", Route::Expenses), Mode::Spend => ("Expense saved", Route::Expenses) };
                     let t1 = app.toast(msg, false);
                     let t2 = app.go(next);
                     let t3 = app.load_lookups();
@@ -272,8 +287,11 @@ pub fn view(app: &App) -> Element<'_, Message> {
             let payee = column![ui::label("Payee"), combo_box(&s.contacts, "Who did you pay?", s.contact.as_ref(), |c| Message::Pay(Msg::Contact(c)))
                 .on_input(|t| Message::Pay(Msg::ContactText(t))).padding([7, 10]).size(14).input_style(theme::input)].spacing(5).width(Fill);
             let amount_box = column![text("AMOUNT").size(12).font(BOLD).color(k.muted), text(ui::money(total)).size(30).font(BOLD)].spacing(2).align_x(Alignment::End);
-            ui::page(ui::h1(app.term("spend")), vec![], column![
-                ui::card(row![column![row![payee, account_pick("Payment account")].spacing(14), row![date, reference].spacing(14)].spacing(14).width(Fill), Space::new().width(24), amount_box].align_y(Alignment::Start)),
+            let second: Element<Message> = if s.check {
+                row![date, ui::field("Check no.", &s.check_no, |v| Message::Pay(Msg::CheckNo(v))), reference].spacing(14).into()
+            } else { row![date, reference].spacing(14).into() };
+            ui::page(ui::h1(if s.check { "Check" } else { app.term("spend") }), vec![], column![
+                ui::card(row![column![row![payee, account_pick(if s.check { "Bank account" } else { "Payment account" })].spacing(14), second].spacing(14).width(Fill), Space::new().width(24), amount_box].align_y(Alignment::Start)),
                 ui::h2("Category details"),
                 container(table).style(theme::card).width(Fill).clip(true),
                 row![ui::btn("Add lines", Some(Message::Pay(Msg::AddLine))), ui::hspace(), ui::muted("Amounts include tax")],

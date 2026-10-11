@@ -37,8 +37,10 @@ pub fn load_expenses(app: &mut App) -> iced::Task<Message> {
                         let amt = t["amount"].as_i64().unwrap_or(0);
                         if amt >= 0 || !(t["kind"] == "banktx" || (t["kind"] == "payment" && t["description"].as_str().unwrap_or("").starts_with("Payment"))) { continue; }
                         if t["kind"] == "payment" && t["description"].as_str().map(|d| !d.contains('-')).unwrap_or(true) { continue; }
-                        let kind = if t["kind"] == "banktx" { "EXPENSE" } else { "BILLPAYMENT" };
-                        rows.push(serde_json::json!({"type": kind, "date": t["date"], "number": t["reference"], "contact_name": t["contact"], "total": -amt, "amount_due": 0,
+                        let desc = t["description"].as_str().unwrap_or("");
+                        let kind = if t["kind"] != "banktx" { "BILLPAYMENT" } else if desc.starts_with("Check ") { "CHECK" } else { "EXPENSE" };
+                        let number = if kind == "CHECK" { serde_json::json!(desc.trim_start_matches("Check ")) } else { t["reference"].clone() };
+                        rows.push(serde_json::json!({"type": kind, "date": t["date"], "number": number, "contact_name": t["contact"], "total": -amt, "amount_due": 0,
                             "status": "PAID", "document_id": t["document_id"], "account": b["name"], "id": t["id"]}));
                     }
                 }
@@ -54,6 +56,7 @@ fn type_label(app: &App, kind: &str) -> &'static str {
     match kind {
         "EXPENSE" => if app.skin == Skin::QuickBooks { "Expense" } else { "Spend money" },
         "SALESRECEIPT_ROW" => "Sales receipt",
+        "CHECK" => "Check",
         "BILLPAYMENT" => "Bill payment", "ACCREC" => app.term("invoice"), "QUOTE" => app.term("quote"), "ACCRECCREDIT" => app.term("credit_note"), "ACCPAY" => app.term("bill"),
         "ACCPAYCREDIT" => app.term("supplier_credit"), "PO" => app.term("po"), _ => "Transaction" }
 }
@@ -135,7 +138,7 @@ pub fn docs(app: &App) -> Element<'_, Message> {
         let kind = if r["subtype"] == "RECEIPT" { "SALESRECEIPT_ROW" } else { st(r, "type") };
         let label = vocab::status(app.skin, kind, st(r, "status"), i(&r["overdue"]) == 1);
         let msg = match kind {
-            "EXPENSE" => None,
+            "EXPENSE" | "CHECK" => None,
             "BILLPAYMENT" => r["document_id"].as_i64().map(|id| Message::Nav(Route::Doc { kind: "ACCPAY".into(), id: Some(id) })),
             "SALESRECEIPT_ROW" => Some(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: r["id"].as_i64() })),
             _ => Some(Message::Nav(Route::Doc { kind: kind.into(), id: r["id"].as_i64() })),

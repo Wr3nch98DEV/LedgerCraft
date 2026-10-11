@@ -19,6 +19,9 @@ pub struct BankTxInput {
     pub rate: Option<String>,
     pub lines: Vec<LineInput>,
     pub amount: Option<String>, // for overpayments
+    /// 'CHECK' for a check (QuickBooks); empty otherwise.
+    pub subtype: Option<String>,
+    pub check_number: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -130,6 +133,8 @@ impl Ledger {
                 "UPDATE bank_transactions SET type=?2, account_id=?3, contact_id=?4, date=?5, reference=?6, line_amount_type=?7, currency=?8, rate_e8=?9,
                    subtotal=?10, total_tax=?11, total=?12, remaining_credit=?13 WHERE id=?1",
                 params![tid, t.kind, t.account_id, contact, t.date, t.reference, lat_s, currency, rate, subtotal, total_tax, total, if is_credit { total } else { 0 }])?;
+            self.conn.execute("UPDATE bank_transactions SET subtype = ?2, check_number = ?3 WHERE id = ?1",
+                params![tid, t.subtype.clone().unwrap_or_default(), t.check_number.clone().unwrap_or_default().trim()])?;
             self.write_lines("BANKTX", tid, &lines)?;
             let jid = self.post_bank_transaction(tid)?;
             self.conn.execute("UPDATE bank_transactions SET journal_id = ?2 WHERE id = ?1", params![tid, jid])?;
@@ -289,6 +294,14 @@ impl Ledger {
         })
     }
 
+    /// The next check number for a bank account (last numeric check number + 1, starting at 1001).
+    pub fn next_check_number(&self, account_id: i64) -> Result<String> {
+        let last: Option<i64> = self.conn.query_row(
+            "SELECT MAX(CAST(check_number AS INTEGER)) FROM bank_transactions WHERE account_id = ?1 AND subtype = 'CHECK' AND status <> 'DELETED' AND check_number GLOB '[0-9]*'",
+            [account_id], |r| r.get(0))?;
+        Ok(last.map(|n| n + 1).unwrap_or(1001).to_string())
+    }
+
     /// All cash movements for a bank account (the "Account Transactions" tab).
     pub fn bank_account_transactions(&self, account_id: i64, limit: i64) -> Result<Vec<Value>> {
         util::query_json(&self.conn,
@@ -298,7 +311,7 @@ impl Ledger {
                FROM payments p JOIN documents d ON d.id = p.document_id JOIN contacts c ON c.id = d.contact_id WHERE p.account_id = ?1 AND p.status <> 'DELETED'
                UNION ALL
                SELECT 'banktx', b.id, b.date, CASE WHEN b.type LIKE 'RECEIVE%' THEN b.total ELSE -b.total END, c.name, b.reference,
-                 CASE WHEN b.type LIKE 'RECEIVE%' THEN 'Receive money' ELSE 'Spend money' END, b.reconciled, NULL
+                 CASE WHEN b.subtype = 'CHECK' THEN 'Check ' || b.check_number WHEN b.type LIKE 'RECEIVE%' THEN 'Receive money' ELSE 'Spend money' END, b.reconciled, NULL
                FROM bank_transactions b LEFT JOIN contacts c ON c.id = b.contact_id WHERE b.account_id = ?1 AND b.status <> 'DELETED'
                UNION ALL
                SELECT 'transfer_from', t.id, t.date, -t.amount, (SELECT name FROM accounts WHERE id = t.to_account_id), t.reference, 'Transfer to ' || (SELECT name FROM accounts WHERE id = t.to_account_id), t.from_reconciled, NULL
