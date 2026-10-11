@@ -209,7 +209,7 @@ impl App {
     pub fn org_name(&self) -> String { self.session.as_ref().and_then(|s| s["org"]["name"].as_str()).unwrap_or("").to_string() }
     pub fn user_name(&self) -> String { self.session.as_ref().and_then(|s| s["user"]["name"].as_str()).unwrap_or("").to_string() }
 
-    fn save_prefs(&self) {
+    pub fn save_prefs(&self) {
         let _ = std::fs::write(prefs_path(&self.be), json!({"layout": self.skin.key(), "dark": self.dark}).to_string());
     }
 
