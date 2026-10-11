@@ -1,0 +1,16 @@
+[package]
+name = "ledger-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+argon2 = "0.6.0"
+chrono = { version = "0.4.45", features = ["serde"] }
+rand = "0.10.3"
+rusqlite = { version = "0.40.2", features = ["bundled", "serde_json"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.152"
+
+[dev-dependencies]
+proptest = "1.12.0"
+tempfile = "3.27.0"

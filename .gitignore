@@ -1,0 +1,8 @@
+target/
+node_modules/
+ui/build/
+ui/.svelte-kit/
+*.lcdb
+*.lcdb-wal
+*.lcdb-shm
+/dist/
