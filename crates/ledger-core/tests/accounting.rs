@@ -340,3 +340,106 @@ fn demo_company_is_consistent() {
     assert!(!r.is_empty());
     assert_invariants(&l);
 }
+
+#[test]
+fn bas_reconciles_to_tax_report() {
+    let l = org();
+    let sales = acct(&l, "200");
+    invoice(&l, "2026-07-10", vec![line(sales, Some(tax(&l, "GST on Income")), "1", "1000")], "AUTHORISED");
+    l.save_document(None, &DocInput { kind: "ACCPAY".into(), contact_name: Some("S".into()), date: "2026-07-11".into(), line_amount_type: Some("INCLUSIVE".into()),
+        lines: vec![line(acct(&l, "453"), Some(tax(&l, "GST on Expenses")), "1", "330")], status: Some("AUTHORISED".into()), ..Default::default() }).unwrap();
+    let id = l.create_tax_return(Some("AU-BAS"), "2026-07-01", "2026-09-30", Some("ACCRUAL")).unwrap();
+    let r = l.get_tax_return(id).unwrap();
+    let b = |k: &str| r["data"]["boxes"].as_array().unwrap().iter().find(|x| x["box"] == k).unwrap()["amount"].as_i64().unwrap();
+    assert_eq!(b("G1"), 110000);
+    assert_eq!(b("1A"), 10000);
+    assert_eq!(b("G11"), 33000);
+    assert_eq!(b("1B"), 3000);
+    assert_eq!(b("9"), 7000);
+    l.file_tax_return(id).unwrap();
+    // filed return locks the period for non-advisers
+    let mut l = l;
+    l.role = "STANDARD".into();
+    assert!(l.check_lock("2026-08-01").is_err());
+}
+
+#[test]
+fn fixed_asset_depreciation_and_disposal() {
+    let l = org();
+    l.ensure_asset_types().unwrap();
+    let ty = l.list_asset_types().unwrap().into_iter().find(|t| t["name"] == "Computer equipment").unwrap()["id"].as_i64().unwrap();
+    let a = l.save_asset(None, &ledger_core::assets::AssetInput { name: "Laptop".into(), asset_type_id: Some(ty), purchase_date: "2026-01-01".into(), purchase_price: "3000".into(),
+        method: Some("STRAIGHTLINE".into()), life_years: Some("3".into()), ..Default::default() }).unwrap();
+    l.register_asset(a).unwrap();
+    let r = l.run_depreciation("2026-06-30").unwrap();
+    assert_eq!(r["total"], 50000, "6 months of 3000/36 = 500");
+    assert_eq!(bal(&l, acct(&l, "416")), 50000);
+    assert_eq!(bal(&l, acct(&l, "721")), -50000);
+    l.rollback_depreciation().unwrap();
+    assert_eq!(bal(&l, acct(&l, "416")), 0);
+    l.run_depreciation("2026-06-30").unwrap();
+    // sell for 2,800 on 15 July: depreciation to 30 June (500), book value 2,500 -> gain 300
+    l.dispose_asset(a, "2026-07-15", "2800", Some(acct(&l, "090")), acct(&l, "260")).unwrap();
+    assert_eq!(bal(&l, acct(&l, "720")), -300000 + 0, "cost removed (cost was never posted via bill in this test)");
+    assert_eq!(bal(&l, acct(&l, "260")), -30000);
+    assert_invariants(&l);
+}
+
+#[test]
+fn payroll_run_posts_balanced_journal() {
+    let mut l = org();
+    l.set_setting("payroll_jurisdiction", "AU").unwrap();
+    l.ensure_payroll_setup().unwrap();
+    let cal: i64 = l.conn.query_row("SELECT id FROM pay_calendars WHERE frequency = 'FORTNIGHTLY'", [], |r| r.get(0)).unwrap();
+    l.save_employee(None, &ledger_core::payroll::EmployeeInput { first_name: "A".into(), last_name: "B".into(), start_date: "2020-01-01".into(), pay_calendar_id: Some(cal),
+        pay_basis: "SALARY".into(), annual_salary: Some("78000".into()), employment_type: "FULLTIME".into(), ..Default::default() }).unwrap();
+    let rid = l.create_pay_run(cal, None).unwrap();
+    let r = l.get_pay_run(rid).unwrap();
+    assert_eq!(r["wages"], 300000);
+    assert_eq!(r["super"], 36000);
+    let net = r["net_pay"].as_i64().unwrap();
+    assert_eq!(net, 300000 - r["tax"].as_i64().unwrap());
+    l.role = "ADVISER".into();
+    l.post_pay_run(rid, Some(acct(&l, "090"))).unwrap();
+    assert_eq!(bal(&l, acct(&l, "090")), -net);
+    assert_eq!(bal(&l, l.sys_account("WAGESPAYABLE").unwrap()), 0, "net wages paid out");
+    let leave: i64 = l.conn.query_row("SELECT SUM(hours_e2) FROM leave_balances", [], |r| r.get(0)).unwrap();
+    assert!(leave > 0, "leave accrued");
+    assert_invariants(&l);
+}
+
+#[test]
+fn expense_claim_and_project_invoice() {
+    let l = org();
+    let rid = l.save_receipt(None, &ledger_core::expenses::ReceiptInput { supplier: "Cafe".into(), date: "2026-03-01".into(), kind: "RECEIPT".into(), line_amount_type: Some("INCLUSIVE".into()),
+        lines: vec![LineInput { description: "Lunch".into(), amount: Some("55".into()), account_id: Some(acct(&l, "420")), ..Default::default() }], ..Default::default() }).unwrap();
+    l.set_receipt_status(rid, "SUBMITTED").unwrap();
+    l.set_receipt_status(rid, "AUTHORISED").unwrap();
+    assert_eq!(bal(&l, l.sys_account("AP").unwrap()), -5500);
+    let cust = l.find_or_create_contact("Client").unwrap();
+    let pid = l.save_project(None, &serde_json::json!({"name": "Website", "contact_id": cust})).unwrap();
+    let task = l.save_task(None, pid, &serde_json::json!({"name": "Build", "charge_type": "TIME", "rate": "100"})).unwrap();
+    l.add_time(pid, task, "2026-03-02", 90, "Work").unwrap();
+    l.add_project_cost(pid, &serde_json::json!({"description": "Hosting", "amount": "50", "markup": "20"})).unwrap();
+    let inv = l.invoice_project(pid).unwrap();
+    let d = l.get_document(inv).unwrap();
+    assert_eq!(d["subtotal"], 15000 + 6000, "1.5h x 100 + 50 + 20% markup");
+    assert!(l.invoice_project(pid).is_err(), "nothing left to bill");
+}
+
+#[test]
+fn csv_import_dry_run_then_real() {
+    let l = org();
+    let csv = "*ContactName,EmailAddress,FirstName\nNew Customer,nc@example.com,Nia\nOther Co,oc@example.com,Oz\n";
+    let r = l.import_csv("contacts", csv, true, None).unwrap();
+    assert_eq!(r["created"], 2);
+    assert_eq!(l.list_contacts("all", "").unwrap().len(), 0, "dry run writes nothing");
+    let r = l.import_csv("contacts", csv, false, None).unwrap();
+    assert_eq!(r["created"], 2);
+    let inv = "*ContactName,*InvoiceNumber,*InvoiceDate,*DueDate,Description,*Quantity,*UnitAmount,*AccountCode,*TaxType\nNew Customer,X-1,1/03/2026,15/03/2026,Work,2,50,200,GST on Income\nNew Customer,X-1,1/03/2026,15/03/2026,More,1,10,200,GST on Income\n";
+    let r = l.import_csv("invoices", inv, false, None).unwrap();
+    assert_eq!(r["created"], 1, "{r}");
+    assert_eq!(bal(&l, l.sys_account("AR").unwrap()), 12100);
+    assert!(l.export_csv("invoices").unwrap().contains("X-1"));
+    assert_invariants(&l);
+}

@@ -31,6 +31,13 @@ pub mod modules;
 pub mod email;
 pub mod extra_reports;
 pub mod demo;
+pub mod taxreturns;
+pub mod assets;
+pub mod payroll;
+pub mod expenses;
+pub mod projects;
+pub mod importexport;
+pub mod adviser;
 
 pub use error::{Error, Result};
 pub use money::Cents;

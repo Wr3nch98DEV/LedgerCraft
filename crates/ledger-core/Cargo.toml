@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 argon2 = "0.6.0"
 chrono = { version = "0.4.45", features = ["serde"] }
+miniz_oxide = "0.9.1"
 rand = "0.10.3"
 rusqlite = { version = "0.40.2", features = ["bundled", "serde_json"] }
 serde = { version = "1.0.229", features = ["derive"] }

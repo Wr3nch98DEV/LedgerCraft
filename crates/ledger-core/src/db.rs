@@ -5,6 +5,7 @@ use rusqlite::Connection;
 pub const MIGRATIONS: &[(&str, &str)] = &[
     ("v1_core", include_str!("schema_v1.sql")),
     ("v2_modules", include_str!("schema_v2.sql")),
+    ("v3_payroll_projects", include_str!("schema_v3.sql")),
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {
