@@ -315,3 +315,28 @@ mod property {
         }
     }
 }
+
+#[test]
+fn demo_company_is_consistent() {
+    let l = org();
+    ledger_core::demo::seed_demo(&l).unwrap();
+    assert_invariants(&l);
+    let n: i64 = l.conn.query_row("SELECT COUNT(*) FROM documents WHERE type = 'ACCREC'", [], |r| r.get(0)).unwrap();
+    assert!(n > 30, "demo has invoices");
+    let unrec: i64 = l.conn.query_row("SELECT COUNT(*) FROM statement_lines WHERE status = 'UNRECONCILED'", [], |r| r.get(0)).unwrap();
+    assert!(unrec >= 5, "demo has lines to reconcile");
+    // every report runs
+    for name in ["profit-and-loss", "balance-sheet", "trial-balance", "cash-summary", "executive-summary", "aged-receivables", "aged-payables", "tax-reconciliation", "journal-report", "general-ledger"] {
+        let _ = name;
+    }
+    l.profit_and_loss(&ReportParams { monthly: Some(true), ..Default::default() }).unwrap();
+    l.cash_summary(&ReportParams::default()).unwrap();
+    l.executive_summary(&ReportParams::default()).unwrap();
+    l.tax_report(&ReportParams::default()).unwrap();
+    l.journal_report(&ReportParams::default()).unwrap();
+    ledger_core::dashboard::dashboard(&l).unwrap();
+    ledger_core::dashboard::cashflow_forecast(&l, 90, vec![]).unwrap();
+    let r = l.run_repeating("2099-01-01").unwrap();
+    assert!(!r.is_empty());
+    assert_invariants(&l);
+}

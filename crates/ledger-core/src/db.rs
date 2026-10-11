@@ -4,6 +4,7 @@ use rusqlite::Connection;
 /// Ordered list of migrations. Never edit a shipped migration; append a new one.
 pub const MIGRATIONS: &[(&str, &str)] = &[
     ("v1_core", include_str!("schema_v1.sql")),
+    ("v2_modules", include_str!("schema_v2.sql")),
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

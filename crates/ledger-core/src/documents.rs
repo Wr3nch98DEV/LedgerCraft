@@ -339,7 +339,7 @@ impl Ledger {
     }
 
     /// Post the journal for an approved invoice/bill/credit note (plus inventory movements).
-    fn post_document(&self, id: i64) -> Result<i64> {
+    pub(crate) fn post_document(&self, id: i64) -> Result<i64> {
         let (kind, contact, date, currency, rate, number, reference): (String, i64, String, String, i64, String, String) = self.conn.query_row(
             "SELECT type, contact_id, date, currency, rate_e8, number, reference FROM documents WHERE id = ?1", [id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?;
@@ -406,7 +406,7 @@ impl Ledger {
     }
 
     /// Reverse a document's journal and inventory movements (void or edit of approved doc).
-    fn unpost_document(&self, id: i64) -> Result<()> {
+    pub(crate) fn unpost_document(&self, id: i64) -> Result<()> {
         let (jid, kind, date): (Option<i64>, String, String) = self.conn.query_row("SELECT journal_id, type, date FROM documents WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         if let Some(j) = jid {
             let rid = self.reverse_journal(j, None, None)?;

@@ -24,9 +24,17 @@ pub mod statements;
 pub mod reports;
 pub mod search;
 pub mod util;
+pub mod dashboard;
+pub mod advanced;
+pub mod ext;
+pub mod modules;
+pub mod email;
+pub mod extra_reports;
+pub mod demo;
 
 pub use error::{Error, Result};
 pub use money::Cents;
+pub use rusqlite;
 
 use rusqlite::Connection;
 use std::cell::Cell;
