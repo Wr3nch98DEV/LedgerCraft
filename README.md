@@ -1,5 +1,7 @@
 # LedgerCraft
 
+> **New:** LedgerCraft now has a native desktop app (100% Rust, [iced](https://iced.rs)) with switchable **QuickBooks-style** and **Xero-style** layouts over the same books. Run `start.bat` (native) or `start.bat web` (previous web version, full feature set during the transition). Plan and status: [UI_REWRITE_PLAN.md](UI_REWRITE_PLAN.md).
+
 **Open-source, offline-first accounting for small businesses and their advisers** — part of the *Craft* suite of open alternatives to commercial software.
 
 LedgerCraft covers the same ground as cloud accounting suites like Xero: invoicing, bills, bank reconciliation, reports, GST/VAT returns, multi-currency, fixed assets, projects, expense claims and payroll. It runs on your own computer as a single small program, and each business is stored in one portable file.

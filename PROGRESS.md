@@ -1,5 +1,7 @@
 # LedgerCraft — overnight build report
 
+> **Update — native app prototype (12 Oct 2026).** `start.bat` now opens the new **native LedgerCraft app** (100% Rust, iced): a **QuickBooks-style** layout by default and a **Xero-style** layout you can switch to from the gear menu → Profile (or `start.bat xero`). Both use the same company files. Daily bookkeeping works natively: dashboard, invoices/estimates/bills/POs, receive payment, pay bills, expenses, bank feed review, chart of accounts, journal entries and all reports. Anything not yet native (payroll, taxes, projects, printing, most settings) is still in the previous version: **`start.bat web`**. Status and what's next: see `UI_REWRITE_PLAN.md`.
+
 **Start here:** double-click **`start.bat`**. First run builds everything (a few minutes). Then click **"Just show me the demo company"** to explore 12 months of sample data, or set up your own business.
 
 LedgerCraft opens in its own window in **dark mode**. Toggle light/dark with the sun/moon icon (top right) or **Alt+T**.

@@ -1,5 +1,24 @@
 # LedgerCraft native UI rewrite: plan for review
 
+## Status — native prototype (12 Oct 2026)
+
+**Built and working** (launch with `start.bat`; tested against the demo company):
+
+| Plan item | State |
+|---|---|
+| Phase 0: iced 0.14 spike, engine bridge, theme tokens, icons, widgets | ✅ (PDF crate bake-off not started) |
+| Phase 1: app skeleton, QuickBooks-style shell (sidebar, top bar, + New, gear menu), Xero-style shell, layout + dark/light switching, company picker & setup wizard, `start.bat` | ✅ (sign-in for password-protected files: not yet; search box opens a filtered sales list) |
+| Phase 2: engine additions (§6) | ⬜ not started — QuickBooks-only items (sales receipt, checks, bank deposit, tick-off reconcile…) are greyed out in the + New menu |
+| Phase 3: QuickBooks core | 🟡 Business overview; Sales (all sales, invoices, estimates, customers + customer page, products & services); Expenses (expense transactions, bills, vendors, POs); invoice / estimate / credit memo / bill / vendor credit / PO editor (create, edit, approve, void, copy, convert, record payment); Receive payment across invoices; Pay bills (as one batch); Expense; Banking For review / Categorized (match, rules, categorize, undo, accept all); Chart of accounts; Journal entry; new customer / vendor / product |
+| Phase 4: reports | 🟡 Report centre with QuickBooks names & groups, every engine report viewable with period + cash/accrual; customise panel, export, saved reports not yet. Taxes, payroll, projects, mileage: placeholders pointing at the web version |
+| Phase 5–6: settings & tools, PDFs | ⬜ settings page has layout/theme/company info only; printing still via the web version |
+| Phase 7: Xero-style layout | 🟡 working on the same screens (top menu, dashboard cards, Xero terms and statuses); Xero-specific screens not yet |
+| Phase 8: cut-over | ⬜ web version kept as `start.bat web` |
+
+**Deviations from the plan, for review:** the UI lives in one crate (`crates/ledger-app`, modules per area) rather than four, and talks to the engine through the existing in-process command dispatcher (`ledger_server::rpc::handle`, same as the REST API) rather than new typed calls. Both kept the prototype fast to build and can be split/typed later without changing screens. The layout preference is stored per computer (`ui-preferences.json`), not yet per user.
+
+**Tests:** 9 native-app tests (money/date parsing, invoice editor → engine round trip, bank-feed actions reconcile the demo feed to zero difference, every report runs from the viewer, form payloads) + 46 engine tests.
+
 **Status:** draft for review. No code changes until approved.
 **Goal:** replace the web UI (Svelte/TypeScript/HTML/CSS shown in an Edge/Chrome window) with a native desktop UI written entirely in Rust using **iced**. The UI ships with two switchable layouts:
 

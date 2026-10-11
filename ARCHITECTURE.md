@@ -62,3 +62,7 @@ Amounts are `i64` minor units. Quantities are ×10⁴, unit prices ×10² of the
 ## Performance
 
 SQLite in WAL mode with indexes on journal dates, accounts, sources and documents. Reports aggregate in SQL. The UI lists render up to 500 rows with server-side search; the reconcile screen pages 15 lines at a time.
+
+## Native app (`crates/ledger-app`)
+
+A native window built with iced 0.14 (Elm architecture). `backend.rs` calls the engine in-process through `ledger_server::rpc::handle` on Tokio's blocking pool; `app.rs` holds routes, state and messages; `shell.rs` draws the QuickBooks-style (left sidebar) or Xero-style (top bar) frame; screens (`dashboard`, `lists`, `doc`, `payments`, `banking`, `reports`, `forms`, `settings`, `setup`) keep one screen model and switch only their view and wording (`vocab.rs`) by layout. `theme.rs` holds dark/light design tokens per layout. `ledger-server` is now a library (dispatcher, jobs, rendering) plus the web server binary.
