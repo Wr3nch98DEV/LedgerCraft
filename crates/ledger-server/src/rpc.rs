@@ -134,6 +134,8 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
         // ---- settings / users / audit ----
         "settings.get" => { need("settings:read")?; Ok(l.settings_json()?) }
         "settings.update" => { need("settings:write")?; l.update_settings(p)?; ok() }
+        "sequences.list" => { need("settings:read")?; Ok(json!(l.list_sequences()?)) }
+        "sequences.save" => { need("settings:write")?; l.set_sequence(s(p, "name"), s(p, "prefix"), i(p, "next")?)?; ok() }
         "users.list" => { need("users:read")?; Ok(json!(l.list_users()?)) }
         "users.create" => { need("users:write")?; Ok(json!({"id": l.create_user(&de::<UserInput>(p)?)?})) }
         "users.update" => { need("users:write")?; l.update_user(id(p)?, &de::<UserInput>(&p["user"])?)?; ok() }

@@ -220,7 +220,20 @@ impl Ledger {
                 None => {
                     let number = match d.number.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
                         Some(n) => n.to_string(),
-                        None => match seq_for(&kind) { Some(s) => self.next_number(s)?, None => String::new() },
+                        None => match seq_for(&kind) {
+                            // Auto-numbering skips numbers that are already taken (e.g. after the
+                            // next number was set back in Invoice settings, or entered by hand).
+                            Some(s) => {
+                                let mut n = self.next_number(s)?;
+                                for _ in 0..10_000 {
+                                    let used: i64 = self.conn.query_row("SELECT COUNT(*) FROM documents WHERE type = ?1 AND number = ?2 AND status <> 'DELETED'", params![kind, n], |r| r.get(0))?;
+                                    if used == 0 || kind == "ACCPAY" { break; }
+                                    n = self.next_number(s)?;
+                                }
+                                n
+                            }
+                            None => String::new(),
+                        },
                     };
                     if !number.is_empty() && kind != "ACCPAY" {
                         let dup: i64 = self.conn.query_row("SELECT COUNT(*) FROM documents WHERE type = ?1 AND number = ?2 AND status <> 'DELETED'", params![kind, number], |r| r.get(0))?;

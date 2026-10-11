@@ -115,4 +115,20 @@ impl Ledger {
         self.conn.execute("UPDATE sequences SET next = next + 1 WHERE name = ?1", [name])?;
         Ok(format!("{prefix}{next:0width$}", width = width as usize))
     }
+
+    /// Document numbering (Settings → Invoice settings): prefix and next number per sequence.
+    pub fn list_sequences(&self) -> Result<Vec<Value>> {
+        for (name, prefix) in [("INV", "INV-"), ("CN", "CN-"), ("QU", "QU-"), ("PO", "PO-")] {
+            self.conn.execute("INSERT OR IGNORE INTO sequences(name, prefix, next, width) VALUES (?1, ?2, 1, 4)", params![name, prefix])?;
+        }
+        crate::util::query_json(&self.conn, "SELECT name, prefix, next, width FROM sequences ORDER BY CASE name WHEN 'INV' THEN 0 WHEN 'CN' THEN 1 WHEN 'QU' THEN 2 WHEN 'PO' THEN 3 ELSE 9 END, name", [])
+    }
+
+    pub fn set_sequence(&self, name: &str, prefix: &str, next: i64) -> Result<()> {
+        if next < 1 { return crate::error::invalid("the next number must be 1 or more"); }
+        if prefix.chars().count() > 20 { return crate::error::invalid("the prefix can be at most 20 characters"); }
+        let n = self.conn.execute("UPDATE sequences SET prefix = ?2, next = ?3 WHERE name = ?1", params![name, prefix, next])?;
+        if n == 0 { return crate::error::invalid("unknown number sequence"); }
+        self.audit("UPDATE", "sequence", None, None, Some(serde_json::json!({"name": name, "prefix": prefix, "next": next})))
+    }
 }

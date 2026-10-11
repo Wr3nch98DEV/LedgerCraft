@@ -50,6 +50,12 @@
   // branding
   let themes = $state<any[]>([]);
   let th = $state<any>(null);
+  let seqs = $state<any[]>([]);
+  const seqLabels: Record<string, string> = { INV: 'Invoices', CN: 'Credit notes', QU: 'Quotes', PO: 'Purchase orders', BILL: 'Bills (optional)', MJ: 'Manual journals', ASSET: 'Fixed assets', PAYRUN: 'Pay runs', EXP: 'Expense claims' };
+  $effect(() => { if (s === 'branding') rpc('sequences.list').then((x) => (seqs = x)).catch(toastError); });
+  async function saveSeq(q: any) {
+    try { await rpc('sequences.save', { name: q.name, prefix: q.prefix, next: Number(q.next) }); toast(`${seqLabels[q.name] ?? q.name}: next number is ${q.prefix}${String(q.next).padStart(q.width, '0')}`); } catch (e) { toastError(e); }
+  }
   $effect(() => { if (s === 'branding') rpc('branding.list').then((t) => { themes = t; th = th ?? { ...t[0], payment_advice: !!t[0]?.payment_advice, show_tax_number: !!t[0]?.show_tax_number }; }); });
   async function uploadLogo(f: File) {
     if (f.size > 2 * 1024 * 1024) { toastError('Logos must be 2 MB or smaller'); return; }
@@ -166,6 +172,18 @@
         <p class="mt-3 text-[13px] text-muted">Once any user has a password, LedgerCraft asks everyone to sign in. Passwords are stored as Argon2 hashes.</p>
       </section>
     {:else if s === 'branding' && th}
+      <section class="card mb-4 p-5">
+        <h2 class="mb-1 text-lg font-semibold">Invoice settings</h2>
+        <p class="mb-3 text-[13px] text-muted">Prefix and next number used for new documents. Changing the next number doesn't renumber existing documents.</p>
+        <div class="overflow-x-auto"><table class="tbl text-[13px]"><thead><tr><th>Document</th><th>Prefix</th><th>Next number</th><th>Next will be</th><th></th></tr></thead>
+          <tbody>{#each seqs as q (q.name)}<tr>
+            <td>{seqLabels[q.name] ?? q.name}</td>
+            <td><input class="input w-28" aria-label="{seqLabels[q.name] ?? q.name} prefix" bind:value={q.prefix} disabled={!can('settings:write')} /></td>
+            <td><input class="input num w-28" type="number" min="1" aria-label="{seqLabels[q.name] ?? q.name} next number" bind:value={q.next} disabled={!can('settings:write')} /></td>
+            <td class="font-mono">{q.prefix}{String(q.next).padStart(q.width, '0')}</td>
+            <td class="text-right">{#if can('settings:write')}<button class="btn btn-sm" onclick={() => saveSeq(q)}>Save</button>{/if}</td>
+          </tr>{/each}</tbody></table></div>
+      </section>
       <section class="card p-5">
         <div class="mb-3 flex items-center justify-between"><h2 class="text-lg font-semibold">Branding themes</h2>
           <div class="flex gap-2">{#each themes as t}<button class="btn btn-sm {th.id === t.id ? 'btn-primary' : ''}" onclick={() => (th = { ...t, payment_advice: !!t.payment_advice, show_tax_number: !!t.show_tax_number })}>{t.name}{t.is_default ? ' ★' : ''}</button>{/each}

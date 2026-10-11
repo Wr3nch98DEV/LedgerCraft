@@ -258,6 +258,22 @@ fn statement_balance_when_bank_clears_items_after_the_statement_starts() {
 }
 
 #[test]
+fn invoice_numbering_settings() {
+    let l = org();
+    let names: Vec<String> = l.list_sequences().unwrap().iter().map(|q| q["name"].as_str().unwrap().to_string()).collect();
+    assert_eq!(&names[..4], &["INV", "CN", "QU", "PO"]);
+    l.set_sequence("INV", "HD-", 1500).unwrap();
+    let id = invoice(&l, "2026-07-01", vec![line(acct(&l, "200"), None, "1", "10")], "AUTHORISED");
+    assert_eq!(l.get_document(id).unwrap()["number"], "HD-1500");
+    // setting the next number back to one already used skips ahead instead of failing
+    l.set_sequence("INV", "HD-", 1500).unwrap();
+    let id2 = invoice(&l, "2026-07-02", vec![line(acct(&l, "200"), None, "1", "10")], "AUTHORISED");
+    assert_eq!(l.get_document(id2).unwrap()["number"], "HD-1501");
+    assert!(l.set_sequence("INV", "X", 0).is_err());
+    assert!(l.set_sequence("NOPE", "X", 1).is_err());
+}
+
+#[test]
 fn reports_add_up() {
     let l = org();
     let sales = acct(&l, "200");
