@@ -75,6 +75,9 @@ pub enum Msg {
     PayAccount(Opt),
     AddPayment,
     Cancel,
+    /// Save the document as a PDF and open it (to view or print).
+    Print,
+    Printed(Result<String, String>),
 }
 
 /// How line amounts relate to tax.
@@ -365,6 +368,27 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.be.call("payments.add", json!({"document_id": id, "account_id": acc.id, "date": date, "amount": e.pay_amount.replace(',', ""), "reference": ""}), |r| Message::Doc(Msg::ActionDone(r, "pay")))
         }
         Msg::Cancel => { app.doc = Some(e); return app.update(Message::Back); }
+        Msg::Print => {
+            let Some(id) = e.id else { app.doc = Some(e); return app.toast("Save it first, then print", true) };
+            let be = app.be.clone();
+            let style = app.date_style();
+            let title = printed_title(app, &e.kind);
+            let accent = if app.skin == Skin::QuickBooks { (0.16, 0.6, 0.27) } else { (0.05, 0.58, 0.53) };
+            app.doc = Some(e);
+            return Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<String, String> {
+                    let d = be.call_now("docs.get", json!({"id": id}))?;
+                    let st = be.call_now("settings.get", json!({}))?;
+                    let bytes = crate::pdf::document(&d, &st, &title, &|x| ui::date(x, style), accent);
+                    let name = format!("{}.pdf", d["number"].as_str().filter(|n| !n.is_empty()).unwrap_or("document").replace(|c: char| !c.is_alphanumeric() && c != '-', "_"));
+                    let path = crate::pdf::output_dir().join(name);
+                    std::fs::write(&path, bytes).map_err(|e| format!("Couldn't save the PDF: {e}"))?;
+                    crate::pdf::open_file(&path);
+                    Ok(path.display().to_string())
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Doc(Msg::Printed(r)));
+        }
+        Msg::Printed(r) => match r { Ok(p) => app.toast(format!("Saved {p}"), false), Err(err) => app.toast(err, true) },
     };
     app.doc = Some(e);
     task
@@ -520,10 +544,12 @@ pub fn view(app: &App) -> Element<'_, Message> {
         if status == "AUTHORISED" && e.doc.as_ref().map(|d| d["amount_paid"].as_i64().unwrap_or(0) == 0 && d["amount_credited"].as_i64().unwrap_or(0) == 0).unwrap_or(false) {
             actions.push(ui::btn("Edit", m(Msg::Edit)));
         }
+        actions.push(ui::btn(if app.skin == Skin::QuickBooks { "Print or preview" } else { "Print / PDF" }, m(Msg::Print)));
         actions.push(ui::btn("Copy", m(Msg::Action("copy"))));
         if matches!(status, "AUTHORISED" | "PAID") && ledger_doc(&e.kind) { actions.push(ui::btn_danger("Void", m(Msg::Action("void")))); }
     }
     if editable && e.id.is_some() && matches!(status, "DRAFT" | "SUBMITTED") { actions.insert(0, ui::btn_danger("Delete", m(Msg::Action("delete")))); }
+    if editable && e.id.is_some() { actions.insert(0, ui::btn(if app.skin == Skin::QuickBooks { "Print or preview" } else { "Print / PDF" }, m(Msg::Print))); }
 
     // ---- assemble per layout ----
     let k2 = k;
@@ -547,6 +573,16 @@ pub fn view(app: &App) -> Element<'_, Message> {
         row![ui::h1(title), status_chip].spacing(12).align_y(Alignment::Center),
     ].spacing(4);
     ui::page(title_el.into(), vec![], body)
+}
+
+/// The heading printed on the document.
+fn printed_title(app: &App, kind: &str) -> String {
+    let registered = matches!(app.setting("tax_registered").as_str(), "1" | "true");
+    match kind {
+        "ACCREC" if registered && matches!(app.country().as_str(), "AU" | "NZ") => "Tax Invoice".into(),
+        "ACCREC" if registered && matches!(app.country().as_str(), "GB" | "IE") => "VAT Invoice".into(),
+        _ => title_for(app, kind).to_string(),
+    }
 }
 
 /// QuickBooks-style sticky-looking footer bar with Cancel on the left and save actions on the right.
