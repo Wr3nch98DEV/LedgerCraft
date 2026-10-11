@@ -107,7 +107,7 @@ pub fn docs(app: &App) -> Element<'_, Message> {
         let cells: Vec<Element<Message>> = match app.skin {
             Skin::QuickBooks => vec![
                 ui::cell(app.d(st(r, "date"))), ui::cell_muted(type_label(app, kind)), ui::cell(st(r, "number")), ui::cell(st(r, "contact_name")),
-                ui::cell_muted(app.d(st(r, "due_date"))), ui::cell_money(i(&r["amount_due"])), ui::cell_money(i(&r["total"])), ui::chip(label, status_color(label)),
+                ui::cell_muted(if kind.ends_with("CREDIT") { String::new() } else { app.d(st(r, "due_date")) }), ui::cell_money(i(&r["amount_due"])), ui::cell_money(i(&r["total"])), ui::chip(label, status_color(label)),
             ],
             Skin::Xero => vec![
                 ui::cell(st(r, "number")), ui::cell_muted(st(r, "reference")), ui::cell(st(r, "contact_name")), ui::cell(app.d(st(r, "date"))),
@@ -173,7 +173,8 @@ pub fn contact(app: &App) -> Element<'_, Message> {
     let rows = txs.iter().map(|r| {
         let kind = st(r, "type");
         let label = vocab::status(app.skin, kind, st(r, "status"), i(&r["overdue"]) == 1);
-        (vec![ui::cell(app.d(st(r, "date"))), ui::cell_muted(type_label(app, kind)), ui::cell(st(r, "number")), ui::cell_muted(app.d(st(r, "due_date"))),
+        let due = if kind.ends_with("CREDIT") { String::new() } else { app.d(st(r, "due_date")) };
+        (vec![ui::cell(app.d(st(r, "date"))), ui::cell_muted(type_label(app, kind)), ui::cell(st(r, "number")), ui::cell_muted(due),
             ui::cell_money(i(&r["amount_due"])), ui::cell_money(i(&r["total"])), ui::chip(label, status_color(label))],
          Some(Message::Nav(Route::Doc { kind: kind.into(), id: r["id"].as_i64() })))
     }).collect();

@@ -54,6 +54,8 @@ pub fn status(skin: Skin, kind: &str, status: &str, overdue: bool) -> &'static s
             ("QUOTE", "INVOICED") => "Closed",
             ("PO", "AUTHORISED") => "Open",
             ("PO", "BILLED") => "Closed",
+            ("ACCRECCREDIT" | "ACCPAYCREDIT", "PAID") => "Closed",
+            ("ACCRECCREDIT" | "ACCPAYCREDIT", "AUTHORISED") => "Unapplied",
             (_, "AUTHORISED") if overdue => "Overdue",
             (_, "AUTHORISED") => "Open",
             (_, "PAID") => "Paid",

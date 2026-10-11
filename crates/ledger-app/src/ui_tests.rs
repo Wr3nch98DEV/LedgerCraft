@@ -125,3 +125,26 @@ fn password_protected_company_shows_sign_in() {
     let _ = &mut app;
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn run_and_submit_payroll() {
+    let (mut app, dir) = demo_app("payroll", Skin::QuickBooks);
+    let _ = app.update(Message::Nav(Route::Payroll));
+    app.data = Some(json!({"employees": app.be.call_now("payroll.employees", json!({})).unwrap(), "runs": app.be.call_now("payroll.payRuns", json!({})).unwrap(),
+        "settings": app.be.call_now("payroll.settings", json!({})).unwrap()}));
+    let msgs = click(&app, "Run payroll");
+    assert!(matches!(msgs.first(), Some(Message::People(crate::people::Msg::RunPayroll))), "{msgs:?}");
+    // What RunPayroll sends:
+    let cal = app.data.as_ref().unwrap()["settings"]["calendars"][0]["id"].as_i64().unwrap();
+    let id = app.be.call_now("payroll.createPayRun", json!({"calendar_id": cal})).unwrap()["id"].as_i64().unwrap();
+    let _ = app.update(Message::Nav(Route::PayRun(id)));
+    app.data = Some(app.be.call_now("payroll.payRun", json!({"id": id})).unwrap());
+    assert!(app.people.bank.is_some(), "a bank account is preselected");
+    let msgs = click(&app, "Submit payroll");
+    assert!(matches!(msgs.first(), Some(Message::People(crate::people::Msg::Submit(x))) if *x == id), "{msgs:?}");
+    app.be.call_now("payroll.post", json!({"id": id, "bank_account_id": app.people.bank.as_ref().unwrap().id})).unwrap();
+    assert_eq!(app.be.call_now("payroll.payRun", json!({"id": id})).unwrap()["status"], "POSTED");
+    let tb = app.be.call_now("reports.run", json!({"name": "trial-balance", "params": {"date": "2099-12-31"}})).unwrap();
+    assert_eq!(tb["balanced"], true);
+    let _ = std::fs::remove_dir_all(dir);
+}

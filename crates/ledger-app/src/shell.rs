@@ -4,7 +4,7 @@ use crate::app::{App, Message, Route};
 use crate::icons::icon;
 use crate::theme::{self, Skin, t};
 use crate::ui::{self, BOLD};
-use crate::{banking, dashboard, doc, forms, lists, payments, reports, settings, setup};
+use crate::{banking, dashboard, doc, forms, lists, payments, people, reports, settings, setup};
 use iced::widget::{Space, button, column, container, mouse_area, opaque, row, scrollable, stack, text, text_input};
 use iced::{Alignment, Element, Fill, Length, Padding};
 
@@ -69,6 +69,10 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::Doc { .. } => doc::view(app),
         Route::ReceivePayment(_) | Route::PayBills | Route::Spend(_) => payments::view(app),
         Route::NewContact(_) | Route::NewProduct | Route::Journal => forms::view(app),
+        Route::Payroll => people::payroll(app),
+        Route::PayRun(_) => people::pay_run(app),
+        Route::Taxes => people::taxes(app),
+        Route::TaxReturn(_) => people::tax_return(app),
         Route::Placeholder(name) => placeholder(app, name),
         Route::Setup => setup::view(app),
         Route::Login => setup::login(app),
@@ -96,6 +100,8 @@ fn qb_section(r: &Route) -> &'static str {
         Route::Doc { kind, .. } => if matches!(kind.as_str(), "ACCREC" | "QUOTE" | "ACCRECCREDIT") { "sales" } else { "expenses" },
         Route::Contact(_) | Route::Contacts => "sales",
         Route::Reports | Route::Report(_) => "reports",
+        Route::Payroll | Route::PayRun(_) => "payroll",
+        Route::Taxes | Route::TaxReturn(_) => "taxes",
         Route::Chart | Route::Journal => "accounting",
         Route::NewContact(true) | Route::NewProduct => "sales",
         Route::NewContact(false) => "expenses",
@@ -133,9 +139,9 @@ fn qb_sidebar(app: &App) -> Element<'_, Message> {
         nav = nav.push(sub("Expenses", Route::Expenses)).push(sub("Bills", Route::Bills)).push(sub("Vendors", Route::Vendors)).push(sub("Purchase orders", Route::PurchaseOrders));
     }
     nav = nav.push(item("projects", "Projects", "projects", Route::Placeholder("Projects"), false));
-    nav = nav.push(item("payroll", "Payroll", "payroll", Route::Placeholder("Payroll"), false));
+    nav = nav.push(item("payroll", "Payroll", "payroll", Route::Payroll, false));
     nav = nav.push(item("reports", "Reports", "reports", Route::Reports, false));
-    nav = nav.push(item("taxes", "Taxes", "taxes", Route::Placeholder("Taxes"), false));
+    nav = nav.push(item("taxes", "Taxes", "taxes", Route::Taxes, false));
     nav = nav.push(item("mileage", "Mileage", "mileage", Route::Placeholder("Mileage"), false));
     nav = nav.push(item("accounting", "Accounting", "accounting", Route::Chart, true));
     if sec == "accounting" {
@@ -223,7 +229,7 @@ fn new_menu(app: &App) -> Element<'_, Message> {
                 ("Credit memo", doc_route("ACCRECCREDIT")), ("Sales receipt", None), ("Refund receipt", None), ("Delayed credit", None), ("Delayed charge", None)]),
             menu_col("Vendors", vec![("Expense", Some(Message::Nav(Route::Spend(None)))), ("Check", None), ("Bill", doc_route("ACCPAY")), ("Pay bills", Some(Message::Nav(Route::PayBills))),
                 ("Purchase order", doc_route("PO")), ("Vendor credit", doc_route("ACCPAYCREDIT")), ("Credit card credit", None), ("Print checks", None)]),
-            menu_col("Employees", vec![("Payroll", Some(Message::Nav(Route::Placeholder("Payroll")))), ("Single time activity", None), ("Weekly timesheet", None)]),
+            menu_col("Employees", vec![("Payroll", Some(Message::Nav(Route::Payroll))), ("Single time activity", None), ("Weekly timesheet", None)]),
             menu_col("Other", vec![("Bank deposit", None), ("Transfer", None), ("Journal entry", Some(Message::Nav(Route::Journal))), ("Statement", None), ("Inventory qty adjustment", None), ("Pay down credit card", None)]),
         ].spacing(18).into(),
         Skin::Xero => column![
@@ -259,7 +265,8 @@ fn xero_section(r: &Route) -> &'static str {
         | Route::ReceivePayment(_) | Route::PayBills | Route::Doc { .. } => "business",
         Route::Banking(_) | Route::Reports | Route::Report(_) | Route::Chart | Route::Spend(_) | Route::Journal => "accounting",
         Route::NewContact(_) => "contacts", Route::NewProduct => "business",
-        Route::Placeholder("Payroll") => "payroll",
+        Route::Payroll | Route::PayRun(_) => "payroll",
+        Route::Taxes | Route::TaxReturn(_) => "accounting",
         Route::Contacts | Route::Customers | Route::Vendors | Route::Contact(_) => "contacts",
         _ => "",
     }
@@ -272,7 +279,7 @@ fn xero_menu(_app: &App, m: &'static str) -> Element<'static, Message> {
         "business" => vec![("Invoices", Some(Message::Nav(Route::Invoices))), ("Quotes", Some(Message::Nav(Route::Quotes))), ("Credit notes", Some(Message::Nav(Route::CreditNotes))),
             ("Bills to pay", Some(Message::Nav(Route::Bills))), ("Purchase orders", Some(Message::Nav(Route::PurchaseOrders))), ("Products and services", Some(Message::Nav(Route::Products)))],
         "accounting" => vec![("Bank accounts", Some(Message::Nav(Route::Banking(None)))), ("Reports", Some(Message::Nav(Route::Reports))), ("Chart of accounts", Some(Message::Nav(Route::Chart))),
-            ("Manual journal", Some(Message::Nav(Route::Journal))), ("Fixed assets", None)],
+            ("Manual journal", Some(Message::Nav(Route::Journal))), ("Tax returns", Some(Message::Nav(Route::Taxes))), ("Fixed assets", None)],
         _ => vec![("All contacts", Some(Message::Nav(Route::Contacts))), ("Customers", Some(Message::Nav(Route::Customers))), ("Suppliers", Some(Message::Nav(Route::Vendors)))],
     };
     container(menu_col(match m { "business" => "Business", "accounting" => "Accounting", _ => "Contacts" }, items)).padding(14).style(theme::menu).into()
@@ -296,7 +303,7 @@ fn xero_topbar(app: &App) -> Element<'_, Message> {
         tab("Dashboard", "dashboard", Message::Nav(Route::Dashboard), false),
         tab("Business", "business", Message::OpenMenu(Some("business")), true),
         tab("Accounting", "accounting", Message::OpenMenu(Some("accounting")), true),
-        tab("Payroll", "payroll", Message::Nav(Route::Placeholder("Payroll")), false),
+        tab("Payroll", "payroll", Message::Nav(Route::Payroll), false),
         tab("Contacts", "contacts", Message::OpenMenu(Some("contacts")), true),
         ui::hspace(),
         button(row![icon("plus", 15.0, k.accent_ink), text("New").size(14).font(BOLD)].spacing(6).align_y(Alignment::Center)).style(theme::primary).padding([6, 12]).on_press(Message::ToggleNew),

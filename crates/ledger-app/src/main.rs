@@ -11,6 +11,7 @@ mod forms;
 mod icons;
 mod lists;
 mod payments;
+mod people;
 mod reports;
 mod settings;
 mod setup;

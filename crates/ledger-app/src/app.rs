@@ -3,7 +3,7 @@
 use crate::backend::{Backend, Reply};
 use crate::theme::{self, Skin};
 use crate::ui::DateStyle;
-use crate::{banking, doc, forms, payments, reports, setup, shell};
+use crate::{banking, doc, forms, payments, people, reports, setup, shell};
 use iced::{Element, Subscription, Task, keyboard};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -36,6 +36,10 @@ pub enum Route {
     PayBills,
     Spend(Option<i64>),
     NewContact(bool),
+    Payroll,
+    PayRun(i64),
+    Taxes,
+    TaxReturn(i64),
     NewProduct,
     Journal,
     Placeholder(&'static str),
@@ -111,6 +115,7 @@ pub enum Message {
     Report(reports::Msg),
     Setup(setup::Msg),
     Form(forms::Msg),
+    People(people::Msg),
     /// New invoice/bill for a given contact.
     NewDocFor(String, i64),
     Noop,
@@ -139,6 +144,7 @@ pub struct App {
     pub doc: Option<doc::Editor>,
     pub pay: Option<payments::State>,
     pub form: Option<forms::State>,
+    pub people: people::State,
     pub prefill_contact: Option<i64>,
     pub bank: banking::State,
     pub report: reports::State,
@@ -157,7 +163,7 @@ pub fn parse_route(s: &str) -> Option<Route> {
         "customers" => Route::Customers, "products" => Route::Products, "expenses" => Route::Expenses, "bills" => Route::Bills, "vendors" => Route::Vendors,
         "pos" => Route::PurchaseOrders, "contacts" => Route::Contacts, "contact" => Route::Contact(id(1)?), "banking" => Route::Banking(id(1)), "chart" => Route::Chart,
         "reports" => Route::Reports, "report" => Route::Report(parts.get(1)?.to_string()), "settings" => Route::Settings, "setup" => Route::Setup,
-        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
+        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
         _ => return None,
     })
 }
@@ -190,6 +196,7 @@ impl App {
             doc: None,
             pay: None,
             form: None,
+            people: people::State::default(),
             prefill_contact: None,
             bank: banking::State::default(),
             report: reports::State::default(),
@@ -295,6 +302,7 @@ impl App {
             Route::PayBills => payments::open_pay_bills(self),
             Route::Spend(acc) => payments::open_spend(self, acc),
             Route::NewContact(_) | Route::NewProduct | Route::Journal => forms::open(self),
+            Route::Payroll | Route::PayRun(_) | Route::Taxes | Route::TaxReturn(_) => people::load(self),
             Route::Setup => setup::load(self),
             Route::Settings | Route::Placeholder(_) | Route::Login => Task::none(),
         }
@@ -377,6 +385,7 @@ impl App {
             Message::Report(m) => reports::update(self, m),
             Message::Setup(m) => setup::update(self, m),
             Message::Form(m) => forms::update(self, m),
+            Message::People(m) => people::update(self, m),
             Message::NewDocFor(kind, cid) => { self.prefill_contact = Some(cid); self.go(Route::Doc { kind, id: None }) }
         }
     }
