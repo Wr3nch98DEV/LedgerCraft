@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { rpc } from '../lib/api';
+  import { rpc, download } from '../lib/api';
   import { dateTime, date } from '../lib/format';
   import { navigate } from '../lib/router.svelte';
   import { session, can, confirm, toast, toastError, loadSession } from '../lib/stores.svelte';
@@ -79,6 +79,8 @@
   // outbox
   let outbox = $state<any[]>([]);
   $effect(() => { if (s === 'outbox') rpc('outbox.list').then((o) => (outbox = o)); });
+  let autoB = $state<any>(null);
+  $effect(() => { if (s === 'backup') rpc('backups.list').then((x) => (autoB = x)).catch(() => {}); });
 
   // API
   let tokens = $state<any[]>([]);
@@ -280,6 +282,9 @@
         <p class="text-muted">Your organisation is stored in a single file: <code class="rounded bg-bg2 px-1">{session.data?.org?.file}</code> in your LedgerCraft data folder (%APPDATA%\LedgerCraft\orgs).</p>
         <div class="flex flex-wrap gap-2"><a class="btn btn-primary" href="/download/backup" download><Icon name="download" />Download backup (.lcdb)</a><a class="btn" href="/download/archive" download><Icon name="download" />Full export (JSON)</a></div>
         <p class="text-[13px] text-muted">To restore, copy a backup file into the orgs folder and choose it from the organisation menu.</p>
+        <h3 class="pt-2 font-semibold">Automatic backups</h3>
+        <p class="text-[13px] text-muted">A copy is saved once a day and the last {autoB?.keep ?? 14} are kept{autoB?.folder ? ` in ${autoB.folder}` : ''}.</p>
+        <table class="tbl text-[13px]"><tbody>{#each autoB?.backups ?? [] as bk}<tr><td>{bk.name}</td><td class="n">{(bk.size / 1048576).toFixed(1)} MB</td><td class="text-right"><button class="btn btn-sm" onclick={() => download(`/download/autobackup?name=${encodeURIComponent(bk.name)}`).catch(toastError)}><Icon name="download" size={14} />Download</button></td></tr>{:else}<tr><td class="text-muted">No automatic backups yet — the first one is made a few seconds after LedgerCraft starts.</td></tr>{/each}</tbody></table>
       </section>
     {:else if s === 'profile'}
       <section class="card space-y-3 p-5">

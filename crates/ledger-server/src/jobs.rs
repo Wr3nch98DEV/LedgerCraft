@@ -31,6 +31,7 @@ pub fn run_once(st: &AppState) -> Value {
             }
         }
     }
+    out["backup"] = json!(auto_backup(st));
     out["emails"] = json!(send_queued_email(st));
     out["webhooks"] = json!(deliver_webhooks(st));
     out
@@ -72,6 +73,49 @@ fn send_one(cfg: &Smtp, to: &str, subject: &str, body: &str, attachment: &Attach
     let mut builder = builder.port(cfg.port).timeout(Some(Duration::from_secs(20)));
     if !cfg.user.is_empty() { builder = builder.credentials(Credentials::new(cfg.user.clone(), cfg.pass.clone())); }
     builder.build().send(&msg).map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// How many daily automatic backups to keep per organisation.
+const KEEP_BACKUPS: usize = 14;
+
+pub fn backup_dir(st: &AppState, org_path: &std::path::Path) -> std::path::PathBuf {
+    let stem = org_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "organisation".into());
+    st.data_dir.join("backups").join(stem)
+}
+
+/// Once a day, snapshot the open organisation into `<data>/backups/<org>/<org>-YYYY-MM-DD.lcdb`
+/// (a consistent copy via VACUUM INTO) and keep the newest KEEP_BACKUPS. Returns the file written, if any.
+pub fn auto_backup(st: &AppState) -> Option<String> {
+    let guard = st.org.lock().unwrap();
+    let org = guard.as_ref()?;
+    let dir = backup_dir(st, &org.path);
+    std::fs::create_dir_all(&dir).ok()?;
+    let stem = dir.file_name()?.to_string_lossy().to_string();
+    let target = dir.join(format!("{stem}-{}.lcdb", util::today()));
+    if target.exists() { return None; }
+    org.ledger.conn.execute("VACUUM INTO ?1", [target.display().to_string()]).ok()?;
+    drop(guard);
+    let mut files: Vec<_> = std::fs::read_dir(&dir).ok()?.filter_map(|e| e.ok()).map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "lcdb")).collect();
+    files.sort();
+    while files.len() > KEEP_BACKUPS { let _ = std::fs::remove_file(files.remove(0)); }
+    Some(target.display().to_string())
+}
+
+/// Automatic backups for the open organisation, newest first.
+pub fn list_backups(st: &AppState) -> Value {
+    let guard = st.org.lock().unwrap();
+    let Some(org) = guard.as_ref() else { return json!({"folder": "", "backups": []}) };
+    let dir = backup_dir(st, &org.path);
+    drop(guard);
+    let mut rows: Vec<Value> = std::fs::read_dir(&dir).map(|rd| rd.filter_map(|e| e.ok()).filter_map(|e| {
+        let p = e.path();
+        if !p.extension().is_some_and(|x| x == "lcdb") { return None; }
+        let size = e.metadata().map(|m| m.len()).unwrap_or(0);
+        Some(json!({"name": p.file_name()?.to_string_lossy(), "size": size}))
+    }).collect()).unwrap_or_default();
+    rows.sort_by(|a, b| b["name"].as_str().cmp(&a["name"].as_str()));
+    json!({"folder": dir.display().to_string(), "keep": KEEP_BACKUPS, "backups": rows})
 }
 
 /// Send QUEUED outbox messages. Returns number sent.

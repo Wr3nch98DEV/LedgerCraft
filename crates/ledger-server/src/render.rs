@@ -234,6 +234,13 @@ pub fn download(st: &AppState, kind: &str, q: &HashMap<String, String>) -> Resul
     let org = guard.as_ref().ok_or("no organisation open")?;
     let l = &org.ledger;
     match kind {
+        "autobackup" => {
+            // Only plain file names from this organisation's backup folder.
+            let name = q.get("name").ok_or("missing name")?;
+            if !name.ends_with(".lcdb") || name.contains(['/', '\\', ':']) || name.contains("..") { return Err("invalid backup name".into()); }
+            let path = crate::jobs::backup_dir(st, &org.path).join(name);
+            Ok(("application/octet-stream".into(), name.clone(), std::fs::read(&path).map_err(|_| "backup not found".to_string())?))
+        }
         "eml" => {
             let id: i64 = q.get("id").and_then(|x| x.parse().ok()).ok_or("missing id")?;
             Ok(("message/rfc822".into(), format!("message-{id}.eml"), ledger_core::email::eml(l, id).map_err(|e| e.to_string())?.into_bytes()))

@@ -104,6 +104,11 @@ pub fn handle(st: &AppState, token: Option<&str>, method: &str, p: Value) -> R {
     l.user_id = Some(session.user_id);
     l.role = session.role.clone();
     // Jobs that do network I/O run without holding the organisation lock.
+    if method == "backups.list" {
+        if !session.perms.iter().any(|x| x == "settings:read") { return Err(ApiError::Forbidden("you don't have permission".into())); }
+        drop(guard);
+        return Ok(crate::jobs::list_backups(st));
+    }
     if matches!(method, "rates.fetch" | "email.test" | "jobs.run") {
         if !session.perms.iter().any(|x| x == "settings:write" || x == "accounting:write") { return Err(ApiError::Forbidden("you don't have permission".into())); }
         drop(guard);
