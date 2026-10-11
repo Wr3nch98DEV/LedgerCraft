@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/ledger-core", "crates/ledger-server"]
+members = ["crates/ledger-core", "crates/ledger-server", "crates/ledger-app"]
 
 [profile.release]
 opt-level = "s"

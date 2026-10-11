@@ -1,10 +1,7 @@
 //! LedgerCraft local server: serves the UI and a JSON API over 127.0.0.1 only.
 //! Usage: ledgercraft [--port N] [--data-dir PATH] [--open] [--app]
 
-mod jobs;
-mod rpc;
-mod render;
-mod state;
+use ledger_server::{jobs, render, rpc, state};
 
 use axum::{
     body::Body,
