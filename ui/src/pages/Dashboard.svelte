@@ -6,18 +6,59 @@
   import Bars from '../components/Bars.svelte';
   import Icon from '../components/Icon.svelte';
   import PageHeader from '../components/PageHeader.svelte';
+  import Modal from '../components/Modal.svelte';
 
   let d = $state<any>(null);
   rpc('dashboard').then((r) => (d = r)).catch(toastError);
   const cur = $derived(d?.base_currency ?? '');
   const greeting = $derived.by(() => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'; });
   const first = $derived((session.data?.user?.name ?? '').split(' ')[0]);
+
+  // "Edit homepage": show/hide and reorder widgets. A per-browser convenience, so localStorage is fine.
+  const WIDGETS = [
+    { id: 'banks', label: 'Bank accounts' }, { id: 'sales', label: 'Invoices owed to you' }, { id: 'purchases', label: 'Bills you need to pay' },
+    { id: 'cash', label: 'Total cash in and out' }, { id: 'profit', label: 'Profit this month' }, { id: 'watchlist', label: 'Account watchlist' },
+  ];
+  const LAYOUT_KEY = 'lc.dashboard.layout';
+  function loadLayout(): { order: string[]; hidden: string[] } {
+    const ids = WIDGETS.map((w) => w.id);
+    try {
+      const v = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? 'null');
+      if (v && Array.isArray(v.order)) {
+        const order = v.order.filter((x: string) => ids.includes(x));
+        return { order: [...order, ...ids.filter((x) => !order.includes(x))], hidden: (v.hidden ?? []).filter((x: string) => ids.includes(x)) };
+      }
+    } catch {}
+    return { order: ids, hidden: [] };
+  }
+  let layout = $state(loadLayout());
+  let editing = $state(false);
+  function persist() { try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch {} }
+  function move(i: number, by: number) { const o = [...layout.order]; const j = i + by; if (j < 0 || j >= o.length) return; [o[i], o[j]] = [o[j], o[i]]; layout.order = o; persist(); }
+  function toggle(id: string) { layout.hidden = layout.hidden.includes(id) ? layout.hidden.filter((x) => x !== id) : [...layout.hidden, id]; persist(); }
+  function reset() { layout = { order: WIDGETS.map((w) => w.id), hidden: [] }; persist(); }
+  const labelOf = (id: string) => WIDGETS.find((w) => w.id === id)?.label ?? id;
 </script>
 
 <PageHeader title={`${greeting}${first && first !== 'Owner' ? ', ' + first : ''}`}>
   <a class="btn" href="/cashflow"><Icon name="chart" />Cash flow forecast</a>
   <a class="btn" href="/snapshot"><Icon name="sparkle" />Business snapshot</a>
+  <button class="btn" onclick={() => (editing = true)}><Icon name="edit" />Edit homepage</button>
 </PageHeader>
+
+<Modal bind:open={editing} title="Edit homepage" width={460}>
+  <p class="mb-3 text-[13px] text-muted">Choose which widgets to show and the order they appear in.</p>
+  <ul class="space-y-1.5">
+    {#each layout.order as id, i}
+      <li class="flex items-center gap-2 rounded-lg border border-line px-3 py-2">
+        <label class="flex flex-1 items-center gap-2"><input type="checkbox" class="accent-[var(--accent)]" checked={!layout.hidden.includes(id)} onchange={() => toggle(id)} />{labelOf(id)}</label>
+        <button class="btn btn-ghost btn-sm" aria-label="Move {labelOf(id)} up" disabled={i === 0} onclick={() => move(i, -1)}>↑</button>
+        <button class="btn btn-ghost btn-sm" aria-label="Move {labelOf(id)} down" disabled={i === layout.order.length - 1} onclick={() => move(i, 1)}>↓</button>
+      </li>
+    {/each}
+  </ul>
+  {#snippet footer()}<button class="btn" onclick={reset}>Reset to default</button><button class="btn btn-primary" onclick={() => (editing = false)}>Done</button>{/snippet}
+</Modal>
 
 {#if !d}
   <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{#each Array(6) as _}<div class="card h-56 animate-pulse"></div>{/each}</div>
@@ -32,8 +73,7 @@
     </div>
   {/if}
 
-  <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-    <!-- Bank accounts -->
+  {#snippet w_banks()}
     {#each d.banks.filter((b: any) => b.status === 'ACTIVE') as b}
       <section class="card flex flex-col p-5">
         <div class="flex items-start justify-between">
@@ -58,8 +98,8 @@
         </div>
       </section>
     {/each}
-
-    <!-- Invoices owed to you -->
+  {/snippet}
+  {#snippet w_sales()}
     <section class="card p-5">
       <div class="mb-3 flex items-center justify-between"><a href="/sales/invoices" class="text-[15px] font-semibold hover:text-accent">Invoices owed to you</a><a class="btn btn-sm" href="/sales/invoices/new"><Icon name="plus" size={14} />New</a></div>
       <div class="mb-3 grid grid-cols-3 gap-2 text-[13px]">
@@ -69,8 +109,8 @@
       </div>
       <Bars data={d.sales_buckets} series={[{ key: 'amount', label: 'Due', color: 'var(--accent)' }]} height={110} />
     </section>
-
-    <!-- Bills to pay -->
+  {/snippet}
+  {#snippet w_purchases()}
     <section class="card p-5">
       <div class="mb-3 flex items-center justify-between"><a href="/purchases/bills" class="text-[15px] font-semibold hover:text-accent">Bills you need to pay</a><a class="btn btn-sm" href="/purchases/bills/new"><Icon name="plus" size={14} />New</a></div>
       <div class="mb-3 grid grid-cols-3 gap-2 text-[13px]">
@@ -80,15 +120,15 @@
       </div>
       <Bars data={d.purchase_buckets} series={[{ key: 'amount', label: 'Due', color: 'var(--info)' }]} height={110} />
     </section>
-
-    <!-- Cash in and out -->
+  {/snippet}
+  {#snippet w_cash()}
     <section class="card p-5">
       <div class="mb-1 flex items-center justify-between"><span class="text-[15px] font-semibold">Total cash in and out</span><span class="text-[12px] text-muted">Last 6 months</span></div>
       <div class="mb-3 text-[13px] text-muted">Total cash <span class="num font-semibold text-text">{cur} {money(d.total_cash)}</span></div>
       <Bars data={d.cash_flow} series={[{ key: 'in', label: 'Cash in', color: 'var(--ok)' }, { key: 'out', label: 'Cash out', color: 'var(--bad)' }]} height={130} />
     </section>
-
-    <!-- Net profit this month -->
+  {/snippet}
+  {#snippet w_profit()}
     <section class="card p-5">
       <div class="mb-4 flex items-center justify-between"><a href="/reports/profit-and-loss" class="text-[15px] font-semibold hover:text-accent">Profit this month</a><span class="text-[12px] text-muted">Accrual</span></div>
       <div class="space-y-3">
@@ -98,8 +138,8 @@
         <div class="flex justify-between border-t border-line pt-3"><span class="font-semibold">Net profit</span><span class="num text-lg font-semibold {d.pl_month.net >= 0 ? 'text-ok' : 'text-bad'}">{money(d.pl_month.net)}</span></div>
       </div>
     </section>
-
-    <!-- Watchlist -->
+  {/snippet}
+  {#snippet w_watchlist()}
     <section class="card p-5">
       <div class="mb-3 flex items-center justify-between"><span class="text-[15px] font-semibold">Account watchlist</span><a class="text-[12px] text-muted hover:text-accent" href="/accounting/chart">Edit</a></div>
       {#if d.watchlist.length}
@@ -109,5 +149,12 @@
             <tr class="clickable" onclick={() => navigate(`/reports/account-transactions?account_id=${w.id}`)}><td>{w.name}</td><td class="n">{money(s * w.this_month)}</td><td class="n">{money(s * w.ytd)}</td></tr>{/each}</tbody></table>
       {:else}<div class="text-muted">Tick "Show on dashboard watchlist" on any account to track it here.</div>{/if}
     </section>
+  {/snippet}
+
+  <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    {#each layout.order.filter((x) => !layout.hidden.includes(x)) as id}
+      {#if id === 'banks'}{@render w_banks()}{:else if id === 'sales'}{@render w_sales()}{:else if id === 'purchases'}{@render w_purchases()}
+      {:else if id === 'cash'}{@render w_cash()}{:else if id === 'profit'}{@render w_profit()}{:else if id === 'watchlist'}{@render w_watchlist()}{/if}
+    {/each}
   </div>
 {/if}
