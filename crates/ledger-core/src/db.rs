@@ -7,6 +7,7 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
     ("v2_modules", include_str!("schema_v2.sql")),
     ("v3_payroll_projects", include_str!("schema_v3.sql")),
     ("v4_performance", include_str!("schema_v4.sql")),
+    ("v5_quickbooks_workflows", include_str!("schema_v5.sql")),
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

@@ -53,6 +53,7 @@ pub fn load_expenses(app: &mut App) -> iced::Task<Message> {
 fn type_label(app: &App, kind: &str) -> &'static str {
     match kind {
         "EXPENSE" => if app.skin == Skin::QuickBooks { "Expense" } else { "Spend money" },
+        "SALESRECEIPT_ROW" => "Sales receipt",
         "BILLPAYMENT" => "Bill payment", "ACCREC" => app.term("invoice"), "QUOTE" => app.term("quote"), "ACCRECCREDIT" => app.term("credit_note"), "ACCPAY" => app.term("bill"),
         "ACCPAYCREDIT" => app.term("supplier_credit"), "PO" => app.term("po"), _ => "Transaction" }
 }
@@ -131,11 +132,12 @@ pub fn docs(app: &App) -> Element<'_, Message> {
         Skin::Xero => vec![col("Number", 10), col("Ref", 10), col("To", 22), col("Date", 11), col("Due date", 11), coln("Paid", 11), coln("Due", 11), col("Status", 12)],
     };
     let rows = rows_v.iter().map(|r| {
-        let kind = st(r, "type");
+        let kind = if r["subtype"] == "RECEIPT" { "SALESRECEIPT_ROW" } else { st(r, "type") };
         let label = vocab::status(app.skin, kind, st(r, "status"), i(&r["overdue"]) == 1);
         let msg = match kind {
             "EXPENSE" => None,
             "BILLPAYMENT" => r["document_id"].as_i64().map(|id| Message::Nav(Route::Doc { kind: "ACCPAY".into(), id: Some(id) })),
+            "SALESRECEIPT_ROW" => Some(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: r["id"].as_i64() })),
             _ => Some(Message::Nav(Route::Doc { kind: kind.into(), id: r["id"].as_i64() })),
         };
         let cells: Vec<Element<Message>> = match app.skin {

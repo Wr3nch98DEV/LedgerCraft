@@ -470,7 +470,7 @@ impl Ledger {
         let k1 = kinds[0]; let k2 = *kinds.get(1).unwrap_or(&kinds[0]);
         let like = format!("%{}%", q.trim());
         let rows = util::query_json(&self.conn,
-            "SELECT d.id, d.type, d.number, d.reference, d.date, d.due_date, d.expiry_date, d.status, d.currency, d.subtotal, d.total_tax, d.total, d.amount_paid, d.amount_credited,
+            "SELECT d.id, d.type, d.subtype, d.number, d.reference, d.date, d.due_date, d.expiry_date, d.status, d.currency, d.subtotal, d.total_tax, d.total, d.amount_paid, d.amount_credited,
                d.total - d.amount_paid - d.amount_credited AS amount_due, d.sent, d.title, d.contact_id, c.name AS contact_name, d.fully_paid_on, d.planned_payment_date, d.expected_payment_date,
                (d.status = 'AUTHORISED' AND d.due_date < date('now','localtime')) AS overdue,
                (SELECT MAX(p.date) FROM payments p WHERE p.document_id = d.id AND p.status <> 'DELETED') AS paid_date

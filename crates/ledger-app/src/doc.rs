@@ -100,11 +100,11 @@ fn div_round(n: i128, d: i128) -> i64 { let q = (n.abs() + d.abs() / 2) / d.abs(
 /// Line amount in cents from e4 quantity × e4 price.
 fn line_cents(q: i64, p: i64) -> i64 { div_round(q as i128 * p as i128, 1_000_000) }
 
-fn sales(kind: &str) -> bool { matches!(kind, "ACCREC" | "QUOTE" | "ACCRECCREDIT") }
+fn sales(kind: &str) -> bool { matches!(kind, "ACCREC" | "QUOTE" | "ACCRECCREDIT" | "SALESRECEIPT") }
 fn ledger_doc(kind: &str) -> bool { matches!(kind, "ACCREC" | "ACCPAY" | "ACCRECCREDIT" | "ACCPAYCREDIT") }
 
 pub fn title_for(app: &App, kind: &str) -> &'static str {
-    match kind { "ACCREC" => app.term("invoice"), "QUOTE" => app.term("quote"), "ACCRECCREDIT" => app.term("credit_note"), "ACCPAY" => app.term("bill"), "ACCPAYCREDIT" => app.term("supplier_credit"), "PO" => app.term("po"), _ => "Document" }
+    match kind { "SALESRECEIPT" => "Sales receipt", "ACCREC" => app.term("invoice"), "QUOTE" => app.term("quote"), "ACCRECCREDIT" => app.term("credit_note"), "ACCPAY" => app.term("bill"), "ACCPAYCREDIT" => app.term("supplier_credit"), "PO" => app.term("po"), _ => "Document" }
 }
 
 fn fmt_e4(v: i64) -> String {
@@ -172,7 +172,7 @@ impl Editor {
         (sub, tax, sub + tax)
     }
 
-    fn payload(&self, app: &App, status: &str) -> Result<Value, String> {
+    pub fn payload(&self, app: &App, status: &str) -> Result<Value, String> {
         let style = app.date_style();
         let date = ui::to_iso(&self.date, style).ok_or_else(|| format!("Enter the date as {}", hint(style)))?;
         let due = if self.due.trim().is_empty() { None } else { Some(ui::to_iso(&self.due, style).ok_or_else(|| format!("Enter the due date as {}", hint(style)))?) };
@@ -187,7 +187,8 @@ impl Editor {
                 "account_id": l.account.as_ref().map(|a| a.id), "tax_rate_id": l.tax.as_ref().map(|t| t.id)}));
         }
         if lines.is_empty() { return Err("Add at least one line".into()); }
-        let mut doc = json!({"type": self.kind, "date": date, "due_date": due, "reference": self.reference, "line_amount_type": self.lat, "terms": self.terms, "lines": lines, "status": status});
+        let kind = if self.kind == "SALESRECEIPT" { "ACCREC" } else { self.kind.as_str() };
+        let mut doc = json!({"type": kind, "date": date, "due_date": due, "reference": self.reference, "line_amount_type": self.lat, "terms": self.terms, "lines": lines, "status": status});
         if self.kind == "QUOTE" { doc["expiry_date"] = doc["due_date"].take(); }
         if self.kind == "PO" { doc["delivery_date"] = doc["due_date"].take(); }
         if !self.number.trim().is_empty() { doc["number"] = json!(self.number.trim()); }
@@ -342,7 +343,8 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                     let label = title_for(app, &e.kind);
                     let t1 = app.toast(format!("{label} saved"), false);
                     let t2 = app.load_lookups();
-                    let next = if new_after { Route::Doc { kind: e.kind.clone(), id: None } } else { Route::Doc { kind: e.kind.clone(), id } };
+                    let saved_kind = if e.kind == "SALESRECEIPT" { "ACCREC".to_string() } else { e.kind.clone() };
+                    let next = if new_after { Route::Doc { kind: e.kind.clone(), id: None } } else { Route::Doc { kind: saved_kind, id } };
                     app.doc = Some(e);
                     let t3 = app.go(next);
                     return Task::batch([t1, t2, t3]);
@@ -428,6 +430,13 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
 fn save(app: &mut App, e: &mut Editor, approve: bool, new_after: bool) -> Task<Message> {
     if e.busy { return Task::none(); }
     let status = if approve { "AUTHORISED" } else { "DRAFT" };
+    if e.kind == "SALESRECEIPT" {
+        let Some(acc) = e.pay_account.clone() else { e.error = Some("Choose the account the money went into".into()); return app.toast("Choose the account the money went into", true) };
+        return match e.payload(app, "AUTHORISED") {
+            Ok(mut p) => { p["account_id"] = json!(acc.id); e.busy = true; e.error = None; app.be.call("docs.salesReceipt", p, move |r| Message::Doc(Msg::Saved(r, new_after))) }
+            Err(err) => { e.error = Some(err.clone()); app.toast(err, true) }
+        };
+    }
     match e.payload(app, status) {
         Ok(p) => { e.busy = true; e.error = None; app.be.call("docs.save", p, move |r| Message::Doc(Msg::Saved(r, new_after))) }
         Err(err) => { e.error = Some(err.clone()); app.toast(err, true) }
@@ -449,7 +458,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let status_label = if status.is_empty() { "New" } else { vocab::status(app.skin, &e.kind, status, overdue) };
     let (sub, tax, total) = match (&e.doc, editable) { (Some(d), false) => (d["subtotal"].as_i64().unwrap_or(0), d["total_tax"].as_i64().unwrap_or(0), d["total"].as_i64().unwrap_or(0)), _ => e.totals(app) };
     let due_amt = e.doc.as_ref().map(|d| d["amount_due"].as_i64().unwrap_or(0)).unwrap_or(total);
-    let name = title_for(app, &e.kind);
+    let is_receipt = e.kind == "SALESRECEIPT" || e.doc.as_ref().map(|d| d["subtype"] == "RECEIPT").unwrap_or(false);
+    let name = if is_receipt { "Sales receipt" } else { title_for(app, &e.kind) };
     let title = if e.number.is_empty() { format!("New {}", name.to_lowercase()) } else { format!("{name} {}", e.number) };
     let date_hint = hint(app.date_style());
 
@@ -462,13 +472,17 @@ pub fn view(app: &App) -> Element<'_, Message> {
         column![ui::label(contact_label), ui::link(e.contact.as_ref().map(|c| c.label.clone()).unwrap_or_default(), e.contact.as_ref().map(|c| Message::Nav(Route::Contact(c.id))).unwrap_or(Message::Noop))].spacing(8).width(Fill).into()
     };
     let date_label = match e.kind.as_str() { "ACCREC" => "Invoice date", "QUOTE" => if app.skin == Skin::QuickBooks { "Estimate date" } else { "Date" }, _ => "Date" };
-    let due_label = match e.kind.as_str() { "QUOTE" => "Expiration date", "PO" => "Delivery date", "ACCRECCREDIT" | "ACCPAYCREDIT" => "", _ => "Due date" };
+    let due_label = match e.kind.as_str() { "QUOTE" => "Expiration date", "PO" => "Delivery date", "ACCRECCREDIT" | "ACCPAYCREDIT" | "SALESRECEIPT" => "", _ if is_receipt => "", _ => "Due date" };
+    let date_label = if is_receipt { "Sales receipt date" } else { date_label };
     let field = |lbl: &str, ph: &str, val: &str, f: fn(String) -> Msg| -> Element<'_, Message> {
         if editable { ui::field_ph(lbl, ph, val, move |s| Message::Doc(f(s))) } else { column![ui::label(lbl.to_string()), ui::body(val.to_string())].spacing(8).width(Fill).into() }
     };
     let mut fields = row![contact_field].spacing(14);
     fields = fields.push(field(date_label, date_hint, &e.date, Msg::Date));
     if !due_label.is_empty() { fields = fields.push(field(due_label, date_hint, &e.due, Msg::Due)); }
+    if e.kind == "SALESRECEIPT" && editable {
+        fields = fields.push(column![ui::label("Deposit to"), pick_list(app.lk.bank_opts(), e.pay_account.clone(), |a| Message::Doc(Msg::PayAccount(a))).padding([7, 10]).text_size(14).style(theme::pick).width(Fill)].spacing(5).width(Fill));
+    }
     let mut fields2 = row![].spacing(14);
     fields2 = fields2.push(field(if app.skin == Skin::QuickBooks { if sales(&e.kind) { "Invoice no." } else { "Bill no." } } else { "Number" }, "Auto", &e.number, Msg::Number));
     fields2 = fields2.push(field(if app.skin == Skin::QuickBooks { "Ref no. / PO" } else { "Reference" }, "", &e.reference, Msg::Reference));

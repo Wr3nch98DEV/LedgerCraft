@@ -233,3 +233,30 @@ fn transfer_and_save_and_send() {
     assert!(matches!(msgs.first(), Some(Message::Doc(crate::doc::Msg::SaveAndSend))), "{msgs:?}");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn sales_receipt_from_new_menu() {
+    let (mut app, dir) = demo_app("receipt", Skin::QuickBooks);
+    let _ = app.update(Message::ToggleNew);
+    let msgs = click(&app, "Sales receipt");
+    let Some(Message::Nav(r)) = msgs.into_iter().next() else { panic!("Sales receipt is not enabled in + New") };
+    let _ = app.update(Message::Nav(r));
+    {
+        let e = app.doc.as_mut().unwrap();
+        assert_eq!(e.kind, "SALESRECEIPT");
+        assert!(e.pay_account.is_some(), "a deposit account is preselected");
+        e.contact_text = "Walk-in customer".into();
+        e.lines[0].description = "Logo tweak".into();
+        e.lines[0].price = "200".into();
+    }
+    let msgs = click(&app, "Save and close");
+    assert!(matches!(msgs.first(), Some(Message::Doc(crate::doc::Msg::Save(true)))), "{msgs:?}");
+    // What saving sends:
+    let e = app.doc.as_ref().unwrap();
+    let mut p = e.payload(&app, "AUTHORISED").unwrap();
+    p["account_id"] = json!(e.pay_account.as_ref().unwrap().id);
+    let id = app.be.call_now("docs.salesReceipt", p).unwrap()["id"].as_i64().unwrap();
+    let d = app.be.call_now("docs.get", json!({"id": id})).unwrap();
+    assert_eq!((d["status"].as_str(), d["subtype"].as_str(), d["amount_due"].as_i64()), (Some("PAID"), Some("RECEIPT"), Some(0)));
+    let _ = std::fs::remove_dir_all(dir);
+}

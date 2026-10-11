@@ -317,6 +317,28 @@ fn batch_payment_reconciles_as_one_line() {
 }
 
 #[test]
+fn sales_receipt_is_a_paid_sale() {
+    let l = org();
+    let bank = acct(&l, "090");
+    let sales = acct(&l, "200");
+    let input = DocInput { kind: "ACCREC".into(), contact_name: Some("Walk-in".into()), date: "2026-07-03".into(), line_amount_type: Some("EXCLUSIVE".into()),
+        lines: vec![line(sales, Some(tax(&l, "GST on Income")), "2", "50")], ..Default::default() };
+    let id = l.save_sales_receipt(&input, bank).unwrap();
+    let d = l.get_document(id).unwrap();
+    assert_eq!(d["status"], "PAID");
+    assert_eq!(d["subtype"], "RECEIPT");
+    assert_eq!(d["amount_due"], 0);
+    assert_eq!(bal(&l, bank), 11000);
+    assert_eq!(bal(&l, sales), -10000);
+    assert_eq!(bal(&l, l.sys_account("AR").unwrap()), 0, "nothing left owing");
+    let list = l.list_documents("ACCREC", "all", "", None, 10, 0).unwrap();
+    assert_eq!(list["rows"][0]["subtype"], "RECEIPT");
+    // A bill can't be a sales receipt.
+    assert!(l.save_sales_receipt(&DocInput { kind: "ACCPAY".into(), ..input.clone() }, bank).is_err());
+    assert_invariants(&l);
+}
+
+#[test]
 fn reports_add_up() {
     let l = org();
     let sales = acct(&l, "200");

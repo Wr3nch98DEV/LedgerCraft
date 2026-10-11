@@ -222,6 +222,7 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
         "docs.markSent" => { l.mark_sent(id(p)?)?; ok() }
         "docs.email" => { let d = l.get_document(id(p)?)?; need(doc_perm(&d, true))?; Ok(ledger_core::email::email_document(l, id(p)?, os(p, "to"), os(p, "subject"), os(p, "body"))?) }
         "docs.emailPreview" => Ok(ledger_core::email::preview_document_email(l, id(p)?)?),
+        "docs.salesReceipt" => { need("sales:write")?; need("banking:write")?; Ok(json!({"id": l.save_sales_receipt(&de::<DocInput>(&p["doc"])?, i(p, "account_id")?)?})) }
         "payments.add" => { need("banking:write").or_else(|_| need("sales:write"))?; Ok(json!({"id": l.add_payment(&de::<PaymentInput>(p)?)?})) }
         "payments.delete" => { need("banking:write")?; l.delete_payment(id(p)?)?; ok() }
         "credits.allocate" => { need("sales:write").or_else(|_| need("purchases:write"))?; Ok(json!({"id": l.allocate_credit(i(p, "credit_id")?, i(p, "document_id")?, s(p, "amount"), p["date"].as_str())?})) }

@@ -246,7 +246,7 @@ fn new_menu(app: &App) -> Element<'_, Message> {
     let body: Element<Message> = match app.skin {
         Skin::QuickBooks => row![
             menu_col("Customers", vec![("Invoice", doc_route("ACCREC")), ("Receive payment", Some(Message::Nav(Route::ReceivePayment(None)))), ("Estimate", doc_route("QUOTE")),
-                ("Credit memo", doc_route("ACCRECCREDIT")), ("Sales receipt", None), ("Refund receipt", None), ("Delayed credit", None), ("Delayed charge", None)]),
+                ("Credit memo", doc_route("ACCRECCREDIT")), ("Sales receipt", doc_route("SALESRECEIPT")), ("Refund receipt", None), ("Delayed credit", None), ("Delayed charge", None)]),
             menu_col("Vendors", vec![("Expense", Some(Message::Nav(Route::Spend(None)))), ("Check", None), ("Bill", doc_route("ACCPAY")), ("Pay bills", Some(Message::Nav(Route::PayBills))),
                 ("Purchase order", doc_route("PO")), ("Vendor credit", doc_route("ACCPAYCREDIT")), ("Credit card credit", None), ("Print checks", None)]),
             menu_col("Employees", vec![("Payroll", Some(Message::Nav(Route::Payroll))), ("Single time activity", None), ("Weekly timesheet", None)]),

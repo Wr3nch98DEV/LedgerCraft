@@ -203,6 +203,26 @@ impl Ledger {
             FROM batch_payments b JOIN accounts a ON a.id = b.account_id ORDER BY b.date DESC", [])
     }
 
+    /// A sales receipt (QuickBooks): a sale paid in full on the spot. Posts as an approved sales
+    /// invoice plus its payment into `deposit_account`, in one transaction.
+    pub fn save_sales_receipt(&self, input: &crate::documents::DocInput, deposit_account: i64) -> Result<i64> {
+        if input.kind != "ACCREC" { return crate::error::invalid("a sales receipt is a sale (type ACCREC)"); }
+        self.atomic(|| {
+            let mut d = input.clone();
+            d.status = Some("AUTHORISED".into());
+            if d.due_date.as_deref().map(str::is_empty).unwrap_or(true) { d.due_date = Some(d.date.clone()); }
+            let id = self.save_document(None, &d)?;
+            self.conn.execute("UPDATE documents SET subtype = 'RECEIPT' WHERE id = ?1", [id])?;
+            let (total, rate_e8): (i64, i64) = self.conn.query_row("SELECT total, rate_e8 FROM documents WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            if total > 0 {
+                let rate = if rate_e8 > 0 && rate_e8 != 100_000_000 { Some(crate::money::fmt_fixed(rate_e8, 8)) } else { None };
+                self.add_payment(&PaymentInput { document_id: id, account_id: deposit_account, date: d.date.clone(), amount: crate::money::fmt_money(total),
+                    reference: if d.reference.is_empty() { "Sales receipt".into() } else { d.reference.clone() }, rate, ..Default::default() })?;
+            }
+            Ok(id)
+        })
+    }
+
     pub fn batch_payment_ids(&self, batch_id: i64) -> Result<Vec<i64>> {
         let mut st = self.conn.prepare("SELECT id FROM payments WHERE batch_id = ?1 AND status <> 'DELETED' ORDER BY id")?;
         let ids = st.query_map([batch_id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<i64>>>()?;
