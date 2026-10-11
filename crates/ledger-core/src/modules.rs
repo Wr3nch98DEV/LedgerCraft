@@ -86,8 +86,10 @@ pub fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> 
             for sl in r["payslips"].as_array().unwrap() {
                 let to = sl["email"].as_str().unwrap_or("");
                 if to.is_empty() { continue; }
-                crate::email::queue_email(l, to, &format!("Your payslip for {} to {}", r["period_start"].as_str().unwrap_or(""), r["period_end"].as_str().unwrap_or("")),
-                    &format!("Hi,\n\nYour payslip is ready. Net pay: {}.\n\nThanks,\n{}", crate::money::fmt_money(sl["net"].as_i64().unwrap_or(0)), l.setting_or("org_name", "")?), "payslip", sl["id"].as_i64().unwrap_or(0))?;
+                let long = |k: &str| r[k].as_str().map(crate::reports::fmt_long).unwrap_or_default();
+                crate::email::queue_email(l, to, &format!("Your payslip for {} to {}", long("period_start"), long("period_end")),
+                    &format!("Hi,\n\nYour payslip for {} to {} is attached. Net pay: {}, paid on {}.\n\nThanks,\n{}", long("period_start"), long("period_end"),
+                        crate::money::fmt_money_grouped(sl["net"].as_i64().unwrap_or(0)), long("payment_date"), l.setting_or("org_name", "")?), "payslip", sl["id"].as_i64().unwrap_or(0))?;
                 l.conn.execute("UPDATE payslips SET sent = 1 WHERE id = ?1", [sl["id"].as_i64()])?;
                 n += 1;
             }

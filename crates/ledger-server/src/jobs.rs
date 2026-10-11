@@ -88,6 +88,7 @@ pub fn send_queued_email(st: &AppState) -> i64 {
                     let number = org.ledger.get_document(id).ok().and_then(|d| d["number"].as_str().map(str::to_string)).filter(|n| !n.is_empty()).unwrap_or_else(|| format!("document-{id}"));
                     (format!("{}.html", number.replace(|c: char| "/\\:*?\"<>|".contains(c), "-")), html)
                 }),
+                (Some("payslip"), Some(id)) => org.ledger.payslip_html(id).ok().map(|html| (format!("payslip-{id}.html"), html)),
                 _ => None,
             };
             (m, att)
