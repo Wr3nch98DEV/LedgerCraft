@@ -148,3 +148,23 @@ fn run_and_submit_payroll() {
     assert_eq!(tb["balanced"], true);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn global_search_opens_contact() {
+    let (mut app, dir) = demo_app("search", Skin::QuickBooks);
+    let _ = app.update(Message::Search("pinecrest".into()));
+    let r = app.be.call_now("search", json!({"q": "pinecrest", "limit": 12}));
+    let _ = app.update(Message::SearchResults("pinecrest".into(), r));
+    assert!(!app.search_results.is_empty());
+    let msgs = click(&app, "Pinecrest Realty");
+    let Some(Message::OpenResult(entity, id)) = msgs.into_iter().next() else { panic!("no result click") };
+    assert_eq!(entity, "contact");
+    let _ = app.update(Message::OpenResult(entity, id));
+    assert_eq!(app.route, Route::Contact(id));
+    assert!(app.search.is_empty() && app.search_results.is_empty(), "search closes after opening a result");
+    // Stale replies (for text the user has since changed) are ignored.
+    let _ = app.update(Message::Search("zz".into()));
+    let _ = app.update(Message::SearchResults("pinecrest".into(), Ok(json!([{"entity": "contact", "id": 1, "title": "x"}]))));
+    assert!(app.search_results.is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}

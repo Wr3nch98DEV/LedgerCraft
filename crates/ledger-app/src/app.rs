@@ -104,6 +104,8 @@ pub enum Message {
     CloseMenus,
     Search(String),
     SearchGo,
+    SearchResults(String, Reply),
+    OpenResult(String, i64),
     ListQuery(String),
     ListTab(&'static str),
     Toast(String, bool),
@@ -137,6 +139,7 @@ pub struct App {
     pub gear_menu: bool,
     pub menu: Option<&'static str>,
     pub search: String,
+    pub search_results: Vec<Value>,
     pub list_q: String,
     pub list_tab: &'static str,
     pub toasts: Vec<(u64, String, bool)>,
@@ -189,6 +192,7 @@ impl App {
             gear_menu: false,
             menu: None,
             search: String::new(),
+            search_results: vec![],
             list_q: String::new(),
             list_tab: "all",
             toasts: vec![],
@@ -366,14 +370,35 @@ impl App {
             Message::ToggleNew => { self.new_menu = !self.new_menu; self.gear_menu = false; self.menu = None; Task::none() }
             Message::ToggleGear => { self.gear_menu = !self.gear_menu; self.new_menu = false; self.menu = None; Task::none() }
             Message::OpenMenu(m) => { self.menu = if self.menu == m { None } else { m }; self.new_menu = false; self.gear_menu = false; Task::none() }
-            Message::CloseMenus => { self.new_menu = false; self.gear_menu = false; self.menu = None; Task::none() }
-            Message::Search(s) => { self.search = s; Task::none() }
+            Message::CloseMenus => { self.new_menu = false; self.gear_menu = false; self.menu = None; self.search_results.clear(); Task::none() }
+            Message::Search(s) => {
+                self.search = s.clone();
+                if s.trim().chars().count() < 2 { self.search_results.clear(); return Task::none(); }
+                self.be.call("search", json!({"q": s.trim(), "limit": 12}), move |r| Message::SearchResults(s.clone(), r))
+            }
+            Message::SearchResults(q, r) => {
+                // Ignore replies for text the user has since changed.
+                if q == self.search { self.search_results = r.ok().and_then(|v| v.as_array().cloned()).unwrap_or_default(); }
+                Task::none()
+            }
             Message::SearchGo => {
-                // Search runs as a filtered transaction list for now.
-                let q = std::mem::take(&mut self.search);
-                let t = self.go(if self.skin == Skin::QuickBooks { Route::AllSales } else { Route::Invoices });
-                self.list_q = q;
-                Task::batch([t, self.load()])
+                if let Some(first) = self.search_results.first().cloned() {
+                    return self.update(Message::OpenResult(first["entity"].as_str().unwrap_or("").to_string(), first["id"].as_i64().unwrap_or(0)));
+                }
+                Task::none()
+            }
+            Message::OpenResult(entity, id) => {
+                self.search.clear();
+                self.search_results.clear();
+                let r = match entity.as_str() {
+                    "contact" => Route::Contact(id),
+                    "document" => Route::Doc { kind: "ACCREC".into(), id: Some(id) },
+                    "account" => Route::Chart,
+                    "item" => Route::Products,
+                    "banktx" => Route::Banking(None),
+                    _ => return self.toast("That kind of record opens in the web version for now", false),
+                };
+                self.go(r)
             }
             Message::ListQuery(q) => { self.list_q = q; self.load() }
             Message::ListTab(t) => { self.list_tab = t; self.load() }

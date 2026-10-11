@@ -21,6 +21,22 @@ pub fn view(app: &App) -> Element<'_, Message> {
         Skin::Xero => column![xero_topbar(app), content].into(),
     };
     let mut layers = stack![base].width(Fill).height(Fill);
+    if !app.search_results.is_empty() && !app.search.is_empty() {
+        layers = layers.push(mouse_area(container(Space::new()).width(Fill).height(Fill)).on_press(Message::CloseMenus));
+        let k = t();
+        let list = column(app.search_results.iter().map(|r| {
+            let entity = r["entity"].as_str().unwrap_or("").to_string();
+            let label = match entity.as_str() { "contact" => "Contact", "document" => "Transaction", "account" => "Account", "item" => "Product", "project" => "Project", "banktx" => "Bank", "manual_journal" => "Journal", _ => "Record" };
+            button(row![
+                text(label.to_uppercase()).size(10).font(BOLD).color(k.faint).width(84),
+                column![text(r["title"].as_str().unwrap_or("").to_string()).size(14), text(r["snippet"].as_str().unwrap_or("").replace(['[', ']'], "")).size(12).color(k.muted)].spacing(1),
+            ].spacing(8).align_y(Alignment::Center)).style(theme::menu_item).padding([6, 8]).width(Fill)
+                .on_press(Message::OpenResult(entity, r["id"].as_i64().unwrap_or(0))).into()
+        })).spacing(2);
+        let panel = container(column![list, ui::muted("Press Enter to open the first result")].spacing(6)).padding(10).width(460).style(theme::menu);
+        let pad = match app.skin { Skin::QuickBooks => Padding { top: 54.0, right: 170.0, ..Padding::ZERO }, Skin::Xero => Padding { top: 54.0, right: 120.0, ..Padding::ZERO } };
+        layers = layers.push(container(opaque(panel)).padding(pad).width(Fill).align_x(iced::alignment::Horizontal::Right));
+    }
     if app.new_menu || app.gear_menu || app.menu.is_some() {
         layers = layers.push(mouse_area(container(Space::new()).width(Fill).height(Fill)).on_press(Message::CloseMenus));
         let (menu, pad) = match (app.skin, app.new_menu, app.gear_menu, app.menu) {
@@ -307,7 +323,7 @@ fn xero_topbar(app: &App) -> Element<'_, Message> {
         tab("Contacts", "contacts", Message::OpenMenu(Some("contacts")), true),
         ui::hspace(),
         button(row![icon("plus", 15.0, k.accent_ink), text("New").size(14).font(BOLD)].spacing(6).align_y(Alignment::Center)).style(theme::primary).padding([6, 12]).on_press(Message::ToggleNew),
-        button(icon("search", 18.0, k.nav_muted)).style(theme::nav_item(false)).padding(7).on_press(Message::Nav(Route::Invoices)),
+        text_input("Search", &app.search).on_input(Message::Search).on_submit(Message::SearchGo).padding([6, 10]).size(13).width(Length::Fixed(220.0)).style(theme::input),
         button(icon(if app.dark { "sun" } else { "moon" }, 18.0, k.nav_muted)).style(theme::nav_item(false)).padding(7).on_press(Message::ToggleTheme),
         button(icon("gear", 18.0, k.nav_muted)).style(theme::nav_item(false)).padding(7).on_press(Message::ToggleGear),
         avatar(app),
