@@ -52,6 +52,18 @@ pub fn date(s: &str, style: DateStyle) -> String {
 
 pub fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
 
+/// Parse a date typed in the layout's format (also accepts ISO) into YYYY-MM-DD.
+pub fn to_iso(input: &str, style: DateStyle) -> Option<String> {
+    let s = input.trim();
+    if s.is_empty() { return None; }
+    let fmts: &[&str] = match style { DateStyle::Us => &["%m/%d/%Y", "%Y-%m-%d"], DateStyle::Intl => &["%d/%m/%Y", "%Y-%m-%d"], DateStyle::Long => &["%d %b %Y", "%d/%m/%Y", "%Y-%m-%d"] };
+    fmts.iter().find_map(|f| chrono::NaiveDate::parse_from_str(s, f).ok()).map(|d| d.format("%Y-%m-%d").to_string())
+}
+pub fn today_iso() -> String { chrono::Local::now().date_naive().format("%Y-%m-%d").to_string() }
+pub fn add_days_iso(iso: &str, days: i64) -> String {
+    chrono::NaiveDate::parse_from_str(iso, "%Y-%m-%d").map(|d| (d + chrono::Duration::days(days)).format("%Y-%m-%d").to_string()).unwrap_or_else(|_| iso.to_string())
+}
+
 // ---------- text ----------
 pub fn h1<'a, M: 'a>(s: impl Into<String>) -> Element<'a, M> { text(s.into()).size(24).font(BOLD).into() }
 pub fn h2<'a, M: 'a>(s: impl Into<String>) -> Element<'a, M> { text(s.into()).size(17).font(BOLD).into() }
@@ -152,6 +164,14 @@ mod tests {
         assert_eq!(parse_money(""), Some(0));
         assert_eq!(parse_money("1.234"), None);
         assert_eq!(parse_money("abc"), None);
+    }
+    #[test]
+    fn date_entry() {
+        assert_eq!(to_iso("10/12/2026", DateStyle::Us).as_deref(), Some("2026-10-12"));
+        assert_eq!(to_iso("12/10/2026", DateStyle::Intl).as_deref(), Some("2026-10-12"));
+        assert_eq!(to_iso("12 Oct 2026", DateStyle::Long).as_deref(), Some("2026-10-12"));
+        assert_eq!(to_iso("2026-10-12", DateStyle::Us).as_deref(), Some("2026-10-12"));
+        assert_eq!(to_iso("31/31/2026", DateStyle::Intl), None);
     }
     #[test]
     fn dates() {

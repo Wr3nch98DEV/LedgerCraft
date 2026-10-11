@@ -24,7 +24,10 @@ fn main() -> iced::Result {
     // `--data-dir PATH` uses another data folder (for testing); default is %APPDATA%\LedgerCraft.
     let args: Vec<String> = std::env::args().collect();
     let data_dir = args.iter().position(|a| a == "--data-dir").and_then(|i| args.get(i + 1)).map(std::path::PathBuf::from).unwrap_or_else(backend::default_data_dir);
-    iced::application(move || App::boot(data_dir.clone()), App::update, App::view)
+    let arg = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+    let start = arg("--route").and_then(|r| app::parse_route(&r));
+    let skin = arg("--skin").map(|s| theme::Skin::from_key(&s));
+    iced::application(move || App::boot(data_dir.clone(), start.clone(), skin), App::update, App::view)
         .title(App::title)
         .theme(App::theme)
         .subscription(App::subscription)

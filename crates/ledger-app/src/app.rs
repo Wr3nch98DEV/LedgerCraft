@@ -134,12 +134,29 @@ pub struct App {
     pub bank: banking::State,
     pub report: reports::State,
     pub setup: setup::State,
+    /// Screen to open once the company is loaded (`--route`, used for testing).
+    pub start_route: Option<Route>,
+    pub pending_nav: Option<Route>,
+}
+
+/// Parse a `--route` argument such as `invoices`, `doc:ACCREC:117`, `doc:ACCPAY:new`, `contact:3`, `report:balance-sheet`.
+pub fn parse_route(s: &str) -> Option<Route> {
+    let parts: Vec<&str> = s.split(':').collect();
+    let id = |i: usize| parts.get(i).and_then(|x| x.parse::<i64>().ok());
+    Some(match parts[0] {
+        "dashboard" => Route::Dashboard, "sales" => Route::AllSales, "invoices" => Route::Invoices, "quotes" => Route::Quotes, "credits" => Route::CreditNotes,
+        "customers" => Route::Customers, "products" => Route::Products, "expenses" => Route::Expenses, "bills" => Route::Bills, "vendors" => Route::Vendors,
+        "pos" => Route::PurchaseOrders, "contacts" => Route::Contacts, "contact" => Route::Contact(id(1)?), "banking" => Route::Banking(id(1)), "chart" => Route::Chart,
+        "reports" => Route::Reports, "report" => Route::Report(parts.get(1)?.to_string()), "settings" => Route::Settings, "setup" => Route::Setup,
+        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
+        _ => return None,
+    })
 }
 
 fn prefs_path(be: &Backend) -> std::path::PathBuf { be.st.data_dir.join("ui-preferences.json") }
 
 impl App {
-    pub fn boot(data_dir: std::path::PathBuf) -> (App, Task<Message>) {
+    pub fn boot(data_dir: std::path::PathBuf, start: Option<Route>, skin: Option<Skin>) -> (App, Task<Message>) {
         let be = Backend::new(data_dir);
         let prefs: Value = std::fs::read_to_string(prefs_path(&be)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}));
         let app = App {
@@ -166,7 +183,11 @@ impl App {
             bank: banking::State::default(),
             report: reports::State::default(),
             setup: setup::State::default(),
+            start_route: start,
+            pending_nav: None,
         };
+        let mut app = app;
+        if let Some(s) = skin { app.skin = s; }
         let t = app.be.call("session.get", json!({}), Message::Session);
         (app, t)
     }
@@ -277,9 +298,10 @@ impl App {
             Message::Session(r) => match r {
                 Ok(v) if !v["org"]["name"].is_null() => {
                     self.session = Some(v);
-                    let a = self.load_lookups();
-                    let b = if self.route == Route::Setup { self.go(Route::Dashboard) } else { self.load() };
-                    Task::batch([a, b])
+                    // Open the first screen once reference data (accounts, contacts…) is loaded.
+                    let next = self.start_route.take().unwrap_or(if self.route == Route::Setup { Route::Dashboard } else { self.route.clone() });
+                    self.pending_nav = Some(next);
+                    self.load_lookups()
                 }
                 Ok(_) => { self.route = Route::Setup; self.load() }
                 Err(e) => {
@@ -289,7 +311,12 @@ impl App {
                     if e.contains("no organisation") { t } else { Task::batch([t, self.toast(e, true)]) }
                 }
             },
-            Message::LookupsLoaded(l) => { self.lk = *l; Task::none() }
+            Message::LookupsLoaded(l) => {
+                self.lk = *l;
+                if let Some(r) = self.pending_nav.take() { self.route = r; return self.load(); }
+                if let Some(e) = self.doc.as_mut() { e.contacts = iced::widget::combo_box::State::with_selection(self.lk.contact_opts(matches!(e.kind.as_str(), "ACCREC" | "QUOTE" | "ACCRECCREDIT")), e.contact.as_ref()); }
+                Task::none()
+            }
             Message::Loaded(g, r) => {
                 if g != self.page_gen { return Task::none(); }
                 match r {
