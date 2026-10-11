@@ -175,7 +175,7 @@ impl Ledger {
     pub fn assurance_health(&self) -> Result<Value> {
         let journals: i64 = self.conn.query_row("SELECT COUNT(*) FROM journals WHERE posted = 1", [], |r| r.get(0))?;
         let edits: i64 = self.conn.query_row("SELECT COUNT(*) FROM journals WHERE reverses_journal_id IS NOT NULL AND created_at >= datetime('now','-30 days')", [], |r| r.get(0))?;
-        let stale: i64 = self.conn.query_row("SELECT COUNT(*) FROM statement_lines WHERE status = 'UNRECONCILED' AND date < date('now','-30 days')", [], |r| r.get(0))?;
+        let stale: i64 = self.conn.query_row("SELECT COUNT(*) FROM statement_lines WHERE status = 'UNRECONCILED' AND date < date('now','localtime','-30 days')", [], |r| r.get(0))?;
         let mut flags = Vec::new();
         let late: i64 = self.conn.query_row("SELECT COUNT(*) FROM journals WHERE posted = 1 AND date < date(created_at, '-90 days') AND created_at >= datetime('now','-30 days')", [], |r| r.get(0))?;
         if late > 0 { flags.push(format!("{late} transaction(s) entered in the last 30 days are dated more than 90 days in the past")); }

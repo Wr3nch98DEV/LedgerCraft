@@ -48,7 +48,7 @@ impl Ledger {
             "SELECT c.id, c.name, c.email, c.phone, c.is_customer, c.is_supplier, c.is_employee, c.status, c.default_currency,
                COALESCE((SELECT SUM(total - amount_paid - amount_credited) FROM documents d WHERE d.contact_id = c.id AND d.type = 'ACCREC' AND d.status = 'AUTHORISED'), 0) AS receivable,
                COALESCE((SELECT SUM(total - amount_paid - amount_credited) FROM documents d WHERE d.contact_id = c.id AND d.type = 'ACCPAY' AND d.status = 'AUTHORISED'), 0) AS payable,
-               COALESCE((SELECT SUM(total - amount_paid - amount_credited) FROM documents d WHERE d.contact_id = c.id AND d.type = 'ACCREC' AND d.status = 'AUTHORISED' AND d.due_date < date('now')), 0) AS overdue
+               COALESCE((SELECT SUM(total - amount_paid - amount_credited) FROM documents d WHERE d.contact_id = c.id AND d.type = 'ACCREC' AND d.status = 'AUTHORISED' AND d.due_date < date('now','localtime')), 0) AS overdue
              FROM contacts c
              WHERE c.merged_into IS NULL
                AND (?1 = 'all' AND c.status = 'ACTIVE' OR ?1 = 'customers' AND c.is_customer = 1 AND c.status = 'ACTIVE'
@@ -65,11 +65,11 @@ impl Ledger {
         c["summary"] = util::query_one_json(&self.conn,
             "SELECT
                COALESCE(SUM(CASE WHEN type='ACCREC' AND status='AUTHORISED' THEN total-amount_paid-amount_credited END),0) AS receivable,
-               COALESCE(SUM(CASE WHEN type='ACCREC' AND status='AUTHORISED' AND due_date < date('now') THEN total-amount_paid-amount_credited END),0) AS receivable_overdue,
+               COALESCE(SUM(CASE WHEN type='ACCREC' AND status='AUTHORISED' AND due_date < date('now','localtime') THEN total-amount_paid-amount_credited END),0) AS receivable_overdue,
                COALESCE(SUM(CASE WHEN type='ACCPAY' AND status='AUTHORISED' THEN total-amount_paid-amount_credited END),0) AS payable,
-               COALESCE(SUM(CASE WHEN type='ACCPAY' AND status='AUTHORISED' AND due_date < date('now') THEN total-amount_paid-amount_credited END),0) AS payable_overdue,
-               COALESCE(SUM(CASE WHEN type='ACCREC' AND status IN ('AUTHORISED','PAID') AND date >= date('now','-12 months') THEN base_total END),0) AS sales_12m,
-               COALESCE(SUM(CASE WHEN type='ACCPAY' AND status IN ('AUTHORISED','PAID') AND date >= date('now','-12 months') THEN base_total END),0) AS purchases_12m
+               COALESCE(SUM(CASE WHEN type='ACCPAY' AND status='AUTHORISED' AND due_date < date('now','localtime') THEN total-amount_paid-amount_credited END),0) AS payable_overdue,
+               COALESCE(SUM(CASE WHEN type='ACCREC' AND status IN ('AUTHORISED','PAID') AND date >= date('now','localtime','-12 months') THEN base_total END),0) AS sales_12m,
+               COALESCE(SUM(CASE WHEN type='ACCPAY' AND status IN ('AUTHORISED','PAID') AND date >= date('now','localtime','-12 months') THEN base_total END),0) AS purchases_12m
              FROM documents WHERE contact_id = ?1", [id])?;
         Ok(c)
     }

@@ -115,7 +115,7 @@ pub fn notifications(l: &Ledger) -> Result<Vec<Value>> {
     let mut out = Vec::new();
     let n: i64 = l.conn.query_row("SELECT COUNT(*) FROM receipts WHERE status = 'SUBMITTED'", [], |r| r.get(0))?;
     if n > 0 { out.push(json!({"kind": "expense_claims", "level": "info", "text": format!("{n} expense claim{} to review", if n == 1 { "" } else { "s" }), "link": "/expenses"})); }
-    let due: i64 = l.conn.query_row("SELECT COUNT(*) FROM fixed_assets WHERE status = 'REGISTERED' AND method NOT IN ('NONE','FULL') AND COALESCE(last_dep_date, '0000') < date('now','start of month','-1 day')", [], |r| r.get(0))?;
+    let due: i64 = l.conn.query_row("SELECT COUNT(*) FROM fixed_assets WHERE status = 'REGISTERED' AND method NOT IN ('NONE','FULL') AND COALESCE(last_dep_date, '0000') < date('now','localtime','start of month','-1 day')", [], |r| r.get(0))?;
     if due > 0 { out.push(json!({"kind": "depreciation", "level": "info", "text": format!("Depreciation is due for {due} asset{}", if due == 1 { "" } else { "s" }), "link": "/accounting/assets"})); }
     let inbox: i64 = l.conn.query_row("SELECT COUNT(*) FROM file_inbox WHERE status = 'NEW'", [], |r| r.get(0))?;
     if inbox > 0 { out.push(json!({"kind": "inbox", "level": "info", "text": format!("{inbox} file{} in your inbox", if inbox == 1 { "" } else { "s" }), "link": "/files"})); }

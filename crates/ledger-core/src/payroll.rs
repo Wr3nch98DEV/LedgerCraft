@@ -253,7 +253,7 @@ impl Ledger {
             };
             self.conn.execute("UPDATE employees SET first_name=?2, last_name=?3, email=?4, address=?5, start_date=?6, termination_date=?7, tax_id=?8, tax_code=?9, employment_type=?10,
                 pay_calendar_id=?11, pay_basis=?12, annual_salary=?13, hourly_rate_e2=?14, hours_per_week_e2=?15, super_rate_bp=?16, bank_account=?17, template=?18,
-                status = CASE WHEN ?7 IS NOT NULL AND ?7 <= date('now') THEN 'TERMINATED' ELSE 'ACTIVE' END WHERE id=?1",
+                status = CASE WHEN ?7 IS NOT NULL AND ?7 <= date('now','localtime') THEN 'TERMINATED' ELSE 'ACTIVE' END WHERE id=?1",
                 params![eid, e.first_name.trim(), e.last_name.trim(), e.email, e.address, e.start_date, e.termination_date.clone().filter(|s| !s.is_empty()), e.tax_id, e.tax_code,
                     if e.employment_type.is_empty() { "FULLTIME" } else { &e.employment_type }, e.pay_calendar_id, basis, salary, hourly, hours, sup, e.bank_account, json!(e.template).to_string()])?;
             self.audit(if id.is_some() { "UPDATE" } else { "CREATE" }, "employee", Some(eid), None, Some(json!({"name": full})))?;

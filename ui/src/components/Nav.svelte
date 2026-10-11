@@ -76,6 +76,7 @@
   let orgMenu = $state(false);
   let userMenu = $state(false);
   let notifCount = $state(0);
+  let mobile = $state(false);
 
   async function refreshNotif() { try { notifCount = (await rpc('notifications')).length; } catch {} }
   refreshNotif();
@@ -101,7 +102,7 @@
     <div class="relative" data-menu>
       <button class="mr-2 flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-hover" onclick={() => (orgMenu = !orgMenu)} aria-haspopup="menu">
         <span class="grid h-7 w-7 place-items-center rounded-md bg-accent text-[13px] font-bold text-accent-ink">{(session.data?.org?.name ?? 'L')[0]}</span>
-        <span class="max-w-[200px] truncate font-semibold">{session.data?.org?.name ?? 'LedgerCraft'}</span>
+        <span class="hidden max-w-[200px] truncate font-semibold sm:inline">{session.data?.org?.name ?? 'LedgerCraft'}</span>
         <Icon name="chevron" size={14} class="text-muted" />
       </button>
       {#if orgMenu}
@@ -119,7 +120,8 @@
       {/if}
     </div>
 
-    <nav class="flex items-center gap-0.5" aria-label="Main">
+    <button class="btn btn-ghost btn-sm lg:hidden" aria-label="Menu" onclick={() => (mobile = !mobile)}><Icon name="menu" /></button>
+    <nav class="hidden items-center gap-0.5 lg:flex" aria-label="Main">
       {#each menus as m}
         {#if m.href}
           <a href={m.href} class="rounded-lg px-3 py-1.5 font-medium {isActive(m) ? 'bg-accent-soft text-accent' : 'text-muted hover:bg-hover hover:text-text'}">{m.label}</a>
@@ -159,7 +161,7 @@
       <button class="btn btn-ghost btn-sm relative" title="Notifications" aria-label="Notifications" onclick={() => { ui.notifications = !ui.notifications; refreshNotif(); }}>
         <Icon name="bell" />{#if notifCount}<span class="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-bad px-1 text-[10px] font-bold text-white">{notifCount}</span>{/if}
       </button>
-      <button class="btn btn-ghost btn-sm" title="Help" aria-label="Help" onclick={() => (ui.help = true)}><Icon name="help" /></button>
+      <button class="btn btn-ghost btn-sm hidden sm:inline-flex" title="Help" aria-label="Help" onclick={() => (ui.help = true)}><Icon name="help" /></button>
       <button class="btn btn-ghost btn-sm" title={theme.mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} aria-label="Toggle theme" onclick={toggleTheme}><Icon name={theme.mode === 'dark' ? 'sun' : 'moon'} /></button>
       <div class="relative" data-menu>
         <button class="ml-1 grid h-8 w-8 place-items-center rounded-full bg-panel2 text-[12px] font-bold ring-1 ring-line2" onclick={() => (userMenu = !userMenu)} aria-label="Account">{initials}</button>
@@ -175,3 +177,15 @@
     </div>
   </div>
 </header>
+
+{#if mobile}
+  <div class="no-print fixed inset-0 z-40 bg-black/50 lg:hidden" role="presentation" onmousedown={() => (mobile = false)}></div>
+  <aside class="no-print fixed bottom-0 left-0 top-0 z-50 w-72 max-w-[85vw] overflow-y-auto border-r border-line2 bg-panel p-3 shadow-[var(--shadow)] lg:hidden" aria-label="Menu">
+    <button class="mb-2 block w-full rounded-md px-3 py-2 text-left font-semibold hover:bg-hover" onclick={() => { mobile = false; go('/'); }}>Dashboard</button>
+    {#each menus.filter((m) => m.items) as m}
+      <div class="mt-2 px-3 text-[11px] font-semibold uppercase tracking-wide text-faint">{m.label}</div>
+      {#each m.items ?? [] as it}{#if !it.perm || can(it.perm)}<button class="block w-full rounded-md px-3 py-1.5 text-left hover:bg-hover" onclick={() => { mobile = false; go(it.href!); }}>{it.label}</button>{/if}{/each}
+    {/each}
+    <div class="mt-3 border-t border-line pt-2"><button class="block w-full rounded-md px-3 py-1.5 text-left hover:bg-hover" onclick={() => { mobile = false; go('/settings'); }}>Settings</button></div>
+  </aside>
+{/if}

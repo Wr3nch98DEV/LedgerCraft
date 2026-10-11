@@ -424,7 +424,7 @@ impl Ledger {
         let mut d = util::query_one_json(&self.conn,
             "SELECT d.*, c.name AS contact_name, c.email AS contact_email, c.postal_address AS contact_address, c.tax_number AS contact_tax_number,
                d.total - d.amount_paid - d.amount_credited AS amount_due,
-               (d.status = 'AUTHORISED' AND d.due_date < date('now')) AS overdue
+               (d.status = 'AUTHORISED' AND d.due_date < date('now','localtime')) AS overdue
              FROM documents d JOIN contacts c ON c.id = d.contact_id WHERE d.id = ?1", [id])?;
         d["lines"] = json!(util::query_json(&self.conn,
             "SELECT li.*, a.code AS account_code, a.name AS account_name, t.name AS tax_rate_name, i.code AS item_code,
@@ -456,11 +456,11 @@ impl Ledger {
         let rows = util::query_json(&self.conn,
             "SELECT d.id, d.type, d.number, d.reference, d.date, d.due_date, d.expiry_date, d.status, d.currency, d.subtotal, d.total_tax, d.total, d.amount_paid, d.amount_credited,
                d.total - d.amount_paid - d.amount_credited AS amount_due, d.sent, d.title, d.contact_id, c.name AS contact_name, d.fully_paid_on, d.planned_payment_date, d.expected_payment_date,
-               (d.status = 'AUTHORISED' AND d.due_date < date('now')) AS overdue,
+               (d.status = 'AUTHORISED' AND d.due_date < date('now','localtime')) AS overdue,
                (SELECT MAX(p.date) FROM payments p WHERE p.document_id = d.id AND p.status <> 'DELETED') AS paid_date
              FROM documents d JOIN contacts c ON c.id = d.contact_id
              WHERE d.type IN (?1, ?2) AND (?6 IS NULL OR d.contact_id = ?6)
-               AND (?3 = 'all' AND d.status <> 'DELETED' OR ?3 = 'overdue' AND d.status = 'AUTHORISED' AND d.due_date < date('now')
+               AND (?3 = 'all' AND d.status <> 'DELETED' OR ?3 = 'overdue' AND d.status = 'AUTHORISED' AND d.due_date < date('now','localtime')
                     OR ?3 = 'awaiting' AND d.status = 'AUTHORISED' OR d.status = upper(?3))
                AND (?4 = '%%' OR d.number LIKE ?4 OR d.reference LIKE ?4 OR c.name LIKE ?4 OR printf('%.2f', d.total / 100.0) LIKE ?4)
              ORDER BY d.date DESC, d.id DESC LIMIT ?5 OFFSET ?7",
@@ -470,7 +470,7 @@ impl Ledger {
                COUNT(CASE WHEN status = 'DRAFT' THEN 1 END) AS draft,
                COUNT(CASE WHEN status = 'SUBMITTED' THEN 1 END) AS submitted,
                COUNT(CASE WHEN status = 'AUTHORISED' THEN 1 END) AS awaiting,
-               COUNT(CASE WHEN status = 'AUTHORISED' AND due_date < date('now') THEN 1 END) AS overdue,
+               COUNT(CASE WHEN status = 'AUTHORISED' AND due_date < date('now','localtime') THEN 1 END) AS overdue,
                COUNT(CASE WHEN status = 'PAID' THEN 1 END) AS paid,
                COUNT(CASE WHEN status = 'SENT' THEN 1 END) AS sent,
                COUNT(CASE WHEN status = 'ACCEPTED' THEN 1 END) AS accepted,
@@ -480,7 +480,7 @@ impl Ledger {
                COALESCE(SUM(CASE WHEN status = 'DRAFT' THEN total END), 0) AS draft_total,
                COALESCE(SUM(CASE WHEN status = 'SUBMITTED' THEN total END), 0) AS submitted_total,
                COALESCE(SUM(CASE WHEN status = 'AUTHORISED' THEN base_total * (total - amount_paid - amount_credited) / MAX(total, 1) END), 0) AS awaiting_total,
-               COALESCE(SUM(CASE WHEN status = 'AUTHORISED' AND due_date < date('now') THEN base_total * (total - amount_paid - amount_credited) / MAX(total, 1) END), 0) AS overdue_total
+               COALESCE(SUM(CASE WHEN status = 'AUTHORISED' AND due_date < date('now','localtime') THEN base_total * (total - amount_paid - amount_credited) / MAX(total, 1) END), 0) AS overdue_total
              FROM documents WHERE type IN (?1, ?2) AND (?3 IS NULL OR contact_id = ?3)", params![k1, k2, contact_id])?;
         Ok(json!({"rows": rows, "counts": counts}))
     }

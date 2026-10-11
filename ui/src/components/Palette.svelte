@@ -43,6 +43,8 @@
       case 'item': return `/products/${r.id}`;
       case 'banktx': return `/banking/transaction/${r.id}`;
       case 'manual_journal': return `/accounting/journals/${r.id}`;
+      case 'project': return `/projects/${r.id}`;
+      case 'asset': return `/accounting/assets/${r.id}`;
       default: return '/';
     }
   }
