@@ -292,6 +292,31 @@ fn remittance_advice_for_bill_payments() {
 }
 
 #[test]
+fn batch_payment_reconciles_as_one_line() {
+    let l = org();
+    let bank = acct(&l, "090");
+    let mut bills = Vec::new();
+    for (n, amt) in [("A-1", "100"), ("B-2", "250.5")] {
+        bills.push(l.save_document(None, &DocInput { kind: "ACCPAY".into(), contact_name: Some(format!("Supplier {n}")), date: "2026-07-01".into(), number: Some(n.into()), line_amount_type: Some("NOTAX".into()),
+            lines: vec![line(acct(&l, "429"), None, "1", amt)], status: Some("AUTHORISED".into()), ..Default::default() }).unwrap());
+    }
+    let batch = l.batch_payment(bank, "2026-07-05", "Run 1", &[(bills[0], "100.00".into()), (bills[1], "250.50".into())]).unwrap();
+    let items = l.unreconciled_ledger_items(bank).unwrap();
+    assert_eq!(items.len(), 1, "the batch shows as a single item: {items:?}");
+    assert_eq!(items[0]["kind"], "BATCH");
+    assert_eq!(items[0]["amount"], -35050);
+    l.import_lines(bank, "s.csv", "CSV", &[StmtLine { date: "2026-07-06".into(), amount: -35050, payee: "Batch".into(), ..Default::default() }]).unwrap();
+    let line_id = l.statement_lines(bank, "UNRECONCILED", 10).unwrap()[0]["id"].as_i64().unwrap();
+    let sugg = l.reconcile_suggestions(line_id).unwrap();
+    assert_eq!(sugg["matches"][0]["kind"], "BATCH", "{sugg}");
+    l.reconcile_match(line_id, &[("BATCH".into(), batch)]).unwrap();
+    assert_eq!(l.unreconciled_ledger_items(bank).unwrap().len(), 0);
+    assert_eq!(l.reconciliation_report(bank, "2026-07-31").unwrap()["difference"], 0);
+    l.unreconcile(line_id).unwrap();
+    assert_eq!(l.unreconciled_ledger_items(bank).unwrap()[0]["kind"], "BATCH");
+}
+
+#[test]
 fn reports_add_up() {
     let l = org();
     let sales = acct(&l, "200");

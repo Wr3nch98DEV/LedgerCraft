@@ -66,7 +66,7 @@ macOS / Linux: `cd ui && npm install && npm run build && cd .. && cargo run --re
 | **Banking** | Bank, credit card, payment-service, cash accounts | ✅ |
 | | Statement import: CSV (mapping wizard), OFX, QFX, QIF, CAMT.053, MT940 + duplicate detection | ✅ |
 | | Live bank feeds | 🟡 plugin interface (no aggregator bundled) |
-| | Reconcile: suggested matches, find & match (many-to-one, partial payments), create, transfer, discuss, OK | ✅ |
+| | Reconcile: suggested matches, find & match (many-to-one, partial payments), batch payments as one line, create, transfer, discuss, OK, bank fee/rounding adjustments | ✅ |
 | | Bank rules (any/all conditions, fixed & % allocations, transfer rules) | ✅ |
 | | Spend / receive money, overpayments, prepayments, transfers | ✅ |
 | | Cash coding (bulk) | ✅ |

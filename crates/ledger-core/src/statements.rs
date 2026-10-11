@@ -303,6 +303,11 @@ impl Ledger {
             "BANKTX" => self.conn.query_row("SELECT CASE WHEN type LIKE 'RECEIVE%' THEN total ELSE -total END, date, reconciled FROM bank_transactions WHERE id = ?1 AND status <> 'DELETED'", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?,
             "TRANSFER_FROM" => self.conn.query_row("SELECT -amount, date, from_reconciled FROM transfers WHERE id = ?1 AND status <> 'DELETED'", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?,
             "TRANSFER_TO" => self.conn.query_row("SELECT to_amount, date, to_reconciled FROM transfers WHERE id = ?1 AND status <> 'DELETED'", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?,
+            // A batch payment matches the single bank line for its total.
+            "BATCH" => self.conn.query_row(
+                "SELECT COALESCE(SUM(CASE WHEN a.currency = d.currency THEN p.amount ELSE p.base_amount END * CASE WHEN d.type IN ('ACCREC','ACCPAYCREDIT') THEN 1 ELSE -1 END), 0), b.date, COALESCE(MAX(p.reconciled), 0)
+                 FROM batch_payments b JOIN payments p ON p.batch_id = b.id AND p.status <> 'DELETED' JOIN documents d ON d.id = p.document_id JOIN accounts a ON a.id = p.account_id
+                 WHERE b.id = ?1 GROUP BY b.id", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?,
             _ => return invalid("unknown match kind"),
         })
     }
@@ -313,6 +318,10 @@ impl Ledger {
             "BANKTX" => "UPDATE bank_transactions SET reconciled = ?2 WHERE id = ?1",
             "TRANSFER_FROM" => "UPDATE transfers SET from_reconciled = ?2 WHERE id = ?1",
             "TRANSFER_TO" => "UPDATE transfers SET to_reconciled = ?2 WHERE id = ?1",
+            "BATCH" => {
+                self.conn.execute("UPDATE batch_payments SET reconciled = ?2 WHERE id = ?1", params![id, v])?;
+                "UPDATE payments SET reconciled = ?2 WHERE batch_id = ?1 AND status <> 'DELETED'"
+            }
             _ => return invalid("unknown match kind"),
         };
         self.conn.execute(sql, params![id, v])?;
@@ -477,6 +486,12 @@ impl Ledger {
                c.name AS contact, COALESCE(NULLIF(p.reference, ''), d.number) AS reference, 'Payment: ' || d.number AS description
              FROM payments p JOIN documents d ON d.id = p.document_id JOIN contacts c ON c.id = d.contact_id JOIN accounts a ON a.id = p.account_id
              WHERE p.account_id = ?1 AND p.status <> 'DELETED' AND p.reconciled = 0
+               AND (p.batch_id IS NULL OR EXISTS (SELECT 1 FROM payments x WHERE x.batch_id = p.batch_id AND x.reconciled = 1 AND x.status <> 'DELETED'))
+             UNION ALL
+             SELECT 'BATCH', b.id, b.date, SUM(CASE WHEN a.currency = d.currency THEN p.amount ELSE p.base_amount END * CASE WHEN d.type IN ('ACCREC','ACCPAYCREDIT') THEN 1 ELSE -1 END), 'Batch payment', b.reference, 'Batch payment (' || COUNT(*) || ' items)'
+             FROM batch_payments b JOIN payments p ON p.batch_id = b.id AND p.status <> 'DELETED' JOIN documents d ON d.id = p.document_id JOIN accounts a ON a.id = p.account_id
+             WHERE b.account_id = ?1 AND NOT EXISTS (SELECT 1 FROM payments x WHERE x.batch_id = b.id AND x.reconciled = 1 AND x.status <> 'DELETED')
+             GROUP BY b.id
              UNION ALL
              SELECT 'BANKTX', b.id, b.date, CASE WHEN b.type LIKE 'RECEIVE%' THEN b.total ELSE -b.total END, c.name, b.reference, CASE WHEN b.type LIKE 'RECEIVE%' THEN 'Receive money' ELSE 'Spend money' END
              FROM bank_transactions b LEFT JOIN contacts c ON c.id = b.contact_id WHERE b.account_id = ?1 AND b.status <> 'DELETED' AND b.reconciled = 0
