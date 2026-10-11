@@ -42,8 +42,12 @@
         </div>
         <div class="mt-4 grid grid-cols-2 gap-3">
           <div><div class="text-[12px] text-muted">Balance in LedgerCraft</div><div class="num text-xl font-semibold">{money(b.ledger_balance_fx)}</div></div>
-          <div><div class="text-[12px] text-muted">Statement balance</div><div class="num text-xl font-semibold text-muted">{money(b.statement_balance)}</div>
-            {#if b.last_statement_date}<div class="text-[11px] text-faint">as of {date(b.last_statement_date)}</div>{/if}</div>
+          {#if b.last_statement_date}
+            <div><div class="text-[12px] text-muted">Statement balance</div><div class="num text-xl font-semibold text-muted">{money(b.statement_balance)}</div>
+              <div class="text-[11px] text-faint">as of {date(b.last_statement_date)}</div></div>
+          {:else}
+            <div><div class="text-[12px] text-muted">Statement balance</div><div class="text-[13px] text-faint">No statement lines imported yet</div></div>
+          {/if}
         </div>
         <div class="mt-auto pt-4">
           {#if b.unreconciled_count > 0}

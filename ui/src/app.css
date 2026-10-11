@@ -135,3 +135,7 @@ a { color: inherit; }
   .no-print { display: none !important; }
   html, body { background: #fff; color: #000; }
 }
+
+/* Grid children may shrink below their content width so wide tables scroll inside their card
+   instead of pushing the whole page sideways. */
+.grid > * { min-width: 0; }

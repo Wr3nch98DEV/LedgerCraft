@@ -44,7 +44,7 @@ macOS / Linux: `cd ui && npm install && npm run build && cd .. && cargo run --re
 | | Conversion (opening) balances | ✅ |
 | | Lock dates (all users / non-advisers) — enforced by the database | ✅ |
 | | Users & roles (Adviser, Standard, Invoice only, Read only, Cashbook, Payroll admin, custom) | ✅ |
-| | Passwords (Argon2) | ✅ · TOTP 2FA ⬜ |
+| | Passwords (Argon2), TOTP two-step authentication | ✅ |
 | **Dashboard** | Bank account widgets, invoices owed, bills to pay, cash in/out, watchlist, P&L | ✅ |
 | | Short-term cash flow with what-if | ✅ |
 | | Business snapshot | ✅ |
@@ -53,10 +53,10 @@ macOS / Linux: `cd ui && npm install && npm run build && cd .. && cargo run --re
 | | Quotes (sent / accepted / declined → invoice) | ✅ |
 | | Credit notes, allocation, refunds | ✅ |
 | | Repeating invoices with [Month]/[Year] placeholders, auto-approve, auto-email | ✅ |
-| | Online invoice link | ✅ · card "Pay now" via plugin 🟡 |
-| | Email invoices, templates, reminders | 🟡 queued to Outbox; SMTP sending ⬜ (download .eml) |
+| | Online invoice link, online quote accept/decline | ✅ · card "Pay now" via plugin 🟡 |
+| | Email invoices, statements, templates, reminders | ✅ SMTP sending (your mail server) · Outbox · .eml download |
 | | Customer statements (outstanding & activity) | ✅ |
-| | Branding themes | ✅ (logo upload ⬜) |
+| | Branding themes with logo | ✅ |
 | | Print / PDF | ✅ (print-to-PDF) |
 | **Purchases** | Bills, approvals, supplier credits, repeating bills | ✅ |
 | | Purchase orders → bill | ✅ |
@@ -69,7 +69,7 @@ macOS / Linux: `cd ui && npm install && npm run build && cd .. && cargo run --re
 | | Reconcile: suggested matches, find & match (many-to-one, partial payments), create, transfer, discuss, OK | ✅ |
 | | Bank rules (any/all conditions, fixed & % allocations, transfer rules) | ✅ |
 | | Spend / receive money, overpayments, prepayments, transfers | ✅ |
-| | Cash coding (bulk) | 🟡 API only (`rec.cashcode`) |
+| | Cash coding (bulk) | ✅ |
 | | Bank reconciliation report | ✅ |
 | **Contacts** | Customers/suppliers, people, groups, defaults, timeline, merge, archive, CSV import/export | ✅ |
 | **Products** | Untracked & tracked inventory (average cost, COGS, adjustments, low stock) | ✅ |
@@ -78,14 +78,14 @@ macOS / Linux: `cd ui && npm install && npm run build && cd .. && cargo run --re
 | | Tracking categories (2 active, unlimited options) | ✅ |
 | | Budgets (overall / per tracking option) + budget variance | ✅ |
 | | Find & recode | ✅ |
-| | Multi-currency (160+ currencies), realised & unrealised FX, revaluation | ✅ (rates entered manually; online feed ⬜) |
+| | Multi-currency (160+ currencies), realised & unrealised FX, revaluation | ✅ (manual rates or one-click ECB reference rates) |
 | | Fixed assets (SL, DV 100/150/200%, full, none; book & tax; runs, rollback, disposal) | ✅ |
 | | GST/VAT returns: AU BAS, NZ GST101, UK VAT100 (MTD JSON), IE VAT3, CA GST/HST, US sales tax, generic | ✅ (lodgement by you) |
 | | Assurance dashboard, audit log, history & notes everywhere | ✅ |
 | | Workpapers | ✅ |
-| **Reports** | P&L (comparisons, monthly, budget, % of income, tracking, cash/accrual), Balance Sheet, Trial Balance, GL summary & detail, Account Transactions, Journal Report, Aged AR/AP, Cash Summary, Bank Summary, Executive Summary, Sales/Purchases by Item & Contact, Tax Reconciliation, Invoice detail, Contact transactions, Inventory, Fixed asset register/reconciliation/schedule, Project profitability, Expense claims, Payroll activity, Leave balances, FX gains | ✅ |
+| **Reports** | P&L (comparisons, monthly, budget, % of income, tracking, cash/accrual), Balance Sheet (cash/accrual), Statement of Cash Flows, Trial Balance, GL summary & detail, Account Transactions, Journal Report, Aged AR/AP, Cash Summary, Bank Summary, Executive Summary, Sales/Purchases by Item & Contact, Tax Reconciliation, Invoice detail, Contact transactions, Inventory, Fixed asset register/reconciliation/schedule, Project profitability, Expense claims, Payroll activity, Leave balances, FX gains | ✅ |
 | | Drill-down, CSV / Excel / print-to-PDF export | ✅ |
-| | Custom report builder & report packs | ⬜ |
+| | Custom report builder (layouts, formulas) & report packs | ✅ |
 | **Projects** | Projects, tasks (hourly/fixed/non-chargeable), timer, costs with markup, invoice from project, profitability | ✅ |
 | **Payroll** | Employees, calendars, pay items, timesheets, leave, pay runs, payslips, journals, net-pay bank transaction | ✅ |
 | | Tax tables AU / UK / NZ / US / generic | 🟡 approximations — verify |
@@ -93,7 +93,7 @@ macOS / Linux: `cd ui && npm install && npm run build && cd .. && cargo run --re
 | **Platform** | Global search, command palette (Ctrl+K), keyboard shortcuts, notifications | ✅ |
 | | Import from Xero / QBO / MYOB / Wave CSV (contacts, accounts, items, invoices, bills, journals, trial balance) with dry run | ✅ |
 | | Full export (CSV + JSON archive), backup | ✅ |
-| | Local REST API (token auth, OpenAPI), webhooks | ✅ (webhook delivery worker ⬜ — events are queued) |
+| | Local REST API (token auth, OpenAPI), signed webhooks with background delivery | ✅ |
 | | Dark & light themes | ✅ |
 
 ---

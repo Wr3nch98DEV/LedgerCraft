@@ -48,7 +48,7 @@
     <thead>
       <tr>
         {#if showItems}<th class="w-[130px]">Item</th>{/if}
-        <th>Description</th>
+        <th class="min-w-[200px]">Description</th>
         {#if showQty}<th class="w-[80px] !text-right">Qty</th><th class="w-[110px] !text-right">Price</th>{/if}
         {#if hasDiscount || showDisc}<th class="w-[70px] !text-right">Disc %</th>{/if}
         <th class="w-[200px]">Account</th>
