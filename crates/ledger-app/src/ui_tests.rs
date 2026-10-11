@@ -20,8 +20,14 @@ fn demo_app(tag: &str, skin: Skin) -> (App, std::path::PathBuf) {
     (app, dir)
 }
 
+/// iced's headless renderer isn't safe to run from several test threads at once, so
+/// simulator use is serialised (the app itself only ever has one renderer).
+static SIM: std::sync::Mutex<()> = std::sync::Mutex::new(());
+fn sim_lock() -> std::sync::MutexGuard<'static, ()> { SIM.lock().unwrap_or_else(|e| e.into_inner()) }
+
 /// Click the widget showing `label` and return the messages it produced.
 fn click(app: &App, label: &str) -> Vec<Message> {
+    let _g = sim_lock();
     let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 1400.0), app.view());
     ui.click(label).unwrap_or_else(|e| panic!("couldn't click {label:?}: {e:?}"));
     ui.into_messages().collect()
@@ -37,6 +43,7 @@ fn quickbooks_new_menu_opens_invoice_editor() {
     assert!(app.new_menu);
     // QuickBooks groups the menu under Customers / Vendors / Employees / Other.
     {
+        let _g = sim_lock();
         let mut ui = simulator(app.view());
         for heading in ["CUSTOMERS", "VENDORS", "EMPLOYEES", "OTHER"] { assert!(ui.find(heading).is_ok(), "missing {heading}"); }
     }
@@ -205,5 +212,24 @@ fn xero_reconcile_ok_button() {
         other => panic!("unexpected {other:?}"),
     }
     assert_eq!(app.be.call_now("statements.lines", json!({"account_id": acc})).unwrap().as_array().unwrap().len(), n - 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn transfer_and_save_and_send() {
+    let (mut app, dir) = demo_app("transfer", Skin::QuickBooks);
+    let _ = app.update(Message::Nav(Route::Transfer));
+    let f = app.form.as_ref().unwrap();
+    assert!(f.from.is_some() && f.to.is_some() && f.from != f.to, "two different bank accounts preselected");
+    let _ = app.update(Message::Form(crate::forms::Msg::Amount("125.00".into())));
+    let msgs = click(&app, "Save");
+    assert!(matches!(msgs.first(), Some(Message::Form(crate::forms::Msg::Save))), "{msgs:?}");
+    let f = app.form.as_ref().unwrap();
+    let date = crate::ui::to_iso(&f.date, app.date_style()).unwrap();
+    app.be.call_now("transfers.save", json!({"from_account_id": f.from.as_ref().unwrap().id, "to_account_id": f.to.as_ref().unwrap().id, "date": date, "amount": "125.00", "reference": ""})).unwrap();
+    // A new invoice offers Save and send (QuickBooks' main action).
+    let _ = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None }));
+    let msgs = click(&app, "Save and send");
+    assert!(matches!(msgs.first(), Some(Message::Doc(crate::doc::Msg::SaveAndSend))), "{msgs:?}");
     let _ = std::fs::remove_dir_all(dir);
 }

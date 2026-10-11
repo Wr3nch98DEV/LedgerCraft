@@ -42,6 +42,8 @@ pub struct Editor {
     pub pay_date: String,
     pub pay_account: Option<Opt>,
     pub error: Option<String>,
+    /// Email the document once the save succeeds ("Save and send").
+    pub send_after: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -78,6 +80,9 @@ pub enum Msg {
     /// Save the document as a PDF and open it (to view or print).
     Print,
     Printed(Result<String, String>),
+    SaveAndSend,
+    Send,
+    Sent(Result<Value, String>),
 }
 
 /// How line amounts relate to tax.
@@ -138,7 +143,7 @@ impl Editor {
             lat: if app.country() == "US" { "EXCLUSIVE".into() } else { "EXCLUSIVE".into() },
             lines: vec![Line { qty: "1".into(), ..Default::default() }, Line { qty: "1".into(), ..Default::default() }],
             terms: String::new(), busy: false, editing: true,
-            pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None,
+            pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false,
         };
         if let Some(a) = default_account(app, kind) { for l in &mut e.lines { l.account = Some(a.clone()); l.tax = default_tax(app, Some(a.id)); } }
         e
@@ -303,11 +308,37 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::Terms(s) => { e.terms = s; Task::none() }
         Msg::Save(approve) => save(app, &mut e, approve, false),
         Msg::SaveAndNew => save(app, &mut e, true, true),
+        Msg::SaveAndSend => { e.send_after = true; save(app, &mut e, true, false) }
+        Msg::Send => {
+            let Some(id) = e.id else { app.doc = Some(e); return Task::none() };
+            app.doc = Some(e);
+            return app.be.call("docs.email", json!({"id": id}), |r| Message::Doc(Msg::Sent(r)));
+        }
+        Msg::Sent(r) => match r {
+            Ok(v) => {
+                let msg = if v["queued"] == true { "Emailed - it goes out within a few minutes" } else { "Saved to the Outbox (set up email sending in the web version: Settings, Email)" };
+                let t1 = app.toast(msg, false);
+                app.doc = Some(e);
+                return Task::batch([t1, app.load()]);
+            }
+            Err(err) => app.toast(err, true),
+        },
         Msg::Saved(r, new_after) => {
             e.busy = false;
             match r {
                 Ok(v) => {
                     let id = v["id"].as_i64();
+                    if e.send_after {
+                        e.send_after = false;
+                        if let Some(id) = id {
+                            let kind = e.kind.clone();
+                            app.doc = Some(e);
+                            let t0 = app.be.call("docs.email", json!({"id": id}), |r| Message::Doc(Msg::Sent(r)));
+                            let t1 = app.load_lookups();
+                            let t2 = app.go(Route::Doc { kind, id: Some(id) });
+                            return Task::batch([t2, t0, t1]);
+                        }
+                    }
                     let label = title_for(app, &e.kind);
                     let t1 = app.toast(format!("{label} saved"), false);
                     let t2 = app.load_lookups();
@@ -527,7 +558,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
             Skin::QuickBooks => {
                 if e.doc.is_none() || status == "DRAFT" { actions.push(ui::btn("Save draft", m(Msg::Save(false)))); }
                 actions.push(ui::btn("Save and new", m(Msg::SaveAndNew)));
-                actions.push(ui::btn_primary(if e.kind == "QUOTE" || e.kind == "PO" { "Save" } else { "Save and close" }, m(Msg::Save(true))));
+                if sales(&e.kind) { actions.push(ui::btn("Save and close", m(Msg::Save(true)))); actions.push(ui::btn_primary("Save and send", m(Msg::SaveAndSend))); }
+                else { actions.push(ui::btn_primary(if e.kind == "PO" { "Save" } else { "Save and close" }, m(Msg::Save(true)))); }
             }
             Skin::Xero => {
                 actions.push(ui::btn("Save draft", m(Msg::Save(false))));
@@ -545,6 +577,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             actions.push(ui::btn("Edit", m(Msg::Edit)));
         }
         actions.push(ui::btn(if app.skin == Skin::QuickBooks { "Print or preview" } else { "Print / PDF" }, m(Msg::Print)));
+        if sales(&e.kind) && matches!(status, "AUTHORISED" | "SENT" | "PAID") { actions.push(ui::btn(if app.skin == Skin::QuickBooks { "Send" } else { "Email" }, m(Msg::Send))); }
         actions.push(ui::btn("Copy", m(Msg::Action("copy"))));
         if matches!(status, "AUTHORISED" | "PAID") && ledger_doc(&e.kind) { actions.push(ui::btn_danger("Void", m(Msg::Action("void")))); }
     }

@@ -28,13 +28,16 @@ pub struct State {
     pub memo: String,
     pub lines: Vec<JLine>,
     pub busy: bool,
+    pub from: Option<Opt>,
+    pub to: Option<Opt>,
+    pub amount: String,
 }
 
 #[derive(Debug, Clone)]
 pub enum Msg {
     Name(String), Email(String), Phone(String), Code(String), Price(String), Cost(String),
     SaleAccount(Opt), PurchaseAccount(Opt), Tax(Opt), Service(bool),
-    Date(String), Memo(String), JAccount(usize, Opt), JDesc(usize, String), JDebit(usize, String), JCredit(usize, String), AddLine,
+    Date(String), Memo(String), From(Opt), To(Opt), Amount(String), JAccount(usize, Opt), JDesc(usize, String), JDebit(usize, String), JCredit(usize, String), AddLine,
     Save, Saved(Result<Value, String>),
 }
 
@@ -44,6 +47,9 @@ pub fn open(app: &mut App) -> Task<Message> {
     s.sale_account = find("200");
     s.purchase_account = find("310").or_else(|| find("429"));
     s.lines = vec![JLine::default(), JLine::default()];
+    let banks = app.lk.bank_opts();
+    s.from = banks.first().cloned();
+    s.to = banks.get(1).cloned();
     app.form = Some(s);
     app.data = Some(json!({}));
     Task::none()
@@ -64,6 +70,9 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::Tax(x) => { s.tax = Some(x); Task::none() }
         Msg::Service(v) => { s.service = v; Task::none() }
         Msg::Date(v) => { s.date = v; Task::none() }
+        Msg::From(v) => { s.from = Some(v); Task::none() }
+        Msg::To(v) => { s.to = Some(v); Task::none() }
+        Msg::Amount(v) => { s.amount = v; Task::none() }
         Msg::Memo(v) => { s.memo = v; Task::none() }
         Msg::JAccount(n, a) => { s.lines[n].account = Some(a); if n + 1 == s.lines.len() { s.lines.push(JLine::default()); } Task::none() }
         Msg::JDesc(n, v) => { s.lines[n].description = v; Task::none() }
@@ -76,6 +85,13 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                 Route::NewContact(_) => {
                     if s.name.trim().is_empty() { app.form = Some(s); return app.toast("Enter a name", true); }
                     ("contacts.create", json!({"name": s.name.trim(), "email": s.email.trim(), "phone": s.phone.trim(), "is_customer": s.customer, "is_supplier": !s.customer}))
+                }
+                Route::Transfer => {
+                    let (Some(f), Some(t)) = (s.from.clone(), s.to.clone()) else { app.form = Some(s); return app.toast("Choose both accounts", true) };
+                    if f.id == t.id { app.form = Some(s); return app.toast("Choose two different accounts", true); }
+                    let Some(date) = ui::to_iso(&s.date, style) else { app.form = Some(s); return app.toast("Check the date", true) };
+                    if ui::parse_money(&s.amount).unwrap_or(0) <= 0 { app.form = Some(s); return app.toast("Enter the amount", true); }
+                    ("transfers.save", json!({"from_account_id": f.id, "to_account_id": t.id, "date": date, "amount": s.amount.replace(',', ""), "reference": s.memo.trim()}))
                 }
                 Route::NewProduct => {
                     if s.name.trim().is_empty() { app.form = Some(s); return app.toast("Enter a name", true); }
@@ -103,6 +119,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                     let (msg, next) = match &app.route {
                         Route::NewContact(c) => ("Saved", v["id"].as_i64().map(Route::Contact).unwrap_or(if *c { Route::Customers } else { Route::Vendors })),
                         Route::NewProduct => ("Product saved", Route::Products),
+                        Route::Transfer => ("Transfer recorded", Route::Banking(None)),
                         _ => ("Journal entry posted", Route::Report("journal-report".into())),
                     };
                     let t1 = app.toast(msg, false);
@@ -137,6 +154,19 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 ui::card(column![
                     ui::field(if *customer { "Customer display name" } else { "Company or name" }, &s.name, |v| Message::Form(Msg::Name(v))),
                     row![ui::field("Email", &s.email, |v| Message::Form(Msg::Email(v))), ui::field("Phone", &s.phone, |v| Message::Form(Msg::Phone(v)))].spacing(14),
+                ].spacing(14)),
+                footer(s.busy),
+            ].spacing(14).into())
+        }
+        Route::Transfer => {
+            let banks = app.lk.bank_opts();
+            let pick = |label: &str, sel: &Option<Opt>, f: fn(Opt) -> Msg| -> Element<'_, Message> {
+                column![ui::label(label.to_string()), pick_list(banks.clone(), sel.clone(), move |o| Message::Form(f(o))).padding([7, 10]).text_size(14).style(theme::pick).width(Fill)].spacing(5).width(Fill).into()
+            };
+            ui::page(ui::h1("Transfer"), vec![], column![
+                ui::card(column![
+                    row![pick("Transfer funds from", &s.from, Msg::From), pick("Transfer funds to", &s.to, Msg::To)].spacing(14),
+                    row![ui::field("Transfer amount", &s.amount, |v| Message::Form(Msg::Amount(v))), ui::field("Date", &s.date, |v| Message::Form(Msg::Date(v))), ui::field("Memo", &s.memo, |v| Message::Form(Msg::Memo(v)))].spacing(14),
                 ].spacing(14)),
                 footer(s.busy),
             ].spacing(14).into())

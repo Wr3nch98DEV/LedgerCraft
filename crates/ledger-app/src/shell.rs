@@ -84,7 +84,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::Settings => settings::view(app),
         Route::Doc { .. } => doc::view(app),
         Route::ReceivePayment(_) | Route::PayBills | Route::Spend(_) => payments::view(app),
-        Route::NewContact(_) | Route::NewProduct | Route::Journal => forms::view(app),
+        Route::NewContact(_) | Route::NewProduct | Route::Journal | Route::Transfer => forms::view(app),
         Route::Payroll => people::payroll(app),
         Route::PayRun(_) => people::pay_run(app),
         Route::Taxes => people::taxes(app),
@@ -112,7 +112,7 @@ fn placeholder<'a>(_app: &'a App, name: &'a str) -> Element<'a, Message> {
 fn qb_section(r: &Route) -> &'static str {
     match r {
         Route::Dashboard => "dashboard",
-        Route::Banking(_) => "banking",
+        Route::Banking(_) | Route::Transfer => "banking",
         Route::AllSales | Route::Invoices | Route::Quotes | Route::CreditNotes | Route::Customers | Route::Products | Route::ReceivePayment(_) => "sales",
         Route::Expenses | Route::Bills | Route::Vendors | Route::PurchaseOrders | Route::PayBills | Route::Spend(_) => "expenses",
         Route::Doc { kind, .. } => if matches!(kind.as_str(), "ACCREC" | "QUOTE" | "ACCRECCREDIT") { "sales" } else { "expenses" },
@@ -250,7 +250,7 @@ fn new_menu(app: &App) -> Element<'_, Message> {
             menu_col("Vendors", vec![("Expense", Some(Message::Nav(Route::Spend(None)))), ("Check", None), ("Bill", doc_route("ACCPAY")), ("Pay bills", Some(Message::Nav(Route::PayBills))),
                 ("Purchase order", doc_route("PO")), ("Vendor credit", doc_route("ACCPAYCREDIT")), ("Credit card credit", None), ("Print checks", None)]),
             menu_col("Employees", vec![("Payroll", Some(Message::Nav(Route::Payroll))), ("Single time activity", None), ("Weekly timesheet", None)]),
-            menu_col("Other", vec![("Bank deposit", None), ("Transfer", None), ("Journal entry", Some(Message::Nav(Route::Journal))), ("Statement", None), ("Inventory qty adjustment", None), ("Pay down credit card", None)]),
+            menu_col("Other", vec![("Bank deposit", None), ("Transfer", Some(Message::Nav(Route::Transfer))), ("Journal entry", Some(Message::Nav(Route::Journal))), ("Statement", None), ("Inventory qty adjustment", None), ("Pay down credit card", None)]),
         ].spacing(18).into(),
         Skin::Xero => column![
             menu_col("Create new", vec![("Invoice", doc_route("ACCREC")), ("Bill", doc_route("ACCPAY")), ("Contact", Some(Message::Nav(Route::NewContact(true)))), ("Quote", doc_route("QUOTE")),
