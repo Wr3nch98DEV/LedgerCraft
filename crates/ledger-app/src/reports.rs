@@ -40,7 +40,7 @@ impl std::fmt::Display for Period {
 pub struct State { pub period: Period, pub cash: bool }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Period(Period), Basis(bool) }
+pub enum Msg { Period(Period), Basis(bool), Export(bool), Exported(Result<String, String>) }
 
 pub fn load(app: &mut App, key: &str) -> Task<Message> {
     let (from, to) = app.report.period.range();
@@ -50,7 +50,28 @@ pub fn load(app: &mut App, key: &str) -> Task<Message> {
 }
 
 pub fn update(app: &mut App, m: Msg) -> Task<Message> {
-    match m { Msg::Period(p) => app.report.period = p, Msg::Basis(c) => app.report.cash = c }
+    match m {
+        Msg::Period(p) => app.report.period = p,
+        Msg::Basis(c) => app.report.cash = c,
+        Msg::Export(pdf) => {
+            let (Some(rep), Route::Report(key)) = (app.data.clone(), app.route.clone()) else { return Task::none() };
+            let skin = app.skin;
+            let title = name(skin, &key, rep["title"].as_str().unwrap_or("Report"));
+            let letter = matches!(app.country().as_str(), "US" | "CA");
+            return Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<String, String> {
+                    let relabel = |s: &str| qb_label(skin, s);
+                    let safe: String = title.chars().map(|c| if c.is_alphanumeric() || c == ' ' { c } else { '-' }).collect();
+                    let path = crate::pdf::output_dir().join(format!("{} {}.{}", safe.trim(), chrono::Local::now().format("%Y-%m-%d"), if pdf { "pdf" } else { "csv" }));
+                    let written = if pdf { std::fs::write(&path, crate::pdf::report(&rep, &title, letter, &relabel)) } else { std::fs::write(&path, crate::pdf::report_csv(&rep, &relabel)) };
+                    written.map_err(|e| format!("Couldn't save: {e}"))?;
+                    crate::pdf::open_file(&path);
+                    Ok(path.display().to_string())
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Report(Msg::Exported(r)));
+        }
+        Msg::Exported(r) => return match r { Ok(p) => app.toast(format!("Saved {p}"), false), Err(e) => app.toast(e, true) },
+    }
     app.load()
 }
 
@@ -119,7 +140,7 @@ pub fn centre(app: &App) -> Element<'_, Message> {
 }
 
 /// QuickBooks wording for the engine's report section names.
-fn qb_label(skin: Skin, s: &str) -> String {
+pub fn qb_label(skin: Skin, s: &str) -> String {
     if skin == Skin::Xero { return s.to_string(); }
     match s {
         "Trading Income" | "Revenue" => "Income".into(), "Total Trading Income" | "Total Revenue" => "Total Income".into(),
@@ -145,7 +166,11 @@ pub fn view(app: &App) -> Element<'_, Message> {
             button(text("Cash").size(14)).style(if app.report.cash { theme::primary } else { theme::secondary }).padding([7, 14]).on_press(Message::Report(Msg::Basis(true))),
         ].spacing(4)].spacing(5),
         ui::hspace(),
-        column![Space::new().height(18), ui::btn("Back to report list", Some(Message::Nav(Route::Reports)))],
+        column![Space::new().height(18), row![
+            ui::btn("Export to PDF", app.data.as_ref().map(|_| Message::Report(Msg::Export(true)))),
+            ui::btn(if app.skin == Skin::QuickBooks { "Export to Excel (CSV)" } else { "Export CSV" }, app.data.as_ref().map(|_| Message::Report(Msg::Export(false)))),
+            ui::btn("Back to report list", Some(Message::Nav(Route::Reports))),
+        ].spacing(6)],
     ].spacing(14).align_y(Alignment::End);
     let Some(d) = &app.data else {
         let body: Element<Message> = match &app.error { Some(e) => ui::card(column![ui::h2("Couldn't run this report"), ui::muted(e.clone())].spacing(6)), None => ui::muted("Running report…") };
