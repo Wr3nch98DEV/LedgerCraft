@@ -87,7 +87,7 @@ macOS / Linux: `cd ui && npm install && npm run build && cd .. && cargo run --re
 | | Drill-down, CSV / Excel / print-to-PDF export | ✅ |
 | | Custom report builder (layouts, formulas) & report packs | ✅ |
 | **Projects** | Projects, tasks (hourly/fixed/non-chargeable), timer, costs with markup, invoice from project, profitability | ✅ |
-| **Payroll** | Employees, calendars, pay items, timesheets, leave, pay runs, payslips, journals, net-pay bank transaction | ✅ |
+| **Payroll** | Employees, calendars, pay items, timesheets, leave, pay runs, payslips, journals, net-pay bank transaction, wages bank file (ABA/BACS/NACHA/SEPA) | ✅ |
 | | Tax tables AU / UK / NZ / US / generic | 🟡 approximations — verify |
 | | STP / RTI / IR filing | 🟡 export file only |
 | **Platform** | Global search, command palette (Ctrl+K), keyboard shortcuts, notifications | ✅ |
