@@ -101,8 +101,18 @@ pub fn document_html(l: &Ledger, id: i64, online: bool) -> Result<String, String
     }
     totals += &format!("<div class='grand'><span>TOTAL {}</span><span>{}</span></div>", esc(d["currency"].as_str().unwrap_or("")), m(&d["total"]));
     if matches!(kind, "ACCREC" | "ACCPAY" | "ACCRECCREDIT" | "ACCPAYCREDIT") {
-        let paid = d["amount_paid"].as_i64().unwrap_or(0) + d["amount_credited"].as_i64().unwrap_or(0);
-        if paid > 0 { totals += &format!("<div><span>Less amount paid</span><span>{}</span></div>", group(&fmt_money(paid))); }
+        // Itemise credit notes applied (as Xero does); payments are shown as one line.
+        let credit_doc = matches!(kind, "ACCRECCREDIT" | "ACCPAYCREDIT");
+        let mut credited_listed = 0;
+        for a in d["allocations"].as_array().cloned().unwrap_or_default() {
+            let amt = a["amount"].as_i64().unwrap_or(0);
+            let label = if credit_doc { format!("Allocated to {}", a["document_number"].as_str().unwrap_or("")) } else { format!("Less Credit Note {}", a["credit_number"].as_str().unwrap_or("")) };
+            totals += &format!("<div><span>{}</span><span>{}</span></div>", esc(&label), group(&fmt_money(amt)));
+            credited_listed += amt;
+        }
+        let other_credit = d["amount_credited"].as_i64().unwrap_or(0) - credited_listed;
+        let paid = d["amount_paid"].as_i64().unwrap_or(0) + other_credit.max(0);
+        if paid > 0 { totals += &format!("<div><span>{}</span><span>{}</span></div>", if credit_doc { "Less refunds" } else { "Less amount paid" }, group(&fmt_money(paid))); }
         totals += &format!("<div class='grand'><span>AMOUNT DUE {}</span><span>{}</span></div>", esc(d["currency"].as_str().unwrap_or("")), m(&d["amount_due"]));
     }
     let meta = match kind {
@@ -129,7 +139,7 @@ pub fn document_html(l: &Ledger, id: i64, online: bool) -> Result<String, String
     } else { String::new() };
     let status = if online && kind == "QUOTE" { quote_form } else if online {
         let due = d["amount_due"].as_i64().unwrap_or(0);
-        format!("<div style='margin-top:8px'>{}</div>", if d["status"] == "PAID" { "<span class='status'>Paid</span>".to_string() } else if due > 0 { format!("<span class='status due'>{} due {}</span>", m(&d["amount_due"]), d["due_date"].as_str().map(fmt_long).unwrap_or_default()) } else { String::new() })
+        format!("<div style='margin-top:8px'>{}</div>", if d["status"] == "PAID" { "<span class='status'>Paid</span>".to_string() } else if due > 0 && d["overdue"].as_i64().unwrap_or(0) == 1 { format!("<span class='status due'>{} overdue · was due {}</span>", m(&d["amount_due"]), d["due_date"].as_str().map(fmt_long).unwrap_or_default()) } else if due > 0 { format!("<span class='status due'>{} due {}</span>", m(&d["amount_due"]), d["due_date"].as_str().map(fmt_long).unwrap_or_default()) } else { String::new() })
     } else { String::new() };
     let disc_head = if has_disc { "<th class='n'>Disc.</th>" } else { "" };
     Ok(format!(r#"<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title} {num}</title><style>{STYLE}:root{{--accent:{accent}}}</style></head><body>
