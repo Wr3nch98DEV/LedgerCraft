@@ -70,7 +70,7 @@ impl Ledger {
             let pid = self.conn.last_insert_rowid();
             self.conn.execute("UPDATE journals SET source_id = ?2 WHERE id = ?1", params![jid, pid])?;
             self.refresh_paid(p.document_id)?;
-            self.add_note("document", p.document_id, "HISTORY", &format!("Payment of {} {} received on {}", currency, money::fmt_money(amount), p.date))?;
+            self.add_note("document", p.document_id, "HISTORY", &format!("Payment of {} {} received on {}", currency, money::fmt_money_grouped(amount), p.date))?;
             self.audit("CREATE", "payment", Some(pid), None, Some(json!({"document_id": p.document_id, "amount": amount})))?;
             Ok(pid)
         })
@@ -160,8 +160,8 @@ impl Ledger {
             let aid = self.conn.last_insert_rowid();
             self.refresh_paid(credit_id)?;
             self.refresh_paid(doc_id)?;
-            self.add_note("document", doc_id, "HISTORY", &format!("Credit note {} applied for {}", cn.8, money::fmt_money(amount)))?;
-            self.add_note("document", credit_id, "HISTORY", &format!("Allocated {} to {}", money::fmt_money(amount), doc.8))?;
+            self.add_note("document", doc_id, "HISTORY", &format!("Credit note {} applied for {}", cn.8, money::fmt_money_grouped(amount)))?;
+            self.add_note("document", credit_id, "HISTORY", &format!("Allocated {} to {}", money::fmt_money_grouped(amount), doc.8))?;
             Ok(aid)
         })
     }

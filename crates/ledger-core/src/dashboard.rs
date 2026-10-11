@@ -82,9 +82,9 @@ pub fn notifications(l: &Ledger) -> Result<Vec<Value>> {
     let mut out = Vec::new();
     let due_sql = "SELECT COUNT(*), COALESCE(SUM(total - amount_paid - amount_credited), 0) FROM documents WHERE type = ?1 AND status = 'AUTHORISED' AND due_date < ?2";
     let (n, amt): (i64, i64) = l.conn.query_row(due_sql, params!["ACCREC", today], |r| Ok((r.get(0)?, r.get(1)?)))?;
-    if n > 0 { out.push(json!({"kind": "overdue_invoices", "level": "warn", "text": n.to_string() + " overdue invoice" + plural(n) + " (" + &money::fmt_money(amt) + ")", "link": "/sales/invoices?tab=overdue"})); }
+    if n > 0 { out.push(json!({"kind": "overdue_invoices", "level": "warn", "text": n.to_string() + " overdue invoice" + plural(n) + " (" + &money::fmt_money_grouped(amt) + ")", "link": "/sales/invoices?tab=overdue"})); }
     let (n, amt): (i64, i64) = l.conn.query_row(due_sql, params!["ACCPAY", today], |r| Ok((r.get(0)?, r.get(1)?)))?;
-    if n > 0 { out.push(json!({"kind": "overdue_bills", "level": "warn", "text": n.to_string() + " overdue bill" + plural(n) + " (" + &money::fmt_money(amt) + ")", "link": "/purchases/bills?tab=overdue"})); }
+    if n > 0 { out.push(json!({"kind": "overdue_bills", "level": "warn", "text": n.to_string() + " overdue bill" + plural(n) + " (" + &money::fmt_money_grouped(amt) + ")", "link": "/purchases/bills?tab=overdue"})); }
     let n: i64 = l.conn.query_row("SELECT COUNT(*) FROM statement_lines WHERE status = 'UNRECONCILED'", [], |r| r.get(0))?;
     if n > 0 { out.push(json!({"kind": "reconcile", "level": "info", "text": n.to_string() + " statement line" + plural(n) + " to reconcile", "link": "/banking"})); }
     let n: i64 = l.conn.query_row("SELECT COUNT(*) FROM documents WHERE status = 'SUBMITTED'", [], |r| r.get(0))?;

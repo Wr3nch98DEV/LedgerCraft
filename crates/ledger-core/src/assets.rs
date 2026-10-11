@@ -294,7 +294,7 @@ impl Ledger {
             if diff != 0 { lines.push(JLine::new(gain_loss_account_id, -diff).desc(format!("{} on disposal of {name}", if diff > 0 { "Gain" } else { "Loss" }))); }
             let jid = self.post_journal(NewJournal { date: date.into(), source_type: "ASSETDISPOSAL".into(), source_id: Some(id), reference: name.clone(), narration: format!("Disposal of {name}"), lines, cash_basis: true, reverses: None })?;
             self.conn.execute("UPDATE fixed_assets SET status = 'DISPOSED', disposal_date = ?2, disposal_price = ?3, disposal_journal_id = ?4 WHERE id = ?1", params![id, date, price, jid])?;
-            self.add_note("asset", id, "HISTORY", &format!("Disposed on {date} for {}", money::fmt_money(price)))?;
+            self.add_note("asset", id, "HISTORY", &format!("Disposed on {date} for {}", money::fmt_money_grouped(price)))?;
             Ok(jid)
         })
     }

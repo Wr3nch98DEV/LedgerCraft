@@ -137,7 +137,7 @@ impl Ledger {
             self.index_search("banktx", tid, &format!("{} {} {}", if receive { "Receive money" } else { "Spend money" }, cname, t.reference), &money::fmt_money(total))?;
             self.audit(if id.is_some() { "UPDATE" } else { "CREATE" }, "bank_transaction", Some(tid), None, Some(json!({"type": t.kind, "total": total})))?;
             let what = if receive { "Receive money" } else { "Spend money" };
-            self.add_note("banktx", tid, "HISTORY", &format!("{} {} for {}", what, if id.is_some() { "edited" } else { "created" }, money::fmt_money(total)))?;
+            self.add_note("banktx", tid, "HISTORY", &format!("{} {} for {}", what, if id.is_some() { "edited" } else { "created" }, money::fmt_money_grouped(total)))?;
             Ok(tid)
         })
     }
@@ -232,8 +232,8 @@ impl Ledger {
             let aid = self.conn.last_insert_rowid();
             self.conn.execute("UPDATE bank_transactions SET remaining_credit = remaining_credit - ?2 WHERE id = ?1", params![tx_id, amount])?;
             self.refresh_paid(doc_id)?;
-            self.add_note("document", doc_id, "HISTORY", &format!("Credit of {} applied", money::fmt_money(amount)))?;
-            self.add_note("banktx", tx_id, "HISTORY", &format!("{} applied to a document", money::fmt_money(amount)))?;
+            self.add_note("document", doc_id, "HISTORY", &format!("Credit of {} applied", money::fmt_money_grouped(amount)))?;
+            self.add_note("banktx", tx_id, "HISTORY", &format!("{} applied to a document", money::fmt_money_grouped(amount)))?;
             Ok(aid)
         })
     }

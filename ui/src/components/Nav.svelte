@@ -95,7 +95,7 @@
   const initials = $derived((session.data?.user?.name ?? '?').split(' ').map((s: string) => s[0]).join('').slice(0, 2).toUpperCase());
 </script>
 
-<svelte:window onclick={closeAll} />
+<svelte:window onclick={closeAll} onkeydown={(e) => { if (e.key === 'Escape' && (open || orgMenu || userMenu || ui.newMenu)) { open = null; orgMenu = false; userMenu = false; ui.newMenu = false; } }} />
 
 <header class="no-print sticky top-0 z-30 border-b border-line bg-bg2/95 backdrop-blur">
   <div class="mx-auto flex h-14 max-w-[1440px] items-center gap-1 px-4">

@@ -186,7 +186,7 @@ impl Ledger {
             self.audit(if id.is_some() { "UPDATE" } else { "CREATE" }, "manual_journal", Some(mid), None, Some(json!({"narration": m.narration})))?;
             let posted = m.status.as_deref() == Some("POSTED");
             let what = match (id.is_some(), posted) { (false, true) => "Journal created and posted", (false, false) => "Draft journal created", (true, true) => "Journal edited and reposted", (true, false) => "Journal edited (saved as draft)" };
-            self.add_note("manual_journal", mid, "HISTORY", &format!("{} — total {}", what, money::fmt_money(computed.iter().filter(|c| c.net + c.tax > 0).map(|c| c.net + c.tax).sum())))?;
+            self.add_note("manual_journal", mid, "HISTORY", &format!("{} — total {}", what, money::fmt_money_grouped(computed.iter().filter(|c| c.net + c.tax > 0).map(|c| c.net + c.tax).sum())))?;
             self.index_search("manual_journal", mid, &format!("Manual journal {}", m.narration), "")?;
             Ok(mid)
         })
