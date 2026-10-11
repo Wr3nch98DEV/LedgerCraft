@@ -38,6 +38,14 @@
   function toggle(id: string) { layout.hidden = layout.hidden.includes(id) ? layout.hidden.filter((x) => x !== id) : [...layout.hidden, id]; persist(); }
   function reset() { layout = { order: WIDGETS.map((w) => w.id), hidden: [] }; persist(); }
   const labelOf = (id: string) => WIDGETS.find((w) => w.id === id)?.label ?? id;
+
+  // Getting-started checklist, hidden once complete or dismissed (remembered per organisation in this browser).
+  const gsKey = $derived(`lc.gettingStarted.hidden.${session.data?.org?.file ?? session.data?.org?.name ?? ''}`);
+  let gsHidden = $state(false);
+  $effect(() => { try { gsHidden = localStorage.getItem(gsKey) === '1'; } catch { gsHidden = false; } });
+  function hideGs() { gsHidden = true; try { localStorage.setItem(gsKey, '1'); } catch {} }
+  const gs = $derived<any[]>(d?.getting_started ?? []);
+  const gsDone = $derived(gs.filter((x) => x.done).length);
 </script>
 
 <PageHeader title={`${greeting}${first && first !== 'Owner' ? ', ' + first : ''}`}>
@@ -63,6 +71,21 @@
 {#if !d}
   <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{#each Array(6) as _}<div class="card h-56 animate-pulse"></div>{/each}</div>
 {:else}
+  {#if gs.length && gsDone < gs.length && !gsHidden}
+    <section class="card mb-4 p-5">
+      <div class="mb-3 flex items-center justify-between gap-3">
+        <div><div class="text-[15px] font-semibold">Get set up</div><div class="text-[13px] text-muted">{gsDone} of {gs.length} done — each step ticks itself off as you go.</div></div>
+        <button class="btn btn-ghost btn-sm" onclick={hideGs}>Hide</button>
+      </div>
+      <div class="mb-3 h-1.5 overflow-hidden rounded-full bg-bg2"><div class="h-full rounded-full bg-accent" style="width:{(gsDone / gs.length) * 100}%"></div></div>
+      <ul class="grid gap-1 sm:grid-cols-2">
+        {#each gs as step}
+          <li><a href={step.link} class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[14px] hover:bg-hover {step.done ? 'text-muted line-through' : ''}">
+            <span class="grid h-5 w-5 shrink-0 place-items-center rounded-full border {step.done ? 'border-accent bg-accent text-accent-ink' : 'border-line2'}">{#if step.done}<Icon name="check" size={12} />{/if}</span>{step.text}</a></li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
   {#if d.tasks.length}
     <div class="mb-4 flex flex-wrap gap-2">
       {#each d.tasks as t}

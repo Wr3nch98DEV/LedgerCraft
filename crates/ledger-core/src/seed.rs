@@ -87,7 +87,8 @@ pub fn profile(country: &str) -> CountryProfile {
 fn chart(tax_label: &str) -> Vec<(&'static str, String, &'static str, &'static str, Option<&'static str>, bool)> {
     let t = tax_label;
     vec![
-        ("090", "Business Cheque Account".into(), "BANK", "NONE", None, false),
+        // Local naming: "current account" in VAT countries (UK/IE), "checking" where tax is sales tax (US), "cheque" otherwise.
+        ("090", match t { "VAT" => "Business Current Account", "GST" => "Business Cheque Account", "GST/HST" => "Business Chequing Account", _ => "Business Checking Account" }.into(), "BANK", "NONE", None, false),
         ("091", "Business Savings Account".into(), "BANK", "NONE", None, false),
         ("200", "Sales".into(), "REVENUE", "SALES", None, false),
         ("260", "Other Revenue".into(), "REVENUE", "SALES", None, false),

@@ -11,7 +11,8 @@
   import Status from '../components/Status.svelte';
   import Combo from '../components/Combo.svelte';
   import { accountOptions, taxOptions } from '../components/Pickers';
-  import { lookups } from '../lib/stores.svelte';
+  import { lookups, loadLookups } from '../lib/stores.svelte';
+  import Modal from '../components/Modal.svelte';
 
   let { id }: { id: string } = $props();
   let account = $state<any>(null);
@@ -30,6 +31,19 @@
   }
   Promise.all([loadAccount(), loadLines()]).catch(toastError);
   $effect(() => { tab; loadTab().catch(toastError); });
+  let editOpen = $state(false);
+  let editF = $state<any>(null);
+  async function openDetails() {
+    try { const a = await rpc('accounts.get', { id: account.id }); editF = { ...a, bank_account_number: a.bank_account_number ?? '' }; editOpen = true; } catch (e) { toastError(e); }
+  }
+  async function saveDetails() {
+    try {
+      const a = editF;
+      await rpc('accounts.update', { id: account.id, account: { code: a.code, name: a.name, type: a.type, tax_rate_id: a.tax_rate_id, description: a.description ?? '', enable_payments: !!a.enable_payments,
+        show_in_expense_claims: !!a.show_in_expense_claims, dashboard_watch: !!a.dashboard_watch, bank_account_number: a.bank_account_number } });
+      editOpen = false; toast('Account details saved'); await loadAccount(); loadLookups();
+    } catch (e) { toastError(e); }
+  }
   function done(lineId: number) { lines = (lines ?? []).filter((l) => l.id !== lineId); loadAccount(); }
   async function auto() {
     busy = true;
@@ -52,6 +66,20 @@
 </script>
 
 {#if account}
+<Modal bind:open={editOpen} title="Edit account details" width={480}>
+  {#if editF}
+    <div class="grid gap-3">
+      <div><label class="label" for="ea-name">Account name</label><input id="ea-name" class="input" bind:value={editF.name} /></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="label" for="ea-code">Code</label><input id="ea-code" class="input" bind:value={editF.code} /></div>
+        <div><label class="label" for="ea-num">Account number</label><input id="ea-num" class="input" bind:value={editF.bank_account_number} placeholder="e.g. 062-000 1234 5678" /></div>
+      </div>
+      <p class="text-[12px] text-muted">The account number is used on invoices' payment details and in bank payment files.</p>
+    </div>
+  {/if}
+  {#snippet footer()}<button class="btn" onclick={() => (editOpen = false)}>Cancel</button><button class="btn btn-primary" onclick={saveDetails}>Save</button>{/snippet}
+</Modal>
+
 <PageHeader title={account.name} crumbs={[{ label: 'Bank accounts', href: '/banking' }]}>
   {#snippet sub()}{account.bank_account_number ?? ''} {account.currency}{/snippet}
   <a class="btn" href="/reports/bank-reconciliation?account_id={account.id}"><Icon name="chart" />Reconciliation report</a>
@@ -61,6 +89,7 @@
     <a class="btn" href="/banking/receive?account={account.id}">Receive money</a>
     <a class="btn" href="/banking/transfer?from={account.id}"><Icon name="swap" />Transfer</a>
   {/if}
+  {#if can('accounting:write')}<button class="btn" onclick={openDetails}><Icon name="edit" />Edit account details</button>{/if}
 </PageHeader>
 
 <div class="mb-4 grid gap-3 sm:grid-cols-3">

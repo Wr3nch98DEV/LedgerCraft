@@ -9,6 +9,22 @@ use serde_json::{json, Value};
 const MON: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 fn day_mon(d: chrono::NaiveDate) -> String { d.day().to_string() + " " + MON[d.month0() as usize] }
 
+/// "Getting started" checklist for a new organisation (like Xero's setup guide). Each step is done
+/// when the underlying data exists, so the list completes itself as the business is set up.
+fn getting_started(l: &Ledger) -> Result<Value> {
+    let q = |sql: &str| -> Result<bool> { Ok(l.conn.query_row(sql, [], |r| r.get::<_, i64>(0))? > 0) };
+    let steps = vec![
+        ("details", "Add your business address and contact details", "/settings/organisation", !l.setting_or("address", "")?.trim().is_empty()),
+        ("branding", "Add your logo to invoices and quotes", "/settings/branding", q("SELECT COUNT(*) FROM branding_themes WHERE logo_attachment_id IS NOT NULL")?),
+        ("bank", "Add your bank account number", "/accounting/chart", q("SELECT COUNT(*) FROM accounts WHERE type = 'BANK' AND TRIM(COALESCE(bank_account_number,'')) <> ''")?),
+        ("contacts", "Add or import your customers and suppliers", "/contacts", q("SELECT COUNT(*) FROM contacts WHERE is_customer = 1 OR is_supplier = 1")?),
+        ("conversion", "Enter opening balances from your old system", "/accounting/conversion", q("SELECT COUNT(*) FROM journals WHERE source_type = 'CONVERSION'")?),
+        ("invoice", "Create your first invoice", "/sales/invoices/new", q("SELECT COUNT(*) FROM documents WHERE type = 'ACCREC'")?),
+        ("statement", "Import a bank statement and reconcile", "/banking", q("SELECT COUNT(*) FROM statement_lines")?),
+    ];
+    Ok(json!(steps.into_iter().map(|(key, text, link, done)| json!({"key": key, "text": text, "link": link, "done": done})).collect::<Vec<_>>()))
+}
+
 pub fn dashboard(l: &Ledger) -> Result<Value> {
     let today = util::today();
     let banks = l.bank_accounts()?;
@@ -71,6 +87,7 @@ pub fn dashboard(l: &Ledger) -> Result<Value> {
         "cash_flow": cash, "watchlist": watch,
         "pl_month": {"income": total("Total Trading Income") + total("Total Other Income"), "expenses": total("Total Operating Expenses") + total("Total Cost of Sales"), "net": total("Net Profit")},
         "tasks": notifications(l)?,
+        "getting_started": getting_started(l)?,
     }))
 }
 
