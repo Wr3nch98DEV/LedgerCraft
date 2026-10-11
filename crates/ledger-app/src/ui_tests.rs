@@ -286,3 +286,40 @@ fn write_a_check() {
     assert_eq!(app.be.call_now("banktx.nextCheck", json!({"account_id": acc})).unwrap()["number"], "1002");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn undeposited_funds_then_bank_deposit() {
+    let (mut app, dir) = demo_app("deposit", Skin::QuickBooks);
+    // QuickBooks companies get Undeposited Funds, and it's offered as a "Deposit to" account.
+    let uf = app.be.call_now("accounts.undeposited", json!({})).unwrap()["id"].as_i64().unwrap();
+    let r = app.load_lookups(); let _ = r;
+    let get = |m: &str, p: Value| app.be.call_now(m, p).unwrap().as_array().cloned().unwrap();
+    app.lk.accounts = get("accounts.list", json!({}));
+    assert!(app.lk.bank_opts().iter().any(|o| o.id == uf && o.label == "Undeposited Funds"));
+    // Receive two invoice payments into Undeposited Funds.
+    let open = app.be.call_now("docs.list", json!({"type": "ACCREC", "tab": "awaiting"})).unwrap();
+    let rows = open["rows"].as_array().unwrap();
+    for r in rows.iter().take(2) {
+        app.be.call_now("payments.add", json!({"document_id": r["id"], "account_id": uf, "date": "2026-10-12", "amount": crate::ui::plain(r["amount_due"].as_i64().unwrap()), "reference": ""})).unwrap();
+    }
+    let expected: i64 = rows.iter().take(2).map(|r| r["amount_due"].as_i64().unwrap()).sum();
+    // + New → Bank deposit.
+    let _ = app.update(Message::ToggleNew);
+    let msgs = click(&app, "Bank deposit");
+    let Some(Message::Nav(r)) = msgs.into_iter().next() else { panic!("Bank deposit is not enabled in + New") };
+    let _ = app.update(Message::Nav(r));
+    let und = app.be.call_now("deposits.undeposited", json!({}));
+    let _ = app.update(Message::Pay(crate::payments::Msg::Undeposited(und)));
+    let s = app.pay.as_ref().unwrap();
+    assert_eq!(s.docs.len(), 2);
+    assert!(s.docs.iter().all(|d| d.pick), "all ticked by default");
+    let bank = s.account.as_ref().unwrap().id;
+    assert_ne!(bank, uf, "deposits go to a real bank account");
+    let msgs = click(&app, "Save and close");
+    assert!(matches!(msgs.first(), Some(Message::Pay(crate::payments::Msg::Save))), "{msgs:?}");
+    let ids: Vec<i64> = s.docs.iter().map(|d| d.id).collect();
+    app.be.call_now("deposits.create", json!({"account_id": bank, "date": "2026-10-12", "reference": "", "payment_ids": ids})).unwrap();
+    let items = app.be.call_now("rec.unreconciled", json!({"account_id": bank})).unwrap();
+    assert!(items.as_array().unwrap().iter().any(|i| i["kind"] == "DEPOSIT" && i["amount"].as_i64() == Some(expected)));
+    let _ = std::fs::remove_dir_all(dir);
+}

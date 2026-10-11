@@ -16,7 +16,7 @@ pub struct OpenDoc { pub id: i64, pub number: String, pub contact: String, pub d
 #[derive(Debug, Clone, Default)]
 pub struct SpendLine { pub account: Option<Opt>, pub description: String, pub amount: String, pub tax: Option<Opt> }
 
-pub enum Mode { Receive, PayBills, Spend }
+pub enum Mode { Receive, PayBills, Spend, Deposit }
 
 pub struct State {
     pub mode: Mode,
@@ -55,6 +55,7 @@ pub enum Msg {
     Saved(Result<Value, String>),
     CheckNo(String),
     NextCheck(Result<Value, String>),
+    Undeposited(Result<Value, String>),
 }
 
 fn i(v: &Value) -> i64 { v.as_i64().unwrap_or(0) }
@@ -92,6 +93,22 @@ pub fn open_spend(app: &mut App, account: Option<i64>, check: bool) -> Task<Mess
     match (check, acc) { (true, Some(a)) => app.be.call("banktx.nextCheck", json!({"account_id": a}), |r| Message::Pay(Msg::NextCheck(r))), _ => Task::none() }
 }
 
+/// Bank deposit: pick payments from Undeposited Funds and deposit them as one entry.
+pub fn open_deposit(app: &mut App) -> Task<Message> {
+    let mut s = base(app, Mode::Deposit, true);
+    let banks = bank_only(app);
+    s.account = banks.into_iter().next();
+    app.pay = Some(s);
+    app.data = Some(json!({}));
+    app.be.call("deposits.undeposited", json!({}), |r| Message::Pay(Msg::Undeposited(r)))
+}
+
+/// Real bank accounts only (not Undeposited Funds or other payment-enabled accounts).
+fn bank_only(app: &App) -> Vec<Opt> {
+    let ids: Vec<i64> = app.lk.accounts.iter().filter(|a| a["type"] == "BANK" && a["status"] == "ACTIVE").filter_map(|a| a["id"].as_i64()).collect();
+    app.lk.bank_opts().into_iter().filter(|o| ids.contains(&o.id)).collect()
+}
+
 fn load_docs(app: &App, kind: &str, contact: Option<i64>) -> Task<Message> {
     app.be.call("docs.list", json!({"type": kind, "tab": "awaiting", "contact_id": contact, "limit": 500}), |r| Message::Pay(Msg::Docs(r)))
 }
@@ -108,6 +125,14 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             Task::none()
         }
         Msg::Docs(Err(e)) => app.toast(e, true),
+        Msg::Undeposited(Ok(v)) => {
+            s.docs = v["payments"].as_array().cloned().unwrap_or_default().iter().map(|p| OpenDoc {
+                id: i(&p["id"]), number: p["number"].as_str().unwrap_or("").into(), contact: p["contact"].as_str().unwrap_or("").into(), date: p["date"].as_str().unwrap_or("").into(),
+                due_date: String::new(), total: i(&p["amount"]), due: i(&p["amount"]), pick: true, amount: ui::plain(i(&p["amount"])),
+            }).collect();
+            Task::none()
+        }
+        Msg::Undeposited(Err(e)) => app.toast(e, true),
         Msg::Contact(c) => {
             let id = c.id;
             s.contact_text = c.label.clone();
@@ -146,6 +171,12 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             let Some(date) = ui::to_iso(&s.date, style) else { app.pay = Some(s); return app.toast("Check the payment date", true) };
             let Some(acc) = s.account.clone() else { app.pay = Some(s); return app.toast("Choose a bank account", true) };
             match s.mode {
+                Mode::Deposit => {
+                    let ids: Vec<i64> = s.docs.iter().filter(|d| d.pick).map(|d| d.id).collect();
+                    if ids.is_empty() { app.pay = Some(s); return app.toast("Tick the payments to deposit", true); }
+                    s.busy = true;
+                    app.be.call("deposits.create", json!({"account_id": acc.id, "date": date, "reference": s.reference, "payment_ids": ids}), |r| Message::Pay(Msg::Saved(r)))
+                }
                 Mode::Receive | Mode::PayBills => {
                     let mut items = vec![];
                     for d in s.docs.iter().filter(|d| d.pick) {
@@ -181,7 +212,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             s.busy = false;
             match r {
                 Ok(_) => {
-                    let (msg, next) = match s.mode { Mode::Receive => ("Payment recorded", Route::Invoices), Mode::PayBills => ("Bills paid", Route::Bills), Mode::Spend if s.check => ("Check saved", Route::Expenses), Mode::Spend => ("Expense saved", Route::Expenses) };
+                    let (msg, next) = match s.mode { Mode::Receive => ("Payment recorded", Route::Invoices), Mode::PayBills => ("Bills paid", Route::Bills), Mode::Spend if s.check => ("Check saved", Route::Expenses), Mode::Spend => ("Expense saved", Route::Expenses), Mode::Deposit => ("Deposit saved", Route::Banking(None)) };
                     let t1 = app.toast(msg, false);
                     let t2 = app.go(next);
                     let t3 = app.load_lookups();
@@ -210,11 +241,39 @@ pub fn view(app: &App) -> Element<'_, Message> {
     };
     let date = ui::field_ph(match s.mode { Mode::Spend => "Payment date", _ => "Payment date" }, date_ph, &s.date, |d| Message::Pay(Msg::Date(d)));
     let reference = ui::field("Ref no.", &s.reference, |r| Message::Pay(Msg::Reference(r)));
-    let save_label = match s.mode { Mode::Receive => "Save and close", Mode::PayBills => "Save and close", Mode::Spend => "Save and close" };
+    let save_label = "Save and close";
     let footer = container(row![ui::btn("Cancel", Some(Message::Back)), ui::hspace(), ui::btn_primary(save_label, if s.busy { None } else { Some(Message::Pay(Msg::Save)) })].spacing(8))
         .padding([12, 16]).style(theme::topbar).width(Fill);
 
     match s.mode {
+        Mode::Deposit => {
+            let total: i64 = s.docs.iter().filter(|d| d.pick).map(|d| d.due).sum();
+            let banks = bank_only(app);
+            let head = row![
+                column![ui::label("Account"), pick_list(banks, s.account.clone(), |a| Message::Pay(Msg::Account(a))).padding([7, 10]).text_size(14).style(theme::pick).width(Fill)].spacing(5).width(Fill),
+                date, ui::field("Memo", &s.reference, |r| Message::Pay(Msg::Reference(r))),
+            ].spacing(14);
+            let amount_box = column![text("TOTAL").size(12).font(BOLD).color(k.muted), text(ui::money(total)).size(30).font(BOLD)].spacing(2).align_x(Alignment::End);
+            let cols: Vec<(&str, u16, bool)> = vec![("", 3, false), ("Received from", 26, false), ("Date", 14, false), ("Type", 14, false), ("Ref no.", 14, false), ("Amount", 14, true)];
+            let head_row = container(row(cols.iter().map(|(h, w, r)| {
+                let tx = text(h.to_uppercase()).size(11).font(BOLD).color(k.muted);
+                container(if *r { tx.align_x(iced::alignment::Horizontal::Right).width(Fill) } else { tx.width(Fill) }).width(Length::FillPortion(*w)).into()
+            })).spacing(10).padding([8, 12])).style(theme::header_row).width(Fill);
+            let mut table = column![head_row];
+            if s.docs.is_empty() { table = table.push(container(ui::muted("No payments waiting. Receive payments into Undeposited Funds to group them into one deposit.")).padding(24).center_x(Fill)); }
+            for (n, d) in s.docs.iter().enumerate() {
+                let cells: Vec<Element<Message>> = vec![checkbox(d.pick).on_toggle(move |v| Message::Pay(Msg::Pick(n, v))).into(), ui::cell(d.contact.clone()), ui::cell(app.d(&d.date)),
+                    ui::cell_muted("Payment"), ui::cell_muted(d.number.clone()), ui::cell_money(d.due)];
+                let r = row(cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into())).spacing(10).align_y(Alignment::Center).padding([6, 12]);
+                table = table.push(column![r, ui::hr()]);
+            }
+            ui::page(ui::h1("Bank deposit"), vec![], column![
+                ui::card(row![column![head].width(Fill), Space::new().width(24), amount_box].align_y(Alignment::Start)),
+                ui::h2("Select the payments included in this deposit"),
+                container(table).style(theme::card).width(Fill).clip(true),
+                footer,
+            ].spacing(14).into())
+        }
         Mode::Receive | Mode::PayBills => {
             let receive = matches!(s.mode, Mode::Receive);
             let total: i64 = s.docs.iter().filter(|d| d.pick).map(|d| ui::parse_money(&d.amount).unwrap_or(0)).sum();

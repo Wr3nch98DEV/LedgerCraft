@@ -44,6 +44,7 @@ pub enum Route {
     Mileage,
     Transfer,
     Check(Option<i64>),
+    Deposit,
     NewProduct,
     Journal,
     Placeholder(&'static str),
@@ -171,7 +172,7 @@ pub fn parse_route(s: &str) -> Option<Route> {
         "customers" => Route::Customers, "products" => Route::Products, "expenses" => Route::Expenses, "bills" => Route::Bills, "vendors" => Route::Vendors,
         "pos" => Route::PurchaseOrders, "contacts" => Route::Contacts, "contact" => Route::Contact(id(1)?), "banking" => Route::Banking(id(1)), "chart" => Route::Chart,
         "reports" => Route::Reports, "report" => Route::Report(parts.get(1)?.to_string()), "settings" => Route::Settings, "setup" => Route::Setup,
-        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
+        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
         _ => return None,
     })
 }
@@ -250,9 +251,11 @@ impl App {
 
     pub fn load_lookups(&self) -> Task<Message> {
         let be = self.be.clone();
+        let qb = self.skin == Skin::QuickBooks;
         Task::perform(
             async move {
                 tokio::task::spawn_blocking(move || {
+                    if qb { let _ = be.call_now("accounts.undeposited", json!({})); }
                     let get = |m: &str, p: Value| be.call_now(m, p).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
                     Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})) }
                 }).await.unwrap_or_default()
@@ -313,6 +316,7 @@ impl App {
             Route::PayBills => payments::open_pay_bills(self),
             Route::Spend(acc) => payments::open_spend(self, acc, false),
             Route::Check(acc) => payments::open_spend(self, acc, true),
+            Route::Deposit => payments::open_deposit(self),
             Route::NewContact(_) | Route::NewProduct | Route::Journal | Route::Transfer => forms::open(self),
             Route::Payroll | Route::PayRun(_) | Route::Taxes | Route::TaxReturn(_) | Route::Projects | Route::Mileage => people::load(self),
             Route::Setup => setup::load(self),
