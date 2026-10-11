@@ -16,6 +16,7 @@ pub enum Msg {
     DeleteRun(i64),
     PrepareReturn,
     FileReturn(i64),
+    InvoiceProject(i64),
 }
 
 #[derive(Default)]
@@ -35,6 +36,8 @@ pub fn load(app: &mut App) -> Task<Message> {
                 Route::PayRun(id) => be.call_now("payroll.payRun", json!({"id": id}))?,
                 Route::Taxes => be.call_now("taxReturns.list", json!({}))?,
                 Route::TaxReturn(id) => be.call_now("taxReturns.get", json!({"id": id}))?,
+                Route::Projects => be.call_now("projects.list", json!({}))?,
+                Route::Mileage => be.call_now("receipts.list", json!({}))?,
                 _ => json!({}),
             })
         }).await.unwrap_or_else(|e| Err(e.to_string()))
@@ -56,11 +59,12 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                     let next = match what {
                         "run" => v["id"].as_i64().map(Route::PayRun).unwrap_or(Route::Payroll),
                         "return" => v["id"].as_i64().map(Route::TaxReturn).unwrap_or(Route::Taxes),
+                        "project_invoice" => v["id"].as_i64().map(|id| Route::Doc { kind: "ACCREC".into(), id: Some(id) }).unwrap_or(Route::Projects),
                         "deleted" => Route::Payroll,
                         "filed" => app.route.clone(),
                         _ => app.route.clone(),
                     };
-                    let msg = match what { "run" => "Pay run created — check it, then submit", "posted" => "Payroll submitted and posted", "deleted" => "Pay run deleted", "return" => "Return prepared", "filed" => "Marked as filed", _ => "Done" };
+                    let msg = match what { "project_invoice" => "Draft invoice created from the project's unbilled work", "run" => "Pay run created — check it, then submit", "posted" => "Payroll submitted and posted", "deleted" => "Pay run deleted", "return" => "Return prepared", "filed" => "Marked as filed", _ => "Done" };
                     let t1 = app.toast(msg, false);
                     if next == app.route { return Task::batch([t1, app.load()]); }
                     Task::batch([t1, app.go(next)])
@@ -80,6 +84,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.be.call("taxReturns.create", json!({"form": form, "from": from, "to": to}), |r| Message::People(Msg::Created(r, "return")))
         }
         Msg::FileReturn(id) => app.be.call("taxReturns.file", json!({"id": id}), |r| Message::People(Msg::Created(r, "filed"))),
+        Msg::InvoiceProject(id) => app.be.call("projects.invoice", json!({"id": id}), |r| Message::People(Msg::Created(r, "project_invoice"))),
     }
 }
 
@@ -192,5 +197,46 @@ pub fn tax_return(app: &App) -> Element<'_, Message> {
     ui::page(column![ui::link("Returns", Message::Nav(Route::Taxes)), ui::h1(title)].spacing(4).into(), actions, column![
         container(boxes).style(theme::card).width(Fill).clip(true),
         ui::muted(if filed { "Filed returns lock the period so the figures can't change." } else { "Filing locks this period. Lodge the figures with your tax office yourself." }),
+    ].spacing(14).into())
+}
+
+pub fn projects(app: &App) -> Element<'_, Message> {
+    if let Some(e) = loading(app, "Projects") { return e; }
+    let d = app.data.as_ref().unwrap();
+    let k = t();
+    let rows = d["projects"].as_array().cloned().unwrap_or_default().iter().map(|p| {
+        let s = &p["summary"];
+        let id = i(&p["id"]);
+        let to_invoice = i(&s["to_invoice"]);
+        let status = match p["status"].as_str().unwrap_or("") { "INPROGRESS" => ("In progress", k.info), "CLOSED" => ("Completed", k.ok), _ => ("Not started", k.muted) };
+        (vec![
+            ui::cell(p["name"].as_str().unwrap_or("").to_string()), ui::cell_muted(p["contact_name"].as_str().unwrap_or("").to_string()), ui::chip(status.0, status.1),
+            ui::num(format!("{:.1} h", i(&s["minutes"]) as f64 / 60.0)), ui::cell_money(i(&s["costs"])), ui::cell_money(to_invoice),
+            ui::num(ui::money(i(&s["profit"]))),
+            if to_invoice > 0 { ui::link("Invoice", Message::People(Msg::InvoiceProject(id))) } else { ui::cell("") },
+        ], None)
+    }).collect();
+    ui::page(ui::h1("Projects"), vec![], column![
+        ui::table(&[col("Project", 22), col("Customer", 18), col("Status", 12), coln("Time", 9), coln("Costs", 11), coln("Unbilled", 11), coln("Profit", 11), col("", 8)], rows, "No projects yet."),
+        ui::muted("Time tracking, tasks and expenses for projects are entered in the web version for now; invoicing unbilled work works here."),
+    ].spacing(14).into())
+}
+
+pub fn mileage(app: &App) -> Element<'_, Message> {
+    if let Some(e) = loading(app, "Mileage") { return e; }
+    let d = app.data.as_ref().unwrap();
+    let k = t();
+    let all = d.as_array().cloned().unwrap_or_default();
+    let trips: Vec<&Value> = all.iter().filter(|r| r["kind"] == "MILEAGE").collect();
+    let unit = if app.country() == "US" { "mi" } else { "km" };
+    let rows = trips.iter().map(|r| (vec![
+        ui::cell(app.d(r["date"].as_str().unwrap_or(""))), ui::cell(r["claimant"].as_str().unwrap_or("").to_string()), ui::cell_muted(r["reference"].as_str().unwrap_or("").to_string()),
+        ui::num(format!("{:.1} {unit}", i(&r["distance_e4"]) as f64 / 10000.0)), ui::cell_money(i(&r["total"])),
+        ui::chip(match r["status"].as_str().unwrap_or("") { "PAID" => "Paid", "APPROVED" | "AUTHORISED" => "Approved", "DECLINED" => "Declined", "SUBMITTED" => "Submitted", _ => "Draft" }, k.info),
+    ], None)).collect();
+    let receipts = all.len() - trips.len();
+    ui::page(ui::h1("Mileage"), vec![], column![
+        ui::table(&[col("Date", 12), col("Driver", 20), col("Purpose", 26), coln("Distance", 12), coln("Amount", 12), col("Status", 12)], rows, "No trips recorded yet."),
+        ui::muted(format!("{receipts} receipt claim(s) also on file. Recording new trips and claims is in the web version for now (Business → Expense claims).")),
     ].spacing(14).into())
 }

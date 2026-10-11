@@ -89,6 +89,8 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::PayRun(_) => people::pay_run(app),
         Route::Taxes => people::taxes(app),
         Route::TaxReturn(_) => people::tax_return(app),
+        Route::Projects => people::projects(app),
+        Route::Mileage => people::mileage(app),
         Route::Placeholder(name) => placeholder(app, name),
         Route::Setup => setup::view(app),
         Route::Login => setup::login(app),
@@ -118,6 +120,8 @@ fn qb_section(r: &Route) -> &'static str {
         Route::Reports | Route::Report(_) => "reports",
         Route::Payroll | Route::PayRun(_) => "payroll",
         Route::Taxes | Route::TaxReturn(_) => "taxes",
+        Route::Projects => "projects",
+        Route::Mileage => "mileage",
         Route::Chart | Route::Journal => "accounting",
         Route::NewContact(true) | Route::NewProduct => "sales",
         Route::NewContact(false) => "expenses",
@@ -154,11 +158,11 @@ fn qb_sidebar(app: &App) -> Element<'_, Message> {
     if sec == "expenses" {
         nav = nav.push(sub("Expenses", Route::Expenses)).push(sub("Bills", Route::Bills)).push(sub("Vendors", Route::Vendors)).push(sub("Purchase orders", Route::PurchaseOrders));
     }
-    nav = nav.push(item("projects", "Projects", "projects", Route::Placeholder("Projects"), false));
+    nav = nav.push(item("projects", "Projects", "projects", Route::Projects, false));
     nav = nav.push(item("payroll", "Payroll", "payroll", Route::Payroll, false));
     nav = nav.push(item("reports", "Reports", "reports", Route::Reports, false));
     nav = nav.push(item("taxes", "Taxes", "taxes", Route::Taxes, false));
-    nav = nav.push(item("mileage", "Mileage", "mileage", Route::Placeholder("Mileage"), false));
+    nav = nav.push(item("mileage", "Mileage", "mileage", Route::Mileage, false));
     nav = nav.push(item("accounting", "Accounting", "accounting", Route::Chart, true));
     if sec == "accounting" {
         nav = nav.push(sub("Chart of accounts", Route::Chart)).push(sub("Reconcile", Route::Banking(None)));
@@ -283,6 +287,7 @@ fn xero_section(r: &Route) -> &'static str {
         Route::NewContact(_) => "contacts", Route::NewProduct => "business",
         Route::Payroll | Route::PayRun(_) => "payroll",
         Route::Taxes | Route::TaxReturn(_) => "accounting",
+        Route::Projects | Route::Mileage => "business",
         Route::Contacts | Route::Customers | Route::Vendors | Route::Contact(_) => "contacts",
         _ => "",
     }
@@ -293,7 +298,8 @@ fn xero_menu_left(m: &str) -> f32 { match m { "business" => 250.0, "accounting" 
 fn xero_menu(_app: &App, m: &'static str) -> Element<'static, Message> {
     let items: Vec<(&str, Option<Message>)> = match m {
         "business" => vec![("Invoices", Some(Message::Nav(Route::Invoices))), ("Quotes", Some(Message::Nav(Route::Quotes))), ("Credit notes", Some(Message::Nav(Route::CreditNotes))),
-            ("Bills to pay", Some(Message::Nav(Route::Bills))), ("Purchase orders", Some(Message::Nav(Route::PurchaseOrders))), ("Products and services", Some(Message::Nav(Route::Products)))],
+            ("Bills to pay", Some(Message::Nav(Route::Bills))), ("Purchase orders", Some(Message::Nav(Route::PurchaseOrders))), ("Products and services", Some(Message::Nav(Route::Products))),
+            ("Projects", Some(Message::Nav(Route::Projects))), ("Expense claims", Some(Message::Nav(Route::Mileage)))],
         "accounting" => vec![("Bank accounts", Some(Message::Nav(Route::Banking(None)))), ("Reports", Some(Message::Nav(Route::Reports))), ("Chart of accounts", Some(Message::Nav(Route::Chart))),
             ("Manual journal", Some(Message::Nav(Route::Journal))), ("Tax returns", Some(Message::Nav(Route::Taxes))), ("Fixed assets", None)],
         _ => vec![("All contacts", Some(Message::Nav(Route::Contacts))), ("Customers", Some(Message::Nav(Route::Customers))), ("Suppliers", Some(Message::Nav(Route::Vendors)))],
