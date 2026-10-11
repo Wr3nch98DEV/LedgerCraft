@@ -209,7 +209,7 @@
           <label class="flex items-center gap-1"><input type="radio" bind:group={create.kind} value="normal" class="accent-[var(--accent)]" />{spent ? 'Spend money' : 'Receive money'}</label>
           <label class="flex items-center gap-1"><input type="radio" bind:group={create.kind} value="overpayment" class="accent-[var(--accent)]" />Overpayment</label>
           <label class="flex items-center gap-1"><input type="radio" bind:group={create.kind} value="prepayment" class="accent-[var(--accent)]" />Prepayment</label>
-          <a class="ml-auto link" href="/banking/rules?from={line.id}">Create rule</a>
+          <a class="ml-auto link" href={'/banking/rules?' + new URLSearchParams({ from: String(line.id), type: line.amount < 0 ? 'SPEND' : 'RECEIVE', account: String(account.id), payee: line.payee || '', description: line.description || '' })}>Create rule</a>
         </div>
       {/if}
     {:else if tab === 'transfer'}

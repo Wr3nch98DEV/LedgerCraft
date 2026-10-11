@@ -17,7 +17,9 @@
   let saveAs = $state('');
   let busy = $state(false);
   let drag = $state(false);
+  let accountName = $state('Account');
   rpc('statements.mappings', { account_id: Number(id) }).then((x) => (mappings = x)).catch(() => {});
+  rpc('accounts.bank').then((all: any[]) => { const a = all.find((x) => x.id === Number(id)); if (a) accountName = a.name; }).catch(() => {});
 
   async function pick(f: File) {
     file = f; text = await f.text();
@@ -54,7 +56,7 @@
   const cols = $derived((rows[0] ?? []).map((c, i) => ({ i, label: m.has_header ? c || `Column ${i + 1}` : `Column ${i + 1}` })));
 </script>
 
-<PageHeader title="Import a bank statement" crumbs={[{ label: 'Bank accounts', href: '/banking' }, { label: 'Account', href: `/banking/${id}` }]} />
+<PageHeader title="Import a bank statement" crumbs={[{ label: 'Bank accounts', href: '/banking' }, { label: accountName, href: `/banking/${id}` }]} />
 
 <div class="card max-w-4xl p-5">
   <label class="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition {drag ? 'border-accent bg-accent-soft' : 'border-line2 hover:border-accent'}"

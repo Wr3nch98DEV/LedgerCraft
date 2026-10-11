@@ -8,6 +8,7 @@
   import Icon from '../components/Icon.svelte';
   import Tabs from '../components/Tabs.svelte';
   import { accountOptions, taxOptions, bankAccounts } from '../components/Pickers';
+  import { route, navigate } from '../lib/router.svelte';
 
   let rules = $state<any[]>([]);
   let tab = $state('SPEND');
@@ -21,10 +22,26 @@
   function edit(x: any) { editId = x.id; r = JSON.parse(JSON.stringify({ ...x, active: !!x.active })); if (!r.percent_lines.length && !r.fixed_lines.length) r.percent_lines = []; open = true; }
   function add() { editId = null; r = blank(); open = true; }
   async function save() {
-    try { await rpc('bankRules.save', { id: editId, rule: r }); toast('Rule saved'); open = false; load(); } catch (e) { toastError(e); }
+    try {
+      await rpc('bankRules.save', { id: editId, rule: r }); toast('Rule saved'); open = false;
+      const back = route.query.get('account');
+      if (route.query.get('from') && back) navigate(`/banking/${back}`); else load();
+    } catch (e) { toastError(e); }
   }
   async function del(x: any) { if (await confirm(`Delete rule "${x.name}"?`, '', 'Delete', true)) { await rpc('bankRules.delete', { id: x.id }); load(); } }
   const shown = $derived(rules.filter((x) => x.type === tab));
+  // "Create rule" from a statement line: open a new rule prefilled from that line (as Xero does).
+  if (route.query.get('from')) {
+    const q = route.query;
+    const payee = q.get('payee') ?? '', desc = q.get('description') ?? '';
+    tab = q.get('type') === 'RECEIVE' ? 'RECEIVE' : 'SPEND';
+    r = blank();
+    r.name = payee || desc;
+    r.conditions = [payee ? { field: 'payee', op: 'contains', value: payee } : { field: 'description', op: 'contains', value: desc }];
+    r.account_id = q.get('account') ? Number(q.get('account')) : null;
+    editId = null;
+    open = true;
+  }
   const pctTotal = $derived(r.percent_lines.reduce((s: number, l: any) => s + Number(l.percent || 0), 0));
 </script>
 
