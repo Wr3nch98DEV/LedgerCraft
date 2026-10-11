@@ -42,6 +42,7 @@ async fn main() {
         .route("/download/{kind}", get(download_handler))
         .route("/api/v1/{*path}", get(rest_get).post(rest_post))
         .fallback(get(static_handler))
+        .layer(axum::middleware::from_fn(guard_host))
         .with_state(st.clone());
 
     // Bind to localhost only. If the port is busy, try the next few.
@@ -85,16 +86,45 @@ fn open_window(url: &str, app: bool) {
     { let _ = std::process::Command::new("xdg-open").arg(url).spawn(); let _ = app; }
 }
 
+/// Reject requests whose Host isn't loopback. Blocks DNS-rebinding attacks from web pages.
+async fn guard_host(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let host = req.headers().get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
+    let name = if host.starts_with('[') { host.split(']').next().map(|h| format!("{h}]")).unwrap_or_default() } else { host.split(':').next().unwrap_or("").to_string() };
+    if !matches!(name.as_str(), "127.0.0.1" | "localhost" | "[::1]") {
+        return (StatusCode::FORBIDDEN, "LedgerCraft only accepts connections addressed to 127.0.0.1").into_response();
+    }
+    next.run(req).await
+}
+
+fn cookie_token(headers: &HeaderMap) -> Option<String> {
+    headers.get(header::COOKIE).and_then(|c| c.to_str().ok()).and_then(|c| c.split(';').map(str::trim).find_map(|kv| kv.strip_prefix("lc_session=").map(String::from)))
+}
+
+/// Downloads and printable views need a signed-in session when passwords are in use.
+fn authorized(st: &AppState, headers: &HeaderMap, query_token: Option<&str>) -> bool {
+    let needs = st.org.lock().unwrap().as_ref().map(|o| o.ledger.any_password_set().unwrap_or(false)).unwrap_or(false);
+    if !needs { return true; }
+    let sessions = st.sessions.lock().unwrap();
+    [headers.get("x-session").and_then(|v| v.to_str().ok()).map(String::from), query_token.map(String::from), cookie_token(headers)]
+        .into_iter().flatten().any(|t| sessions.contains_key(&t))
+}
+
 fn json_err(status: StatusCode, msg: String) -> Response {
     (status, Json(json!({"error": msg}))).into_response()
 }
 
 async fn rpc_handler(State(st): State<Arc<AppState>>, headers: HeaderMap, Path(method): Path<String>, body: Option<Json<Value>>) -> Response {
     let params = body.map(|b| b.0).unwrap_or(Value::Null);
-    let token = headers.get("x-session").and_then(|v| v.to_str().ok()).map(String::from);
+    let token = headers.get("x-session").and_then(|v| v.to_str().ok()).map(String::from).or_else(|| cookie_token(&headers));
     let st2 = st.clone();
-    let r = tokio::task::spawn_blocking(move || rpc::handle(&st2, token.as_deref(), &method, params)).await;
+    let m = method.clone();
+    let r = tokio::task::spawn_blocking(move || rpc::handle(&st2, token.as_deref(), &m, params)).await;
     match r {
+        Ok(Ok(v)) if method == "auth.login" => {
+            let cookie = format!("lc_session={}; HttpOnly; SameSite=Strict; Path=/", v["token"].as_str().unwrap_or(""));
+            ([(header::SET_COOKIE, cookie)], Json(v)).into_response()
+        }
+        Ok(Ok(v)) if method == "auth.logout" => ([(header::SET_COOKIE, "lc_session=; Max-Age=0; Path=/".to_string())], Json(v)).into_response(),
         Ok(Ok(v)) => Json(v).into_response(),
         Ok(Err(e)) => {
             let status = match &e {
@@ -119,7 +149,8 @@ async fn session_handler(State(st): State<Arc<AppState>>, headers: HeaderMap) ->
     }
 }
 
-async fn view_handler(State(st): State<Arc<AppState>>, Path((kind, id)): Path<(String, i64)>, Query(q): Query<std::collections::HashMap<String, String>>) -> Response {
+async fn view_handler(State(st): State<Arc<AppState>>, headers: HeaderMap, Path((kind, id)): Path<(String, i64)>, Query(q): Query<std::collections::HashMap<String, String>>) -> Response {
+    if !authorized(&st, &headers, q.get("s").map(String::as_str)) { return (StatusCode::UNAUTHORIZED, "Please sign in to LedgerCraft first.").into_response(); }
     let st2 = st.clone();
     let token = q.get("s").cloned();
     match tokio::task::spawn_blocking(move || render::view(&st2, token.as_deref(), &kind, id)).await {
@@ -138,7 +169,8 @@ async fn online_handler(State(st): State<Arc<AppState>>, Path(token): Path<Strin
     }
 }
 
-async fn download_handler(State(st): State<Arc<AppState>>, Path(kind): Path<String>, Query(q): Query<std::collections::HashMap<String, String>>) -> Response {
+async fn download_handler(State(st): State<Arc<AppState>>, headers: HeaderMap, Path(kind): Path<String>, Query(q): Query<std::collections::HashMap<String, String>>) -> Response {
+    if !authorized(&st, &headers, q.get("s").map(String::as_str)) { return (StatusCode::UNAUTHORIZED, "Please sign in to LedgerCraft first.").into_response(); }
     let st2 = st.clone();
     match tokio::task::spawn_blocking(move || render::download(&st2, &kind, &q)).await {
         Ok(Ok((mime, name, bytes))) => (
