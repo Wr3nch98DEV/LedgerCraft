@@ -103,3 +103,25 @@ fn bank_feed_match_button_reconciles() {
     assert_eq!(app.be.call_now("statements.lines", json!({"account_id": acc})).unwrap().as_array().unwrap().len(), n - 1);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn password_protected_company_shows_sign_in() {
+    let (mut app, dir) = demo_app("login", Skin::QuickBooks);
+    let user = app.be.call_now("session.get", json!({})).unwrap()["user"].clone();
+    app.be.call_now("users.setPassword", json!({"id": user["id"], "password": "correct horse battery"})).unwrap();
+    // Re-open the app: the session now requires signing in.
+    let (mut app2, _) = App::boot(dir.clone(), None, Some(Skin::QuickBooks));
+    let r = app2.be.call_now("session.get", json!({}));
+    let _ = app2.update(Message::Session(r));
+    assert_eq!(app2.route, Route::Login);
+    let msgs = click(&app2, "Sign in");
+    assert!(matches!(msgs.first(), Some(Message::Setup(crate::setup::Msg::SignIn))), "{msgs:?}");
+    // Wrong password is refused; the right one signs in.
+    assert!(app2.be.call_now("auth.login", json!({"email": user["email"], "password": "nope"})).is_err());
+    let ok = app2.be.call_now("auth.login", json!({"email": user["email"], "password": "correct horse battery"}));
+    let _ = app2.update(Message::Setup(crate::setup::Msg::SignedIn(ok)));
+    assert!(app2.be.token.is_some());
+    assert!(app2.be.call_now("session.get", json!({})).is_ok());
+    let _ = &mut app;
+    let _ = std::fs::remove_dir_all(dir);
+}

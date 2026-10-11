@@ -20,9 +20,14 @@ pub struct State {
     pub skin: Skin,
     pub demo: bool,
     pub busy: bool,
+    pub email: String,
+    pub password: String,
+    pub code: String,
+    /// Company name shown on the sign-in screen.
+    pub login_org: String,
 }
 impl Default for State {
-    fn default() -> Self { State { orgs: vec![], name: String::new(), owner: String::new(), country: COUNTRIES[0], skin: Skin::QuickBooks, demo: false, busy: false } }
+    fn default() -> Self { State { orgs: vec![], name: String::new(), owner: String::new(), country: COUNTRIES[0], skin: Skin::QuickBooks, demo: false, busy: false, email: String::new(), password: String::new(), code: String::new(), login_org: String::new() } }
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +42,11 @@ pub enum Msg {
     Demo(bool),
     Create,
     QuickDemo,
+    Email(String),
+    Password(String),
+    Code(String),
+    SignIn,
+    SignedIn(Result<Value, String>),
 }
 
 pub fn load(app: &mut App) -> Task<Message> {
@@ -62,6 +72,26 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::Country(c) => { app.setup.country = c; Task::none() }
         Msg::Skin(s) => { app.setup.skin = s; Task::none() }
         Msg::Demo(d) => { app.setup.demo = d; Task::none() }
+        Msg::Email(v) => { app.setup.email = v; Task::none() }
+        Msg::Password(v) => { app.setup.password = v; Task::none() }
+        Msg::Code(v) => { app.setup.code = v; Task::none() }
+        Msg::SignIn => {
+            app.setup.busy = true;
+            app.be.call("auth.login", json!({"email": app.setup.email.trim(), "password": app.setup.password, "code": app.setup.code.trim()}), |r| Message::Setup(Msg::SignedIn(r)))
+        }
+        Msg::SignedIn(r) => {
+            app.setup.busy = false;
+            match r {
+                Ok(v) => {
+                    app.be.token = v["token"].as_str().map(String::from);
+                    app.setup.password.clear();
+                    app.setup.code.clear();
+                    app.route = crate::app::Route::Dashboard;
+                    app.be.call("session.get", json!({}), Message::Session)
+                }
+                Err(e) => app.toast(e, true),
+            }
+        }
         Msg::QuickDemo => {
             app.setup.name = "Sample Company".into();
             app.setup.owner = "Alex Morgan".into();
@@ -117,4 +147,19 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let mut content = column![brand, ui::card(existing), ui::card(create), ui::muted("LedgerCraft is not affiliated with or endorsed by Intuit (QuickBooks) or Xero Limited.")].spacing(18).max_width(760);
     if app.session.is_some() { content = content.push(ui::btn("Back", Some(Message::Back))); }
     scrollable(container(content).padding(40).center_x(Fill)).style(theme::scroll).height(Fill).into()
+}
+
+/// Sign-in for company files that have passwords set (two-step code when enabled).
+pub fn login(app: &App) -> Element<'_, Message> {
+    let s = &app.setup;
+    let pw = text_input("", &s.password).secure(true).on_input(|v| Message::Setup(Msg::Password(v))).on_submit(Message::Setup(Msg::SignIn)).padding([7, 10]).size(14).style(theme::input);
+    let card = ui::card(column![
+        ui::h2(format!("Welcome back to {}", if s.login_org.is_empty() { "LedgerCraft" } else { &s.login_org })),
+        ui::muted("This company file is protected. Sign in with your email and password."),
+        ui::field("Email", &s.email, |v| Message::Setup(Msg::Email(v))),
+        column![ui::label("Password"), pw].spacing(5),
+        ui::field_ph("Two-step code", "Only if you've turned it on", &s.code, |v| Message::Setup(Msg::Code(v))),
+        row![ui::btn("Other companies", Some(Message::Nav(crate::app::Route::Setup))), ui::hspace(), ui::btn_primary("Sign in", if s.busy { None } else { Some(Message::Setup(Msg::SignIn)) })].spacing(8),
+    ].spacing(12));
+    container(container(card).max_width(440)).padding(60).center_x(Fill).into()
 }

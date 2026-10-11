@@ -12,6 +12,7 @@ use std::time::Duration;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Route {
     Setup,
+    Login,
     Dashboard,
     AllSales,
     Invoices,
@@ -295,7 +296,7 @@ impl App {
             Route::Spend(acc) => payments::open_spend(self, acc),
             Route::NewContact(_) | Route::NewProduct | Route::Journal => forms::open(self),
             Route::Setup => setup::load(self),
-            Route::Settings | Route::Placeholder(_) => Task::none(),
+            Route::Settings | Route::Placeholder(_) | Route::Login => Task::none(),
         }
     }
 
@@ -307,6 +308,14 @@ impl App {
                 if let Some(r) = self.history.pop() { self.route = r; self.load() } else { Task::none() }
             }
             Message::Session(r) => match r {
+                Ok(v) if v["login_required"] == true => {
+                    self.session = None;
+                    self.setup.orgs = v["orgs"].as_array().cloned().unwrap_or_default();
+                    self.setup.login_org = v["org"]["name"].as_str().unwrap_or("").to_string();
+                    self.route = Route::Login;
+                    self.data = Some(json!({}));
+                    Task::none()
+                }
                 Ok(v) if !v["org"]["name"].is_null() => {
                     self.session = Some(v);
                     // Open the first screen once reference data (accounts, contacts…) is loaded.
@@ -315,6 +324,7 @@ impl App {
                     self.load_lookups()
                 }
                 Ok(_) => { self.route = Route::Setup; self.load() }
+                Err(e) if e.contains("sign in") => { self.route = Route::Login; self.data = Some(json!({})); Task::none() }
                 Err(e) => {
                     // No organisation open yet (or it could not be opened): show the organisation picker.
                     self.route = Route::Setup;

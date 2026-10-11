@@ -9,6 +9,9 @@ use iced::widget::{Space, button, column, container, mouse_area, opaque, row, sc
 use iced::{Alignment, Element, Fill, Length, Padding};
 
 pub fn view(app: &App) -> Element<'_, Message> {
+    if app.route == Route::Login {
+        return with_toasts(app, container(setup::login(app)).style(theme::page).width(Fill).height(Fill).into());
+    }
     if app.route == Route::Setup {
         return with_toasts(app, container(setup::view(app)).style(theme::page).width(Fill).height(Fill).into());
     }
@@ -68,6 +71,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::NewContact(_) | Route::NewProduct | Route::Journal => forms::view(app),
         Route::Placeholder(name) => placeholder(app, name),
         Route::Setup => setup::view(app),
+        Route::Login => setup::login(app),
     }
 }
 
