@@ -22,7 +22,7 @@ fn demo_app(tag: &str, skin: Skin) -> (App, std::path::PathBuf) {
 
 /// Click the widget showing `label` and return the messages it produced.
 fn click(app: &App, label: &str) -> Vec<Message> {
-    let mut ui = simulator(app.view());
+    let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 1400.0), app.view());
     ui.click(label).unwrap_or_else(|e| panic!("couldn't click {label:?}: {e:?}"));
     ui.into_messages().collect()
 }
@@ -166,5 +166,24 @@ fn global_search_opens_contact() {
     let _ = app.update(Message::Search("zz".into()));
     let _ = app.update(Message::SearchResults("pinecrest".into(), Ok(json!([{"entity": "contact", "id": 1, "title": "x"}]))));
     assert!(app.search_results.is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn edit_company_details() {
+    let (mut app, dir) = demo_app("settings", Skin::QuickBooks);
+    let _ = app.update(Message::Nav(Route::Settings));
+    let msgs = click(&app, "Edit");
+    assert!(matches!(msgs.first(), Some(Message::Settings(crate::settings::Msg::Edit))), "{msgs:?}");
+    let _ = app.update(Message::Settings(crate::settings::Msg::Edit));
+    assert_eq!(app.settings.values[0], "Demo Co");
+    let _ = app.update(Message::Settings(crate::settings::Msg::Field(4, "555 0100".into())));
+    let msgs = click(&app, "Save");
+    assert!(matches!(msgs.first(), Some(Message::Settings(crate::settings::Msg::Save))), "{msgs:?}");
+    // What Save sends:
+    let mut p = serde_json::Map::new();
+    for ((k, _), v) in crate::settings::FIELDS.iter().zip(app.settings.values.iter()) { p.insert(k.to_string(), json!(v)); }
+    app.be.call_now("settings.update", Value::Object(p)).unwrap();
+    assert_eq!(app.be.call_now("settings.get", json!({})).unwrap()["phone"], "555 0100");
     let _ = std::fs::remove_dir_all(dir);
 }

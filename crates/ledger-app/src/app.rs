@@ -117,6 +117,7 @@ pub enum Message {
     Report(reports::Msg),
     Setup(setup::Msg),
     Form(forms::Msg),
+    Settings(crate::settings::Msg),
     People(people::Msg),
     /// New invoice/bill for a given contact.
     NewDocFor(String, i64),
@@ -148,6 +149,7 @@ pub struct App {
     pub pay: Option<payments::State>,
     pub form: Option<forms::State>,
     pub people: people::State,
+    pub settings: crate::settings::State,
     pub prefill_contact: Option<i64>,
     pub bank: banking::State,
     pub report: reports::State,
@@ -201,6 +203,7 @@ impl App {
             pay: None,
             form: None,
             people: people::State::default(),
+            settings: crate::settings::State::default(),
             prefill_contact: None,
             bank: banking::State::default(),
             report: reports::State::default(),
@@ -412,6 +415,7 @@ impl App {
             Message::Setup(m) => setup::update(self, m),
             Message::Form(m) => forms::update(self, m),
             Message::People(m) => people::update(self, m),
+            Message::Settings(m) => crate::settings::update(self, m),
             Message::NewDocFor(kind, cid) => { self.prefill_contact = Some(cid); self.go(Route::Doc { kind, id: None }) }
         }
     }
