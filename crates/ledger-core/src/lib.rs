@@ -38,6 +38,7 @@ pub mod expenses;
 pub mod projects;
 pub mod importexport;
 pub mod adviser;
+pub mod customreports;
 
 pub use error::{Error, Result};
 pub use money::Cents;

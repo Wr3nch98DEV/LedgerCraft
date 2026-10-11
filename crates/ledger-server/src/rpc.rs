@@ -79,6 +79,7 @@ pub fn handle(st: &AppState, token: Option<&str>, method: &str, p: Value) -> R {
     // ---- authentication ----
     if method == "auth.login" {
         let (uid, role, perms) = l.authenticate(s(&p, "email"), s(&p, "password"))?;
+        l.check_2fa(uid, p["code"].as_str().filter(|c| !c.is_empty()))?;
         let tok = util::random_token(32);
         st.sessions.lock().unwrap().insert(tok.clone(), Session { user_id: uid, role, perms });
         return Ok(json!({"token": tok}));
@@ -102,6 +103,16 @@ pub fn handle(st: &AppState, token: Option<&str>, method: &str, p: Value) -> R {
     };
     l.user_id = Some(session.user_id);
     l.role = session.role.clone();
+    // Jobs that do network I/O run without holding the organisation lock.
+    if matches!(method, "rates.fetch" | "email.test" | "jobs.run") {
+        if !session.perms.iter().any(|x| x == "settings:write" || x == "accounting:write") { return Err(ApiError::Forbidden("you don't have permission".into())); }
+        drop(guard);
+        return match method {
+            "rates.fetch" => crate::jobs::fetch_ecb_rates(st).map_err(ApiError::Bad),
+            "email.test" => { crate::jobs::test_email(st, s(&p, "to")).map_err(ApiError::Bad)?; ok() }
+            _ => Ok(crate::jobs::run_once(st)),
+        };
+    }
     let need = |perm: &str| -> Result<(), ApiError> {
         if session.perms.iter().any(|p| p == perm) { Ok(()) } else { Err(ApiError::Forbidden(format!("you don't have permission ({perm})"))) }
     };
@@ -110,35 +121,7 @@ pub fn handle(st: &AppState, token: Option<&str>, method: &str, p: Value) -> R {
 }
 
 fn report(l: &Ledger, name: &str, p: &ReportParams) -> R {
-    Ok(match name {
-        "profit-and-loss" => l.profit_and_loss(p)?,
-        "balance-sheet" => l.balance_sheet(p)?,
-        "trial-balance" => l.trial_balance(p)?,
-        "account-transactions" => l.account_transactions(p)?,
-        "general-ledger" => l.general_ledger_summary(p)?,
-        "general-ledger-detail" => l.account_transactions(&ReportParams { account_id: None, ..p.clone() })?,
-        "journal-report" => l.journal_report(p)?,
-        "aged-receivables" => l.aged(true, p)?,
-        "aged-payables" => l.aged(false, p)?,
-        "cash-summary" => l.cash_summary(p)?,
-        "bank-summary" => l.bank_summary(p)?,
-        "sales-by-contact" => l.sales_by_contact(true, p)?,
-        "purchases-by-contact" => l.sales_by_contact(false, p)?,
-        "sales-by-item" => l.sales_by_item(true, p)?,
-        "purchases-by-item" => l.sales_by_item(false, p)?,
-        "tax-reconciliation" => l.tax_report(p)?,
-        "executive-summary" => l.executive_summary(p)?,
-        "inventory-summary" => ledger_core::extra_reports::inventory_report(l)?,
-        "bank-reconciliation" => {
-            let acct = p.account_id.ok_or_else(|| ApiError::Bad("choose a bank account".into()))?;
-            let r = l.reconciliation_report(acct, p.date.as_deref().or(p.to.as_deref()).unwrap_or(&util::today()))?;
-            ledger_core::extra_reports::reconciliation_as_report(l, acct, &r)?
-        }
-        "contact-transactions" => ledger_core::extra_reports::contact_transactions(l, p)?,
-        "receivable-invoice-detail" => ledger_core::extra_reports::invoice_detail(l, true, p)?,
-        "payable-invoice-detail" => ledger_core::extra_reports::invoice_detail(l, false, p)?,
-        _ => ledger_core::extra_reports::run_extra(l, name, p)?,
-    })
+    Ok(ledger_core::extra_reports::run_any(l, name, p)?)
 }
 
 fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Result<(), ApiError>, session: &Session, file: &str, orgs: &Value) -> R {
@@ -160,6 +143,9 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
             if uid != session.user_id { need("users:write")?; }
             l.set_password(uid, p["password"].as_str())?; ok()
         }
+        "users.begin2fa" => Ok(l.begin_2fa(session.user_id)?),
+        "users.confirm2fa" => { l.confirm_2fa(session.user_id, s(p, "code"))?; ok() }
+        "users.disable2fa" => { let uid = oi(p, "id").unwrap_or(session.user_id); if uid != session.user_id { need("users:write")?; } l.disable_2fa(uid)?; ok() }
         "audit.list" => { need("accounting:read")?; Ok(json!(l.audit_log(oi(p, "limit").unwrap_or(200), p["entity"].as_str())?)) }
         "history.get" => Ok(json!(l.history(s(p, "entity"), id(p)?)?)),
         "notes.add" => { let nid = l.add_note(s(p, "entity"), id(p)?, "NOTE", s(p, "text"))?; Ok(json!({"id": nid})) }

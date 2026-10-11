@@ -12,6 +12,7 @@
     if (v === null || v === undefined) return '';
     if (typeof v === 'string') return v;
     if (row?.format === 'pct') return fixed(v, 2) + '%';
+    if (row?.format === 'pctx') return v + '%';
     if (row?.format === 'num' || countCols.includes(i)) return String(v);
     if (qtyCols.includes(i)) return qty(v);
     return money(v);
@@ -40,7 +41,10 @@
       {#each report.sections as s, si}
         {#if s.title}<tr><td colspan={cols.length + 1 + (report.detail ? 3 : 0) + (income ? 1 : 0) + (report.has_budget ? 2 : 0)} class="!border-0 !pb-1 !pt-5 text-[15px] font-semibold">{s.title}</td></tr>{/if}
         {#each s.rows ?? [] as r, ri}
-          <tr class={clickable(r) ? 'clickable' : ''} onclick={() => go(r)}>
+          {#if r.heading}<tr><td colspan={cols.length + 1} class="!pt-4 font-semibold">{r.label}</td></tr>
+          {:else if r.text}<tr><td colspan={cols.length + 1} class="whitespace-pre-wrap italic text-muted">{r.label}</td></tr>
+          {:else}
+          <tr class="{clickable(r) ? 'clickable' : ''} {r.bold ? 'font-semibold' : ''}" onclick={() => go(r)}>
             <td class="{r.children ? 'font-medium' : ''}">
               {#if r.children?.length}<button class="mr-1 text-faint" onclick={(e) => { e.stopPropagation(); const k = si + ':' + ri; const n = new Set(expanded); n.has(k) ? n.delete(k) : n.add(k); expanded = n; }}>{expanded.has(si + ':' + ri) ? '▾' : '▸'}</button>{/if}
               <span class={clickable(r) ? 'text-accent' : ''}>{r.label ?? ''}</span>{#if r.contact}<span class="ml-2 text-[12px] text-muted">{r.contact}</span>{/if}{#if r.flag}<span class="chip ml-2 bg-warn-soft text-warn">{r.flag}</span>{/if}
@@ -50,6 +54,7 @@
             {#if income}<td class="n text-muted">{income[0] ? fixed(Math.round((r.values[0] / income[0]) * 10000), 2) + '%' : ''}</td>{/if}
             {#if report.has_budget}<td class="n text-muted">{money(r.budget)}</td><td class="n {r.variance < 0 ? 'text-bad' : 'text-ok'}">{money(r.variance)}</td>{/if}
           </tr>
+          {/if}
           {#if r.children && expanded.has(si + ':' + ri)}
             {#each r.children as c}
               <tr class="clickable text-[13px]" onclick={() => go(c)}><td class="pl-10 text-accent">{c.label}{#if c.due_date}<span class="ml-2 text-muted">due {date(c.due_date)}</span>{/if}</td>{#each c.values as v, i}<td class="n">{cell(v, i, c)}</td>{/each}</tr>

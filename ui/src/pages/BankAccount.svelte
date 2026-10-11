@@ -9,6 +9,9 @@
   import Icon from '../components/Icon.svelte';
   import Empty from '../components/Empty.svelte';
   import Status from '../components/Status.svelte';
+  import Combo from '../components/Combo.svelte';
+  import { accountOptions, taxOptions } from '../components/Pickers';
+  import { lookups } from '../lib/stores.svelte';
 
   let { id }: { id: string } = $props();
   let account = $state<any>(null);
@@ -37,6 +40,14 @@
     if (t.kind === 'payment') navigate(`/doc/${t.document_id}`);
     else if (t.kind === 'banktx') navigate(`/banking/transaction/${t.id}`);
   }
+  let cc = $state<Record<number, any>>({});
+  let ccSel = $state<Set<number>>(new Set());
+  $effect(() => { for (const l of lines ?? []) if (!cc[l.id]) cc[l.id] = { account_id: null, tax_rate_id: null, contact: l.payee, description: l.description || l.payee }; });
+  async function saveCashCoding() {
+    const rows = [...ccSel].map((id) => ({ line_id: id, ...cc[id] })).filter((r) => r.account_id);
+    if (rows.length < ccSel.size) { toastError('Choose an account for every ticked line'); return; }
+    try { const r = await rpc('rec.cashcode', { rows }); toast(`${r.created} line(s) coded and reconciled`); ccSel = new Set(); cc = {}; await loadLines(); await loadAccount(); } catch (e) { toastError(e); }
+  }
   const shown = $derived((lines ?? []).slice(0, pageSize));
 </script>
 
@@ -58,7 +69,7 @@
   <div class="card p-4"><div class="text-[12px] text-muted">Items to reconcile</div><div class="num text-lg font-semibold">{account.unreconciled_count}</div></div>
 </div>
 
-<Tabs tabs={[{ key: 'reconcile', label: 'Reconcile', count: lines?.length ?? null }, { key: 'statements', label: 'Bank statements' }, { key: 'transactions', label: 'Account transactions' }]}
+<Tabs tabs={[{ key: 'reconcile', label: 'Reconcile', count: lines?.length ?? null }, { key: 'cashcode', label: 'Cash coding' }, { key: 'statements', label: 'Bank statements' }, { key: 'transactions', label: 'Account transactions' }]}
   bind:value={tab} onchange={(k) => setQuery('tab', k === 'reconcile' ? null : k)} />
 
 {#if tab === 'reconcile'}
@@ -75,6 +86,21 @@
     </div>
     {#if lines.length > pageSize}<div class="mt-4 text-center"><button class="btn" onclick={() => (pageSize += 15)}>Show more ({lines.length - pageSize} remaining)</button></div>{/if}
   {/if}
+{:else if tab === 'cashcode'}
+  <p class="mb-3 text-[13px] text-muted">Code many statement lines at once: choose an account (and optionally a tax rate and contact) for each line, tick the rows and save. Each becomes a spend/receive money transaction and is reconciled.</p>
+  <div class="card overflow-x-auto">
+    <table class="tbl text-[13px]"><thead><tr><th class="w-8"><input type="checkbox" class="accent-[var(--accent)]" checked={ccSel.size > 0 && ccSel.size === (lines ?? []).length} onchange={(e) => (ccSel = (e.target as HTMLInputElement).checked ? new Set((lines ?? []).map((l) => l.id)) : new Set())} aria-label="Select all" /></th>
+      <th>Date</th><th>Payee</th><th>Description</th><th class="n">Amount</th><th class="w-[220px]">Account</th><th class="w-[170px]">Tax rate</th><th class="w-[160px]">Contact</th></tr></thead>
+      <tbody>{#each (lines ?? []).filter((x) => cc[x.id]) as l (l.id)}
+        {@const c = cc[l.id]}
+        <tr class={ccSel.has(l.id) ? 'sel' : ''}><td><input type="checkbox" class="accent-[var(--accent)]" checked={ccSel.has(l.id)} onchange={() => { const n = new Set(ccSel); n.has(l.id) ? n.delete(l.id) : n.add(l.id); ccSel = n; }} aria-label="Select" /></td>
+          <td class="whitespace-nowrap">{date(l.date)}</td><td>{l.payee}</td><td class="text-muted">{l.description}</td><td class="n {l.amount < 0 ? '' : 'text-ok'}">{money(l.amount)}</td>
+          <td class="!p-1"><Combo compact bind:value={c.account_id} options={accountOptions((a) => a.type !== 'BANK')} onchange={(v) => { if (v) { c.tax_rate_id = lookups.accounts.find((a) => a.id === v)?.tax_rate_id ?? c.tax_rate_id; const n = new Set(ccSel); n.add(l.id); ccSel = n; } }} /></td>
+          <td class="!p-1"><Combo compact bind:value={c.tax_rate_id} options={taxOptions()} /></td>
+          <td class="!p-1"><input class="grid-in" bind:value={c.contact} /></td></tr>
+      {:else}<tr><td colspan="8" class="py-8 text-center text-muted">Nothing to code.</td></tr>{/each}</tbody></table>
+  </div>
+  {#if can('banking:write')}<div class="mt-3 flex justify-end"><button class="btn btn-primary" disabled={!ccSel.size} onclick={saveCashCoding}>Save & reconcile {ccSel.size} line(s)</button></div>{/if}
 {:else if tab === 'statements'}
   <div class="card overflow-x-auto">
     <table class="tbl"><thead><tr><th>Date</th><th>Payee</th><th>Description</th><th>Reference</th><th class="n">Spent</th><th class="n">Received</th><th>Status</th><th></th></tr></thead>

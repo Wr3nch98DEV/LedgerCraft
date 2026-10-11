@@ -7,6 +7,8 @@
   let favs = $state<string[]>([]);
   try { favs = JSON.parse(localStorage.getItem('lc-fav-reports') ?? '["profit-and-loss","balance-sheet","aged-receivables","aged-payables"]'); } catch { favs = []; }
   rpc('reports.catalogue').then((c) => (cat = c));
+  let layouts = $state<any[]>([]);
+  rpc('layouts.list').then((l) => (layouts = l)).catch(() => {});
   function fav(k: string) { favs = favs.includes(k) ? favs.filter((x) => x !== k) : [...favs, k]; try { localStorage.setItem('lc-fav-reports', JSON.stringify(favs)); } catch {} }
   const groups = $derived.by(() => {
     const g: Record<string, any[]> = {};
@@ -16,7 +18,8 @@
 </script>
 
 <PageHeader title="Reports">
-  <a class="btn" href="/settings/report-packs"><Icon name="doc" />Report packs</a>
+  <a class="btn" href="/reports/custom/new"><Icon name="plus" />Custom report</a>
+  <a class="btn" href="/reports/pack/new"><Icon name="doc" />New report pack</a>
   <div class="relative w-64"><Icon name="search" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" /><input class="input pl-8" placeholder="Find a report" bind:value={q} /></div>
 </PageHeader>
 
@@ -25,6 +28,14 @@
     <h2 class="mb-2 text-[13px] font-semibold uppercase tracking-wide text-faint">Favourites</h2>
     <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       {#each cat.filter((r) => favs.includes(r.key)) as r}<a href="/reports/{r.key}" class="card p-4 hover:border-accent"><div class="font-semibold">{r.title}</div><div class="text-[13px] text-muted">{r.description}</div></a>{/each}
+    </div>
+  </section>
+{/if}
+{#if layouts.length && !q}
+  <section class="mb-6">
+    <h2 class="mb-2 text-[13px] font-semibold uppercase tracking-wide text-faint">Custom reports & packs</h2>
+    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {#each layouts as l}<a href="/reports/{l.kind === 'PACK' ? 'pack' : 'custom'}/{l.id}" class="card p-4 hover:border-accent"><div class="font-semibold">{l.name}</div><div class="text-[13px] text-muted">{l.kind === 'PACK' ? 'Report pack' : 'Custom report'}{l.published ? ' · published' : ''}</div></a>{/each}
     </div>
   </section>
 {/if}

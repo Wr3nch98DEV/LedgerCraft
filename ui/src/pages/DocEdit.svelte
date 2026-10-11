@@ -10,6 +10,7 @@
   import Combo from '../components/Combo.svelte';
   import Status from '../components/Status.svelte';
   import History from '../components/History.svelte';
+  import Attachments from '../components/Attachments.svelte';
   import Modal from '../components/Modal.svelte';
   import Icon from '../components/Icon.svelte';
   import { bankAccounts, currencyOptions } from '../components/Pickers';
@@ -361,7 +362,7 @@
   </div>
 {/if}
 
-{#if doc}<History entity="document" id={doc.id} />{/if}
+{#if doc}<Attachments entity="document" id={doc.id} /><History entity="document" id={doc.id} />{/if}
 {/if}
 
 <Modal bind:open={emailOpen} title="Send {DOC_LABEL[type].toLowerCase()}" width={620}>

@@ -51,6 +51,11 @@
   let themes = $state<any[]>([]);
   let th = $state<any>(null);
   $effect(() => { if (s === 'branding') rpc('branding.list').then((t) => { themes = t; th = th ?? { ...t[0], payment_advice: !!t[0]?.payment_advice, show_tax_number: !!t[0]?.show_tax_number }; }); });
+  async function uploadLogo(f: File) {
+    if (f.size > 2 * 1024 * 1024) { toastError('Logos must be 2 MB or smaller'); return; }
+    const data = await new Promise<string>((ok) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result)); fr.readAsDataURL(f); });
+    try { const r = await rpc('attachments.add', { entity: 'branding', entity_id: th.id ?? null, filename: f.name, mime: f.type, data }); th.logo_attachment_id = r.id; toast('Logo uploaded — save the theme to keep it'); } catch (e) { toastError(e); }
+  }
   async function saveTheme() { try { const r = await rpc('branding.save', { id: th.id ?? null, theme: th, default: !!th.is_default }); toast('Theme saved'); themes = await rpc('branding.list'); th = { ...themes.find((t) => t.id === r.id) }; } catch (e) { toastError(e); } }
 
   // emails
@@ -62,6 +67,9 @@
   async function saveReminder(r: any) { await rpc('reminders.save', { id: r.id, days: Number(r.days), active: !!r.active }); toast('Reminder saved'); }
   async function delReminder(r: any) { await rpc('reminders.delete', { id: r.id }); reminders = await rpc('reminders.list'); }
 
+  let testTo = $state('');
+  async function testEmail() { try { await rpc('email.test', { to: testTo }); toast('Test email sent'); } catch (e) { toastError(e); } }
+  async function runJobs() { try { const r = await rpc('jobs.run'); toast(`Sent ${r.emails} email(s)`); outbox = await rpc('outbox.list'); } catch (e) { toastError(e); } }
   // outbox
   let outbox = $state<any[]>([]);
   $effect(() => { if (s === 'outbox') rpc('outbox.list').then((o) => (outbox = o)); });
@@ -77,6 +85,11 @@
   async function revoke(t: any) { if (await confirm('Revoke this token?', 'Apps using it will stop working.', 'Revoke', true)) { await rpc('api.revokeToken', { id: t.id }); tokens = await rpc('api.tokens'); } }
   async function addHook() { try { await rpc('webhooks.save', { url: hookUrl, events: ['*'] }); hookUrl = ''; hooks = await rpc('webhooks.list'); } catch (e) { toastError(e); } }
 
+  let tfa = $state<any>(null);
+  let tfaCode = $state('');
+  async function begin2fa() { try { tfa = await rpc('users.begin2fa'); } catch (e) { toastError(e); } }
+  async function confirm2fa() { try { await rpc('users.confirm2fa', { code: tfaCode }); tfa = null; tfaCode = ''; toast('Two-step verification is on'); } catch (e) { toastError(e); } }
+  async function disable2fa() { if (await confirm('Turn off two-step verification?')) { await rpc('users.disable2fa'); toast('Two-step verification turned off'); } }
   // profile
   let pw = $state({ a: '', b: '' });
   async function setPassword() {
@@ -166,6 +179,10 @@
           <div><label class="label" for="pt">Purchase order title</label><input id="pt" class="input" bind:value={th.po_title} /></div>
           <div class="sm:col-span-2"><label class="label" for="pi">Payment instructions</label><textarea id="pi" rows="3" class="textarea" bind:value={th.payment_instructions} placeholder="e.g. BSB 062-000 Account 1234 5678"></textarea></div>
           <div class="sm:col-span-2"><label class="label" for="tt">Terms & conditions</label><textarea id="tt" rows="3" class="textarea" bind:value={th.terms}></textarea></div>
+          <div class="sm:col-span-2"><span class="label">Logo</span><div class="flex items-center gap-3">
+            {#if th.logo_attachment_id}<img src="/download/attachment?id={th.logo_attachment_id}" alt="Logo" class="h-12 max-w-[180px] rounded bg-white object-contain p-1" />{/if}
+            <label class="btn btn-sm cursor-pointer">Upload logo<input type="file" accept="image/png,image/jpeg,image/svg+xml" class="hidden" onchange={(e) => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) uploadLogo(f); }} /></label>
+            {#if th.logo_attachment_id}<button class="btn btn-sm btn-ghost" onclick={() => (th.logo_attachment_id = null)}>Remove</button>{/if}</div></div>
           <label class="flex items-center gap-2"><input type="checkbox" bind:checked={th.payment_advice} class="accent-[var(--accent)]" />Show payment advice slip</label>
           <label class="flex items-center gap-2"><input type="checkbox" bind:checked={th.is_default} class="accent-[var(--accent)]" />Default theme</label>
         </div>
@@ -185,14 +202,18 @@
       </section>
       <section class="card mb-4 space-y-3 p-5">
         <h2 class="text-lg font-semibold">Email sending (SMTP)</h2>
-        <p class="text-[13px] text-muted">Optional. Without SMTP, emails are kept in the Outbox where you can download them as .eml files and send them from your own mail app.</p>
+        <p class="text-[13px] text-muted">Optional. With SMTP configured, queued emails (invoices, reminders, payslips) are sent automatically every few minutes. Without it, emails are kept in the Outbox where you can download them as .eml files.</p>
         <div class="grid gap-3 sm:grid-cols-3">
           <div><label class="label" for="sh">SMTP host</label><input id="sh" class="input" bind:value={st.smtp_host} placeholder="smtp.example.com" /></div>
           <div><label class="label" for="sp">Port</label><input id="sp" class="input" bind:value={st.smtp_port} placeholder="587" /></div>
           <div><label class="label" for="sf">From address</label><input id="sf" class="input" bind:value={st.smtp_from} /></div>
           <div><label class="label" for="su">Username</label><input id="su" class="input" bind:value={st.smtp_user} /></div>
+          <div><label class="label" for="spw">Password</label><input id="spw" type="password" class="input" bind:value={st.smtp_pass} placeholder="(unchanged)" /></div>
+          <div><label class="label" for="stl">Security</label><select id="stl" class="select" bind:value={st.smtp_tls}><option value="STARTTLS">STARTTLS (port 587)</option><option value="TLS">TLS (port 465)</option><option value="NONE">None (local relay)</option></select></div>
         </div>
-        {#if can('settings:write')}<div class="flex justify-end"><button class="btn btn-primary" onclick={() => saveSettings(['smtp_host', 'smtp_port', 'smtp_from', 'smtp_user'])}>Save</button></div>{/if}
+        {#if can('settings:write')}<div class="flex justify-end gap-2">
+          <input class="input w-60" placeholder="Send a test to…" bind:value={testTo} /><button class="btn" onclick={testEmail}>Send test</button>
+          <button class="btn btn-primary" onclick={() => saveSettings(['smtp_host', 'smtp_port', 'smtp_from', 'smtp_user', 'smtp_tls', ...(st.smtp_pass ? ['smtp_pass'] : [])])}>Save</button></div>{/if}
       </section>
       <section class="card space-y-4 p-5">
         <h2 class="text-lg font-semibold">Email templates</h2>
@@ -205,9 +226,9 @@
       </section>
     {:else if s === 'outbox'}
       <section class="card overflow-x-auto p-5">
-        <h2 class="mb-3 text-lg font-semibold">Outbox</h2>
+        <div class="mb-3 flex items-center justify-between"><h2 class="text-lg font-semibold">Outbox</h2><button class="btn btn-sm" onclick={runJobs}>Send queued now</button></div>
         <table class="tbl"><thead><tr><th>Created</th><th>To</th><th>Subject</th><th>Status</th><th></th></tr></thead>
-          <tbody>{#each outbox as o}<tr><td class="whitespace-nowrap text-muted">{dateTime(o.created_at)}</td><td>{o.to_addr}</td><td>{o.subject}</td><td>{o.status === 'SAVED' ? 'Saved (not sent)' : o.status}</td>
+          <tbody>{#each outbox as o}<tr><td class="whitespace-nowrap text-muted">{dateTime(o.created_at)}</td><td>{o.to_addr}</td><td>{o.subject}</td><td>{o.status === 'SAVED' ? 'Saved (not sent)' : o.status === 'FAILED' ? 'Failed: ' + (o.error ?? '') : o.status === 'QUEUED' ? 'Queued' : 'Sent ' + dateTime(o.sent_at)}</td>
             <td class="text-right"><a class="btn btn-sm" href="/download/eml?id={o.id}" download><Icon name="download" size={14} />.eml</a></td></tr>
           {:else}<tr><td colspan="5" class="py-8 text-center text-muted">No emails yet.</td></tr>{/each}</tbody></table>
       </section>
@@ -249,6 +270,16 @@
         <div class="grid max-w-md gap-3"><div><label class="label" for="p1">New password</label><input id="p1" type="password" class="input" bind:value={pw.a} /></div><div><label class="label" for="p2">Confirm password</label><input id="p2" type="password" class="input" bind:value={pw.b} /></div></div>
         <div class="flex gap-2"><button class="btn btn-primary" onclick={setPassword}>Set password</button></div>
         <p class="text-[13px] text-muted">Leave blank and save to remove your password (only possible if no one else has a password). Minimum 8 characters.</p>
+      </section>
+      <section class="card mt-4 space-y-3 p-5">
+        <h2 class="text-lg font-semibold">Two-step verification</h2>
+        <p class="text-[13px] text-muted">Protect sign-in with a 6-digit code from an authenticator app (Microsoft Authenticator, Google Authenticator, 1Password, Bitwarden…). Requires a password.</p>
+        {#if tfa}
+          <div class="rounded-lg bg-bg2 p-3 text-[13px]">Add this key to your authenticator app (choose "enter a setup key"): <code class="select-all font-mono text-text">{tfa.secret}</code><div class="mt-1 break-all text-faint">{tfa.uri}</div></div>
+          <div class="flex gap-2"><input class="input w-40 num" placeholder="123456" bind:value={tfaCode} maxlength="6" /><button class="btn btn-primary" onclick={confirm2fa}>Verify & turn on</button></div>
+        {:else}
+          <div class="flex gap-2"><button class="btn" onclick={begin2fa}>Set up two-step verification</button><button class="btn btn-ghost" onclick={disable2fa}>Turn off</button></div>
+        {/if}
       </section>
     {/if}
   </div>

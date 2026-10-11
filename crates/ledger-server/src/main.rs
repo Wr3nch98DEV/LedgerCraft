@@ -1,6 +1,7 @@
 //! LedgerCraft local server: serves the UI and a JSON API over 127.0.0.1 only.
 //! Usage: ledgercraft [--port N] [--data-dir PATH] [--open] [--app]
 
+mod jobs;
 mod rpc;
 mod render;
 mod state;
@@ -31,6 +32,7 @@ async fn main() {
     std::fs::create_dir_all(data_dir.join("orgs")).expect("create data dir");
     let st = Arc::new(AppState::new(data_dir.clone()));
     st.auto_open();
+    jobs::start(st.clone());
 
     let app = Router::new()
         .route("/api/rpc/{method}", post(rpc_handler))

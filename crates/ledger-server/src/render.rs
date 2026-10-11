@@ -7,6 +7,24 @@ use ledger_core::{money::fmt_money, reports::fmt_long, util, Ledger};
 use serde_json::Value;
 use std::collections::HashMap;
 
+fn b64(data: &[u8]) -> String {
+    const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len() * 4 / 3 + 4);
+    for c in data.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 { if i <= c.len() { out.push(T[((n >> (18 - 6 * i)) & 63) as usize] as char) } else { out.push('=') } }
+    }
+    out
+}
+
+fn logo_html(l: &Ledger, theme: &Value) -> String {
+    let Some(id) = theme["logo_attachment_id"].as_i64() else { return String::new() };
+    match l.attachment(id) {
+        Ok((_, mime, data)) if mime.starts_with("image/") => format!("<img src=\"data:{mime};base64,{}\" alt=\"\" style=\"max-height:64px;max-width:220px;margin-bottom:10px\"><br>", b64(&data)),
+        _ => String::new(),
+    }
+}
+
 fn esc(s: &str) -> String { s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;") }
 fn nl(s: &str) -> String { esc(s).replace('\n', "<br>") }
 fn qty(e4: i64) -> String { let s = ledger_core::money::fmt_fixed(e4, 4); let s = s.trim_end_matches('0').trim_end_matches('.').to_string(); if s.is_empty() { "0".into() } else { s } }
@@ -110,13 +128,13 @@ pub fn document_html(l: &Ledger, id: i64, online: bool) -> Result<String, String
     Ok(format!(r#"<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title} {num}</title><style>{STYLE}:root{{--accent:{accent}}}</style></head><body>
 <div class="bar"><button onclick="window.print()">Print / Save as PDF</button></div>
 <div class="page">
-<div class="top"><div><h1>{title_up}</h1><div>{contact}</div><div class="muted">{caddr}</div>{status}</div><div class="meta">{meta}{reference}</div>{org}</div>
+<div class="top"><div>{logo}<h1>{title_up}</h1><div>{contact}</div><div class="muted">{caddr}</div>{status}</div><div class="meta">{meta}{reference}</div>{org}</div>
 {summary}
 <table><thead><tr><th>Description</th><th class="n">Quantity</th><th class="n">Unit Price</th>{disc_head}<th class="n">{taxh}</th><th class="n">Amount {cur}</th></tr></thead><tbody>{rows}</tbody></table>
 <div class="totals">{totals}</div>
 {terms}{instructions}{advice}
 </div></body></html>"#,
-        num = esc(d["number"].as_str().unwrap_or("")), title_up = esc(&title.to_uppercase()), contact = esc(d["contact_name"].as_str().unwrap_or("")),
+        num = esc(d["number"].as_str().unwrap_or("")), title_up = esc(&title.to_uppercase()), logo = logo_html(l, &theme), contact = esc(d["contact_name"].as_str().unwrap_or("")),
         caddr = nl(d["contact_address"].as_str().unwrap_or("")), org = org_block(l), taxh = if lat == "NOTAX" { "".to_string() } else { esc(&tax_label) },
         cur = esc(d["currency"].as_str().unwrap_or("")), instructions = if kind == "ACCREC" && !instr.is_empty() { format!("<div class='terms'><b>How to pay</b><br>{}</div>", nl(instr)) } else { String::new() }))
 }

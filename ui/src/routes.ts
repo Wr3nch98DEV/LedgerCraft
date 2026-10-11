@@ -34,6 +34,8 @@ import Cashflow from './pages/Cashflow.svelte';
 import Snapshot from './pages/Snapshot.svelte';
 import Module from './pages/Module.svelte';
 import JournalView from './pages/JournalView.svelte';
+import CustomReport from './pages/CustomReport.svelte';
+import ReportPack from './pages/ReportPack.svelte';
 
 const wrap = (c: any, extra: Record<string, any>) => (anchor: any, props: any) => c(anchor, { ...props, ...extra });
 
@@ -81,6 +83,8 @@ export const routes: [string, any][] = [
   ['/banking/:id/import', ImportStatement],
   ['/banking/:id', BankAccount],
   ['/reports', Reports],
+  ['/reports/custom/:id', CustomReport],
+  ['/reports/pack/:id', ReportPack],
   ['/reports/:name', ReportView],
   ['/accounting/chart', Chart],
   ['/accounting/tax-rates', TaxRates],

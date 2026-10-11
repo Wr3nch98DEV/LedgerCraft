@@ -7,6 +7,7 @@
   import Status from '../components/Status.svelte';
   import Icon from '../components/Icon.svelte';
   import History from '../components/History.svelte';
+  import Attachments from '../components/Attachments.svelte';
   import Tabs from '../components/Tabs.svelte';
 
   let { id }: { id: string } = $props();
@@ -85,5 +86,6 @@
     {#if c.groups.length}<div class="card p-4 text-[13px]"><div class="mb-1 font-semibold">Groups</div>{c.groups.map((g: any) => g.name).join(', ')}</div>{/if}
   </aside>
 </div>
+<Attachments entity="contact" id={c.id} />
 <History entity="contact" id={c.id} />
 {/if}

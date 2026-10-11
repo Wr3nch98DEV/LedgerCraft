@@ -150,3 +150,36 @@ pub fn run_extra(l: &Ledger, name: &str, p: &ReportParams) -> Result<Value> {
         _ => crate::modules::report(l, name, p),
     }
 }
+
+/// Run any report by its catalogue key.
+pub fn run_any(l: &Ledger, name: &str, p: &ReportParams) -> Result<Value> {
+    match name {
+        "profit-and-loss" => l.profit_and_loss(p),
+        "balance-sheet" => l.balance_sheet(p),
+        "trial-balance" => l.trial_balance(p),
+        "account-transactions" => l.account_transactions(p),
+        "general-ledger" => l.general_ledger_summary(p),
+        "general-ledger-detail" => l.account_transactions(&ReportParams { account_id: None, ..p.clone() }),
+        "journal-report" => l.journal_report(p),
+        "aged-receivables" => l.aged(true, p),
+        "aged-payables" => l.aged(false, p),
+        "cash-summary" => l.cash_summary(p),
+        "bank-summary" => l.bank_summary(p),
+        "sales-by-contact" => l.sales_by_contact(true, p),
+        "purchases-by-contact" => l.sales_by_contact(false, p),
+        "sales-by-item" => l.sales_by_item(true, p),
+        "purchases-by-item" => l.sales_by_item(false, p),
+        "tax-reconciliation" => l.tax_report(p),
+        "executive-summary" => l.executive_summary(p),
+        "inventory-summary" => inventory_report(l),
+        "bank-reconciliation" => {
+            let acct = p.account_id.ok_or_else(|| Error::Validation("choose a bank account".into()))?;
+            let r = l.reconciliation_report(acct, p.date.as_deref().or(p.to.as_deref()).unwrap_or(&util::today()))?;
+            reconciliation_as_report(l, acct, &r)
+        }
+        "contact-transactions" => contact_transactions(l, p),
+        "receivable-invoice-detail" => invoice_detail(l, true, p),
+        "payable-invoice-detail" => invoice_detail(l, false, p),
+        _ => run_extra(l, name, p),
+    }
+}

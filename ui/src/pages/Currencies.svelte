@@ -20,6 +20,7 @@
   async function runRevaluation() {
     try { const r = await rpc('fx.revalue', { date: revalueDate }); toast(r.posted ? `Revaluation posted (${r.detail.length} item(s)), reversing next day` : 'Nothing to revalue'); } catch (e) { toastError(e); }
   }
+  async function fetchRates() { try { const r = await rpc('rates.fetch'); toast(`Updated ${r.updated.length} rate(s) for ${date(r.date)}`); load(); } catch (e) { toastError(e); } }
   const enabled = $derived(list.filter((c) => c.enabled));
   const others = $derived(list.filter((c) => !c.enabled).map((c) => ({ value: c.code, label: c.code, sub: c.name })));
 </script>
@@ -38,7 +39,8 @@
     {/if}
     <div class="card p-4"><div class="mb-1 font-semibold">Currency revaluation</div><p class="mb-3 text-[13px] text-muted">Posts unrealised gains/losses on open foreign-currency invoices, bills and bank accounts at period end, reversing automatically the next day.</p>
       <div class="flex gap-2"><input type="date" class="input" bind:value={revalueDate} /><button class="btn" onclick={runRevaluation}>Revalue</button></div></div>
-    <div class="card p-4 text-[13px] text-muted">Exchange rates are entered manually (works offline). Rates are expressed as how many units of the foreign currency equal 1 {base}.</div>
+    <div class="card p-4"><div class="mb-1 font-semibold">Daily rates</div><p class="mb-3 text-[13px] text-muted">Fetch today's European Central Bank reference rates for your enabled currencies (needs internet).</p><button class="btn" onclick={fetchRates}>Fetch ECB rates</button></div>
+    <div class="card p-4 text-[13px] text-muted">You can also enter rates manually (works offline). Rates are expressed as how many units of the foreign currency equal 1 {base}.</div>
   </aside>
 </div>
 

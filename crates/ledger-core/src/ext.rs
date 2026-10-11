@@ -66,6 +66,13 @@ pub fn dispatch_ext(l: &mut Ledger, method: &str, p: &Value, need: Need) -> Resu
         "webhooks.delete" => { need("settings:write")?; l.conn.execute("DELETE FROM webhooks WHERE id = ?1", [i(p, "id")?])?; return ok(); }
         "webhooks.deliveries" => json!(crate::util::query_json(&l.conn, "SELECT * FROM webhook_deliveries ORDER BY id DESC LIMIT 100", [])?),
         "openapi" => openapi(),
+        // custom reports & packs
+        "layouts.list" => { need("reports:read")?; json!(l.list_layouts()?) }
+        "layouts.save" => { need("reports:read")?; json!({"id": l.save_layout(p["id"].as_i64(), s(p, "name"), s(p, "kind"), &p["definition"])?}) }
+        "layouts.delete" => { need("reports:read")?; l.delete_layout(i(p, "id")?)?; return ok(); }
+        "layouts.publish" => { need("reports:read")?; l.publish_layout(i(p, "id")?, p["publish"].as_bool().unwrap_or(true))?; return ok(); }
+        "layouts.run" => { need("reports:read")?; l.run_layout(i(p, "id")?, if p["params"].is_object() { Some(&p["params"]) } else { None })? }
+        "layouts.preview" => { need("reports:read")?; if s(p, "kind") == "PACK" { l.run_pack(s(p, "name"), &p["definition"])? } else { l.run_custom(s(p, "name"), &p["definition"], None)? } }
         // branding themes & email templates
         "branding.list" => json!(crate::util::query_json(&l.conn, "SELECT * FROM branding_themes ORDER BY is_default DESC, name", [])?),
         "branding.save" => {
@@ -192,4 +199,24 @@ pub fn openapi() -> Value {
         },
         "x-webhooks": ["contact.created", "document.created", "payment.created", "banktransaction.created"],
     })
+}
+
+/// HMAC-SHA256 (RFC 2104) hex digest, used to sign webhook payloads.
+pub fn hmac_sha256_hex(key: &[u8], msg: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut k = if key.len() > 64 { Sha256::digest(key).to_vec() } else { key.to_vec() };
+    k.resize(64, 0);
+    let ipad: Vec<u8> = k.iter().map(|b| b ^ 0x36).collect();
+    let opad: Vec<u8> = k.iter().map(|b| b ^ 0x5c).collect();
+    let inner = Sha256::new().chain_update(&ipad).chain_update(msg).finalize();
+    let outer = Sha256::new().chain_update(&opad).chain_update(inner).finalize();
+    outer.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn hmac_rfc4231_case2() {
+        assert_eq!(super::hmac_sha256_hex(b"Jefe", b"what do ya want for nothing?"), "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
+    }
 }

@@ -6,6 +6,7 @@
   import PageHeader from '../components/PageHeader.svelte';
   import Combo from '../components/Combo.svelte';
   import History from '../components/History.svelte';
+  import Attachments from '../components/Attachments.svelte';
   import Status from '../components/Status.svelte';
   import Icon from '../components/Icon.svelte';
   import { accountOptions, taxOptions, trackingCategories, trackingOptions } from '../components/Pickers';
@@ -80,4 +81,4 @@
     <div class="flex gap-2"><button class="btn" onclick={() => save('DRAFT')}>Save as draft</button><button class="btn btn-primary" disabled={totals.d !== totals.c || !totals.d} onclick={() => save('POSTED')}>Post</button></div>
   </div>
 {/if}
-{#if mj}<History entity="manual_journal" id={mj.id} />{/if}
+{#if mj}<Attachments entity="manual_journal" id={mj.id} /><History entity="manual_journal" id={mj.id} />{/if}

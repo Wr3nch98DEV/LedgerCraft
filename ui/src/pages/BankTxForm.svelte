@@ -9,6 +9,7 @@
   import ContactSelect from '../components/ContactSelect.svelte';
   import Combo from '../components/Combo.svelte';
   import History from '../components/History.svelte';
+  import Attachments from '../components/Attachments.svelte';
   import Icon from '../components/Icon.svelte';
   import { bankAccounts } from '../components/Pickers';
 
@@ -65,4 +66,4 @@
   <div>{#if id && can('banking:write') && !tx?.reconciled}<button class="btn btn-danger" onclick={del}><Icon name="trash" />Remove</button>{/if}</div>
   {#if can('banking:write') && !credit && !tx?.reconciled}<div class="flex gap-2"><a class="btn" href="/banking">Cancel</a><button class="btn btn-primary" disabled={busy || !f.account_id} onclick={save}>Save</button></div>{/if}
 </div>
-{#if tx}<History entity="banktx" id={tx.id} />{/if}
+{#if tx}<Attachments entity="banktx" id={tx.id} /><History entity="banktx" id={tx.id} />{/if}
