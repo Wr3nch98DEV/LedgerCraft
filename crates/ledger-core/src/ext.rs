@@ -108,6 +108,7 @@ pub fn dispatch_ext(l: &mut Ledger, method: &str, p: &Value, need: Need) -> Resu
         "reminders.delete" => { l.conn.execute("DELETE FROM reminder_rules WHERE id = ?1", [i(p, "id")?])?; return ok(); }
         "reminders.run" => json!({"queued": crate::email::run_reminders(l)?}),
         "outbox.list" => json!(crate::email::outbox(l)?),
+        "docs.paymentDates" => { l.set_payment_dates(i(p, "id")?, p["expected"].as_str(), p["planned"].as_str())?; return ok(); }
         "statements.email" => { need("sales:write")?; let ids: Vec<i64> = serde_json::from_value(p["contact_ids"].clone()).unwrap_or_default(); json!({"queued": crate::email::email_statements(l, &ids)?}) }
         "reports.catalogue" => json!(crate::extra_reports::CATALOGUE.iter().map(|(k, t, c, d)| json!({"key": k, "title": t, "category": c, "description": d})).collect::<Vec<_>>()),
         _ => return crate::modules::dispatch(l, method, p, need),

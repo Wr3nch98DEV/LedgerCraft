@@ -16,6 +16,8 @@
   let picked = $state<Map<string, { kind: string; id: number; amount: number; label: string; doc?: boolean; pay?: string }>>(new Map());
   let all = $state<{ ledger: any[]; docs: any[] }>({ ledger: [], docs: [] });
   let findQ = $state('');
+  let adjAccount = $state<number | null>(null);
+  let adjDesc = $state('Bank fees');
 
   const spent = line.amount < 0;
   const abs = Math.abs(line.amount);
@@ -105,6 +107,13 @@
     try {
       const docs = [...picked.values()].filter((p) => p.doc).map((p) => ({ id: p.id, amount: p.pay }));
       const targets = [...picked.values()].filter((p) => !p.doc).map((p) => ({ kind: p.kind, id: p.id }));
+      const diff = line.amount - pickedTotal;
+      if (diff !== 0 && adjAccount) {
+        // Book the difference (e.g. bank fees or rounding) as a spend/receive money adjustment.
+        const r = await rpc('banktx.save', { tx: { type: diff < 0 ? 'SPEND' : 'RECEIVE', account_id: account.id, date: line.date, reference: line.reference || 'Adjustment', line_amount_type: 'INCLUSIVE',
+          lines: [{ description: adjDesc, amount: moneyPlain(Math.abs(diff)), account_id: adjAccount }] } });
+        targets.push({ kind: 'BANKTX', id: r.id });
+      }
       if (docs.length) await rpc('rec.pay', { id: line.id, documents: docs, targets });
       else await rpc('rec.match', { id: line.id, targets });
       toast('Reconciled'); ondone();
@@ -250,7 +259,13 @@
       <div class="flex items-center justify-between border-t border-line px-5 py-3">
         <div class="text-[13px]">Selected <span class="num font-semibold">{money(Math.abs(pickedTotal))}</span> of <span class="num">{money(abs)}</span>
           {#if pickedTotal !== line.amount && picked.size}<span class="ml-2 text-warn">Difference {money(Math.abs(line.amount - pickedTotal))}</span>{/if}</div>
-        <div class="flex gap-2"><button class="btn" onclick={() => (findOpen = false)}>Cancel</button><button class="btn btn-primary" disabled={busy || !picked.size || pickedTotal !== line.amount} onclick={okFind}>Reconcile</button></div>
+        <div class="flex items-center gap-2">
+          {#if picked.size && pickedTotal !== line.amount}
+            <span class="text-[12px] text-muted">Adjust difference to</span>
+            <div class="w-52"><Combo bind:value={adjAccount} options={accountOptions((a) => a.type !== 'BANK')} placeholder="e.g. Bank Fees" /></div>
+            <input class="input w-32" bind:value={adjDesc} />
+          {/if}
+          <button class="btn" onclick={() => (findOpen = false)}>Cancel</button><button class="btn btn-primary" disabled={busy || !picked.size || (pickedTotal !== line.amount && !adjAccount)} onclick={okFind}>Reconcile</button></div>
       </div>
     </div>
   </div>

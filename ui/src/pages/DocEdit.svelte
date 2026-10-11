@@ -317,6 +317,13 @@
         </div>
       {/if}
 
+      {#if (type === 'ACCREC' || type === 'ACCPAY') && doc.status === 'AUTHORISED'}
+        <div class="card p-4">
+          <label class="label" for="pdt">{type === 'ACCREC' ? 'Expected payment date' : 'Planned payment date'}</label>
+          <input id="pdt" type="date" class="input" value={type === 'ACCREC' ? doc.expected_payment_date ?? '' : doc.planned_payment_date ?? ''}
+            onchange={async (e) => { const v = (e.target as HTMLInputElement).value; try { await rpc('docs.paymentDates', type === 'ACCREC' ? { id: doc.id, expected: v, planned: doc.planned_payment_date } : { id: doc.id, expected: doc.expected_payment_date, planned: v }); toast('Saved — used by the cash flow forecast'); } catch (x) { toastError(x); } }} />
+        </div>
+      {/if}
       {#if ledger && doc.status === 'AUTHORISED' && can('banking:write')}
         <div class="card p-4">
           <div class="mb-3 font-semibold">{credit ? 'Record refund' : 'Record payment'}</div>

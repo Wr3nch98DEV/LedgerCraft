@@ -111,6 +111,8 @@ impl Ledger {
             } else if c.tax_rate_id.is_none() {
                 c.tax_rate_id = self.conn.query_row("SELECT tax_rate_id FROM accounts WHERE id = ?1", [c.account_id.unwrap()], |r| r.get(0)).optional()?.flatten();
             }
+            // "No tax" amounts carry no tax rate, so they stay out of GST/VAT returns (like "BAS excluded").
+            if lat == Lat::NoTax { c.tax_rate_id = None; }
             let (rate_bp, comps, rt) = match (lat, c.tax_rate_id) {
                 (Lat::NoTax, _) | (_, None) => (0, vec![], None),
                 (_, Some(t)) => { let (r, cs, rt) = self.tax_rate(t)?; (r, cs, Some(rt)) }
@@ -515,6 +517,15 @@ impl Ledger {
             self.add_note("document", nid, "HISTORY", &format!("Copied from {} {}", entity_name(&from_kind), d["number"].as_str().unwrap_or("")))?;
             Ok(nid)
         })
+    }
+
+    /// Expected (invoices) / planned (bills) payment date used by the cash-flow forecast.
+    pub fn set_payment_dates(&self, id: i64, expected: Option<&str>, planned: Option<&str>) -> Result<()> {
+        if let Some(d) = expected.filter(|d| !d.is_empty()) { util::parse_date(d)?; }
+        if let Some(d) = planned.filter(|d| !d.is_empty()) { util::parse_date(d)?; }
+        self.conn.execute("UPDATE documents SET expected_payment_date = ?2, planned_payment_date = ?3 WHERE id = ?1",
+            params![id, expected.filter(|d| !d.is_empty()), planned.filter(|d| !d.is_empty())])?;
+        Ok(())
     }
 
     pub fn mark_sent(&self, id: i64) -> Result<()> {
