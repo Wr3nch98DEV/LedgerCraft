@@ -33,6 +33,17 @@ export async function rpc<T = any>(method: string, params: any = {}): Promise<T>
   return body as T;
 }
 
+/** Download a server-generated file; a server-side error (e.g. missing bank details) is thrown as an ApiError. */
+export async function download(path: string) {
+  const res = await fetch(path, { headers: token ? { 'x-session': token } : {} });
+  if (!res.ok) throw new ApiError((await res.text()) || `Download failed (${res.status})`, res.status);
+  const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'download';
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 /** Open a server-rendered page (invoice print view etc.) in a new window. */
 export function openView(path: string) {
   window.open(path + (token ? (path.includes('?') ? '&' : '?') + 's=' + token : ''), '_blank');

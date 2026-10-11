@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { rpc, openView } from '../../lib/api';
+  import { rpc, openView, download } from '../../lib/api';
   import { money, date, moneyPlain, fixed } from '../../lib/format';
   import { navigate } from '../../lib/router.svelte';
   import { can, confirm, toast, toastError } from '../../lib/stores.svelte';
@@ -14,6 +14,9 @@
   let bank = $state<number | null>(bankAccounts()[0]?.value ?? null);
   let editing = $state<number | null>(null);
   let lines = $state<any[]>([]);
+  // Bank file format defaults to the organisation's country (ABA in AU, BACS in the UK, NACHA in the US, SEPA elsewhere).
+  let fileFmt = $state('ABA');
+  rpc('settings.get').then((st: any) => { fileFmt = ({ AU: 'ABA', GB: 'BACS', US: 'NACHA' } as Record<string, string>)[st.country] ?? 'SEPA'; }).catch(() => {});
   const load = () => rpc('payroll.payRun', { id: Number(id) }).then((x) => (r = x)).catch(toastError);
   load();
   rpc('payroll.settings').then((s) => (items = s.pay_items.filter((p: any) => p.kind !== 'SUPER')));
@@ -32,7 +35,9 @@
 <PageHeader title="Pay run {r.number}" crumbs={[{ label: 'Pay runs', href: '/payroll/pay-runs' }]}>
   {#snippet sub()}{r.calendar_name} · {date(r.period_start)} – {date(r.period_end)} · paid {date(r.payment_date)} · <Status status={r.status} />{/snippet}
   <a class="btn" href="/download/payroll-filing?id={r.id}" download title="Requires government developer registration — export file only"><Icon name="download" />Filing export</a>
-  {#if r.status === 'POSTED'}<button class="btn" onclick={email}><Icon name="mail" />Email payslips</button>{/if}
+  {#if r.status === 'POSTED'}<button class="btn" onclick={email}><Icon name="mail" />Email payslips</button>
+    <div class="flex items-center gap-1"><select class="select w-24" aria-label="Bank file format" bind:value={fileFmt}><option>ABA</option><option>BACS</option><option>NACHA</option><option>SEPA</option></select>
+      <button class="btn" onclick={() => download(`/download/payrun-file?id=${r.id}&format=${fileFmt}`).catch(toastError)}><Icon name="download" />Bank file</button></div>{/if}
   {#if r.status === 'DRAFT' && can('payroll:write')}<button class="btn btn-danger" onclick={del}>Delete</button>{/if}
 </PageHeader>
 <div class="mb-4 grid gap-3 sm:grid-cols-5">

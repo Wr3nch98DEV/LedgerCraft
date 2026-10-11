@@ -171,6 +171,7 @@ pub fn download(l: &Ledger, kind: &str, q: &HashMap<String, String>) -> Result<(
         }
         "archive" => Ok(("application/json".into(), format!("ledgercraft-archive-{}.json", util::today()), serde_json::to_vec_pretty(&l.export_archive()?)?)),
         "batch-file" => { let (name, body) = l.batch_file(id()?, q.get("format").map(String::as_str).unwrap_or("ABA"))?; Ok(("application/octet-stream".into(), name, body.into_bytes())) }
+        "payrun-file" => { let (name, body) = l.payrun_file(id()?, q.get("format").map(String::as_str).unwrap_or("ABA"))?; Ok(("application/octet-stream".into(), name, body.into_bytes())) }
         "attachment" => { let (name, mime, data) = l.attachment(id()?)?; Ok((mime, name, data)) }
         "mtd" => Ok(("application/json".into(), format!("vat-return-{}.json", id()?), serde_json::to_vec_pretty(&l.mtd_payload(id()?)?)?)),
         "payroll-filing" => Ok(("application/json".into(), format!("payroll-filing-{}.json", id()?), serde_json::to_vec_pretty(&l.payroll_filing_payload(id()?)?)?)),
@@ -196,9 +197,9 @@ pub fn seed_demo_extras(l: &Ledger) -> Result<()> {
     let cal: i64 = l.conn.query_row("SELECT id FROM pay_calendars WHERE frequency = 'FORTNIGHTLY' LIMIT 1", [], |r| r.get(0))?;
     let start = util::fmt_date(util::add_months(t, -6));
     l.save_employee(None, &EmployeeInput { first_name: "Sam".into(), last_name: "Rivera".into(), email: "sam@harbourside.example".into(), start_date: start.clone(), pay_calendar_id: Some(cal),
-        pay_basis: "SALARY".into(), annual_salary: Some("78000".into()), employment_type: "FULLTIME".into(), hours_per_week: Some("38".into()), tax_id: "123 456 782".into(), ..Default::default() })?;
+        pay_basis: "SALARY".into(), annual_salary: Some("78000".into()), employment_type: "FULLTIME".into(), hours_per_week: Some("38".into()), tax_id: "123 456 782".into(), bank_account: "062-001 1122 3344".into(), ..Default::default() })?;
     l.save_employee(None, &EmployeeInput { first_name: "Priya".into(), last_name: "Nair".into(), email: "priya@harbourside.example".into(), start_date: start, pay_calendar_id: Some(cal),
-        pay_basis: "HOURLY".into(), hourly_rate: Some("42.50".into()), employment_type: "PARTTIME".into(), hours_per_week: Some("24".into()), ..Default::default() })?;
+        pay_basis: "HOURLY".into(), hourly_rate: Some("42.50".into()), employment_type: "PARTTIME".into(), hours_per_week: Some("24".into()), bank_account: "033-002 5566 7788".into(), ..Default::default() })?;
     // Project with time
     let cust: Option<i64> = l.conn.query_row("SELECT id FROM contacts WHERE name = 'Pinecrest Realty'", [], |r| r.get(0)).ok();
     let pid = l.save_project(None, &json!({"name": "Pinecrest brand refresh", "contact_id": cust, "estimate": "9500", "deadline": util::fmt_date(t + chrono::Duration::days(30))}))?;

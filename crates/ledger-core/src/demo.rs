@@ -59,10 +59,12 @@ pub fn seed_demo(l: &Ledger) -> Result<()> {
         let suppliers = [("Officeworks", "453"), ("Telstra", "489"), ("AGL Energy", "445"), ("Adobe Systems", "485"),
             ("Harbour Property Group", "469"), ("Allianz Insurance", "433"), ("PrintCo Australia", "461"), ("Paper & Ink Wholesale", "310")];
         let mut sup_ids = Vec::new();
-        for (n, exp) in suppliers.iter() {
+        for (i, (n, exp)) in suppliers.iter().enumerate() {
             let slug: String = n.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect();
+            // Fictional BSB + account numbers so batch payment bank files work in the demo.
+            let bank_account = format!("08{}-{:03} {:08}", i % 10, 100 + i * 7, 40_000_000 + i * 1_234_567);
             sup_ids.push(l.create_contact(&ContactInput { name: (*n).into(), is_supplier: Some(true), purchase_account_id: Some(acct(exp)),
-                email: String::from("billing@") + &slug + ".example", ..Default::default() })?);
+                email: String::from("billing@") + &slug + ".example", bank_account, ..Default::default() })?);
         }
         let design = l.create_item(&ItemInput { code: "DES-HR".into(), name: "Design services (per hour)".into(), sales_description: "Graphic design services".into(), sale_price: Some("145".into()),
             sale_account_id: Some(acct("200")), sale_tax_rate_id: t_out, is_purchased: Some(false), ..Default::default() })?;

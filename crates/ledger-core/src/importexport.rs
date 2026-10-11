@@ -222,6 +222,35 @@ impl Ledger {
     /// Bank batch payment file for a batch of supplier payments. Returns (filename, contents).
     pub fn batch_file(&self, id: i64, format: &str) -> Result<(String, String)> {
         let b = self.batch_payment_detail(id)?;
+        self.bank_file(&b, format, &format!("batch-{id}"))
+    }
+
+    /// Bank payment file for a posted pay run: each employee's net pay to their bank account.
+    pub fn payrun_file(&self, id: i64, format: &str) -> Result<(String, String)> {
+        let r = util::query_one_json(&self.conn, "SELECT number, payment_date, status FROM pay_runs WHERE id = ?1", [id])?;
+        if r.is_null() { return crate::error::invalid("pay run not found"); }
+        let number = r["number"].as_str().unwrap_or("").to_string();
+        // Debit the account the net wages were paid from (falls back to the first bank account).
+        let debit: String = self.conn.query_row(
+            "SELECT COALESCE((SELECT a.bank_account_number FROM bank_transactions b JOIN accounts a ON a.id = b.account_id WHERE b.reference = ?1 AND b.status <> 'DELETED' ORDER BY b.id DESC LIMIT 1),
+                             (SELECT bank_account_number FROM accounts WHERE type = 'BANK' AND status = 'ACTIVE' ORDER BY code LIMIT 1), '')",
+            [format!("Net wages {number}")], |r| r.get(0))?;
+        let pays: Vec<Value> = util::query_json(&self.conn,
+            "SELECT s.net AS amount, e.first_name || ' ' || e.last_name AS contact_name, e.bank_account FROM payslips s JOIN employees e ON e.id = s.employee_id
+             WHERE s.pay_run_id = ?1 AND s.net > 0 ORDER BY e.last_name, e.first_name", [id])?
+            .into_iter().map(|mut p| { p["number"] = Value::from(format!("WAGES {number}")); p }).collect();
+        let b = serde_json::json!({"date": r["payment_date"], "bank_account_number": debit, "payments": pays});
+        self.bank_file(&b, format, &format!("payrun-{number}"))
+    }
+
+    /// ABA / BACS / NACHA / SEPA file from `{date, bank_account_number, payments: [{amount, contact_name, bank_account, number}]}`.
+    fn bank_file(&self, b: &Value, format: &str, stem: &str) -> Result<(String, String)> {
+        let missing: Vec<String> = b["payments"].as_array().map(|ps| ps.iter()
+            .filter(|p| digits(p["bank_account"].as_str().unwrap_or("")).is_empty() && p["bank_account"].as_str().unwrap_or("").trim().is_empty())
+            .map(|p| p["contact_name"].as_str().unwrap_or("?").to_string()).collect()).unwrap_or_default();
+        if !missing.is_empty() {
+            return invalid(format!("Add bank account details for {} before creating a bank file.", missing.join(", ")));
+        }
         let org = self.setting_or("legal_name", "")?.to_uppercase();
         let date = util::parse_date(b["date"].as_str().unwrap_or(""))?;
         let acct = digits(b["bank_account_number"].as_str().unwrap_or(""));
@@ -239,13 +268,13 @@ impl Ledger {
                         pad(p["number"].as_str().unwrap_or(""), 18), bsb_f(&bsb), an, pad(&org, 16), 0);
                 }
                 s += &format!("7999-999{}{:010}{:010}{:010}{}{:06}{}\r\n", pad("", 12), total, 0, total, pad("", 24), pays.len(), pad("", 40));
-                (format!("batch-{id}.aba"), s)
+                (format!("{stem}.aba"), s)
             }
             "BACS" => {
                 let mut s = String::from("Sort code,Account number,Account name,Amount,Reference\r\n");
                 for p in &pays { let (sc, an) = split(&digits(p["bank_account"].as_str().unwrap_or("")), 6);
                     s += &format!("{sc},{an},{},{},{}\r\n", csv_cell(p["contact_name"].as_str().unwrap_or("")), money::fmt_money(p["amount"].as_i64().unwrap_or(0)), csv_cell(p["number"].as_str().unwrap_or(""))); }
-                (format!("batch-{id}-bacs.csv"), s)
+                (format!("{stem}-bacs.csv"), s)
             }
             "NACHA" => {
                 let d = yymmdd(date);
@@ -255,7 +284,7 @@ impl Ledger {
                     s += &format!("622{:0>9}{}{:010}{}{}  0{:>15}\r\n", rt, pad(&an, 17), p["amount"].as_i64().unwrap_or(0), pad("", 15), pad(p["contact_name"].as_str().unwrap_or(""), 22), i + 1); }
                 s += &format!("8220{:06}{:010}{:012}{:012}{}{}{:07}\r\n", pays.len(), 0, total, 0, pad("", 35), pad("", 8), 1);
                 s += &format!("9000001000001{:08}{:010}{:012}{:012}{}\r\n", pays.len(), 0, total, 0, pad("", 39));
-                (format!("batch-{id}.ach"), s)
+                (format!("{stem}.ach"), s)
             }
             _ => {
                 let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
@@ -265,7 +294,7 @@ impl Ledger {
                         i + 1, money::fmt_money(p["amount"].as_i64().unwrap_or(0)), esc(p["contact_name"].as_str().unwrap_or("")), esc(&p["bank_account"].as_str().unwrap_or("").replace(' ', "")), esc(p["number"].as_str().unwrap_or("")));
                 }
                 let d = util::fmt_date(date);
-                (format!("batch-{id}-sepa.xml"), format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pain.001.001.03\"><CstmrCdtTrfInitn><GrpHdr><MsgId>LC-{id}</MsgId><CreDtTm>{d}T00:00:00</CreDtTm><NbOfTxs>{}</NbOfTxs><CtrlSum>{}</CtrlSum><InitgPty><Nm>{}</Nm></InitgPty></GrpHdr><PmtInf><PmtInfId>LC-{id}</PmtInfId><PmtMtd>TRF</PmtMtd><ReqdExctnDt>{d}</ReqdExctnDt><Dbtr><Nm>{}</Nm></Dbtr><DbtrAcct><Id><IBAN>{}</IBAN></Id></DbtrAcct><DbtrAgt><FinInstnId/></DbtrAgt>{tx}</PmtInf></CstmrCdtTrfInitn></Document>",
+                (format!("{stem}-sepa.xml"), format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pain.001.001.03\"><CstmrCdtTrfInitn><GrpHdr><MsgId>LC-{stem}</MsgId><CreDtTm>{d}T00:00:00</CreDtTm><NbOfTxs>{}</NbOfTxs><CtrlSum>{}</CtrlSum><InitgPty><Nm>{}</Nm></InitgPty></GrpHdr><PmtInf><PmtInfId>LC-{stem}</PmtInfId><PmtMtd>TRF</PmtMtd><ReqdExctnDt>{d}</ReqdExctnDt><Dbtr><Nm>{}</Nm></Dbtr><DbtrAcct><Id><IBAN>{}</IBAN></Id></DbtrAcct><DbtrAgt><FinInstnId/></DbtrAgt>{tx}</PmtInf></CstmrCdtTrfInitn></Document>",
                     pays.len(), money::fmt_money(total), esc(&org), esc(&org), esc(b["bank_account_number"].as_str().unwrap_or(""))))
             }
         })
