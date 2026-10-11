@@ -108,6 +108,12 @@ pub fn dispatch_ext(l: &mut Ledger, method: &str, p: &Value, need: Need) -> Resu
         "reminders.delete" => { l.conn.execute("DELETE FROM reminder_rules WHERE id = ?1", [i(p, "id")?])?; return ok(); }
         "reminders.run" => json!({"queued": crate::email::run_reminders(l)?}),
         "outbox.list" => json!(crate::email::outbox(l)?),
+        "outbox.requeue" => {
+            need("settings:write")?;
+            if l.setting_or("smtp_host", "")?.trim().is_empty() { return crate::error::invalid("set up SMTP in Settings → Email first"); }
+            l.conn.execute("UPDATE outbox SET status = 'QUEUED', error = NULL WHERE id = ?1 AND status IN ('FAILED','SAVED')", [i(p, "id")?])?;
+            return ok();
+        }
         "docs.paymentDates" => { l.set_payment_dates(i(p, "id")?, p["expected"].as_str(), p["planned"].as_str())?; return ok(); }
         "statements.email" => { need("sales:write")?; let ids: Vec<i64> = serde_json::from_value(p["contact_ids"].clone()).unwrap_or_default(); json!({"queued": crate::email::email_statements(l, &ids)?}) }
         "reports.catalogue" => json!(crate::extra_reports::CATALOGUE.iter().map(|(k, t, c, d)| json!({"key": k, "title": t, "category": c, "description": d})).collect::<Vec<_>>()),

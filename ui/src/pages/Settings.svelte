@@ -247,7 +247,7 @@
         <div class="mb-3 flex items-center justify-between"><h2 class="text-lg font-semibold">Outbox</h2><button class="btn btn-sm" onclick={runJobs}>Send queued now</button></div>
         <table class="tbl"><thead><tr><th>Created</th><th>To</th><th>Subject</th><th>Status</th><th></th></tr></thead>
           <tbody>{#each outbox as o}<tr><td class="whitespace-nowrap text-muted">{dateTime(o.created_at)}</td><td>{o.to_addr}</td><td>{o.subject}</td><td>{o.status === 'SAVED' ? 'Saved (not sent)' : o.status === 'FAILED' ? 'Failed: ' + (o.error ?? '') : o.status === 'QUEUED' ? 'Queued' : 'Sent ' + dateTime(o.sent_at)}</td>
-            <td class="text-right"><a class="btn btn-sm" href="/download/eml?id={o.id}" download><Icon name="download" size={14} />.eml</a></td></tr>
+            <td class="whitespace-nowrap text-right">{#if (o.status === 'FAILED' || o.status === 'SAVED') && can('settings:write')}<button class="btn btn-sm mr-1" onclick={async () => { try { await rpc('outbox.requeue', { id: o.id }); await runJobs(); } catch (e) { toastError(e); } }}>Send again</button>{/if}<a class="btn btn-sm" href="/download/eml?id={o.id}" download><Icon name="download" size={14} />.eml</a></td></tr>
           {:else}<tr><td colspan="5" class="py-8 text-center text-muted">No emails yet.</td></tr>{/each}</tbody></table>
       </section>
     {:else if s === 'payments'}
