@@ -111,7 +111,6 @@ pub enum Message {
     OpenResult(String, i64),
     ListQuery(String),
     ListTab(&'static str),
-    Toast(String, bool),
     DropToast(u64),
     Key(keyboard::Event),
     Doc(doc::Msg),
@@ -408,7 +407,6 @@ impl App {
             }
             Message::ListQuery(q) => { self.list_q = q; self.load() }
             Message::ListTab(t) => { self.list_tab = t; self.load() }
-            Message::Toast(s, e) => self.toast(s, e),
             Message::DropToast(id) => { self.toasts.retain(|t| t.0 != id); Task::none() }
             Message::Key(ev) => self.on_key(ev),
             Message::Doc(m) => doc::update(self, m),
@@ -428,6 +426,7 @@ impl App {
             use keyboard::key::Named;
             match key.as_ref() {
                 keyboard::Key::Named(Named::Escape) => return self.update(Message::CloseMenus),
+                keyboard::Key::Named(Named::F5) => return self.update(Message::Refresh),
                 keyboard::Key::Character("s") if modifiers.command() => {
                     if matches!(self.route, Route::Doc { .. }) { return doc::update(self, doc::Msg::Save(false)); }
                 }

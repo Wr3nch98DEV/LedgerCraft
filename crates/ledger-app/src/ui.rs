@@ -1,10 +1,8 @@
 //! Reusable building blocks: formatting, buttons, fields, cards and a clickable data table.
 
-use crate::icons::icon;
 use crate::theme::{self, t};
 use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Alignment, Color, Element, Fill, Font, Length, Padding};
-use serde_json::Value;
 
 pub const BOLD: Font = Font { weight: iced::font::Weight::Semibold, ..Font::DEFAULT };
 
@@ -22,7 +20,6 @@ pub fn money(cents: i64) -> String {
     }
     format!("{}{g}.{:02}", if neg { "-" } else { "" }, a % 100)
 }
-pub fn money_v(v: &Value) -> String { money(v.as_i64().unwrap_or(0)) }
 /// Cents → "1234.56" for editable inputs.
 pub fn plain(cents: i64) -> String { format!("{}{}.{:02}", if cents < 0 { "-" } else { "" }, cents.unsigned_abs() / 100, cents.unsigned_abs() % 100) }
 
@@ -50,7 +47,6 @@ pub fn date(s: &str, style: DateStyle) -> String {
     match style { DateStyle::Us => d.format("%m/%d/%Y").to_string(), DateStyle::Intl => d.format("%d/%m/%Y").to_string(), DateStyle::Long => d.format("%-d %b %Y").to_string() }
 }
 
-pub fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
 
 /// Parse a date typed in the layout's format (also accepts ISO) into YYYY-MM-DD.
 pub fn to_iso(input: &str, style: DateStyle) -> Option<String> {
@@ -78,9 +74,6 @@ pub fn btn_primary<'a, M: Clone + 'a>(label: &str, msg: Option<M>) -> Element<'a
 }
 pub fn btn<'a, M: Clone + 'a>(label: &str, msg: Option<M>) -> Element<'a, M> {
     button(text(label.to_string()).size(14)).padding([7, 14]).style(theme::secondary).on_press_maybe(msg).into()
-}
-pub fn btn_icon<'a, M: Clone + 'a>(ic: &str, label: &str, msg: Option<M>) -> Element<'a, M> {
-    button(row![icon(ic, 16.0, t().text), text(label.to_string()).size(14)].spacing(6).align_y(Alignment::Center)).padding([7, 12]).style(theme::secondary).on_press_maybe(msg).into()
 }
 pub fn btn_danger<'a, M: Clone + 'a>(label: &str, msg: Option<M>) -> Element<'a, M> {
     button(text(label.to_string()).size(14)).padding([7, 14]).style(theme::danger).on_press_maybe(msg).into()

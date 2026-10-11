@@ -114,10 +114,8 @@ pub fn topbar(_: &Theme) -> container::Style {
     let k = t();
     container::Style { background: Some(Background::Color(k.panel)), border: Border { color: k.line, width: 1.0, radius: radius(0.0) }, ..Default::default() }
 }
-pub fn row_line(_: &Theme) -> container::Style { let k = t(); container::Style { border: Border { color: k.line, width: 0.0, radius: radius(0.0) }, ..Default::default() } }
 pub fn rule(_: &Theme) -> container::Style { let k = t(); container::Style { background: Some(Background::Color(k.line)), ..Default::default() } }
 pub fn header_row(_: &Theme) -> container::Style { let k = t(); container::Style { background: Some(Background::Color(k.panel2)), text_color: Some(k.muted), ..Default::default() } }
-pub fn overlay(_: &Theme) -> container::Style { container::Style { background: Some(Background::Color(Color { a: 0.55, ..Color::BLACK })), ..Default::default() } }
 pub fn menu(_: &Theme) -> container::Style {
     let k = t();
     container::Style {

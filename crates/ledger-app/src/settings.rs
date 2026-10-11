@@ -2,7 +2,7 @@
 
 use crate::app::{App, Message, Route};
 use crate::icons::icon;
-use crate::theme::{self, Skin, t};
+use crate::theme::{Skin, t};
 use crate::ui::{self, BOLD};
 use iced::widget::{button, column, container, row, text};
 use iced::{Alignment, Element, Fill, Task};
