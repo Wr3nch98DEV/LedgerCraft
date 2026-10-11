@@ -22,8 +22,38 @@ fn loading_or_error<'a>(app: &'a App, title: &str) -> Option<Element<'a, Message
     Some(ui::page(ui::h1(title.to_string()), vec![], body))
 }
 
+/// QuickBooks "Expense transactions": bills plus money already spent from bank accounts.
+pub fn load_expenses(app: &mut App) -> iced::Task<Message> {
+    let be = app.be.clone();
+    let g = app.page_gen;
+    let (tab, q) = (app.list_tab, app.list_q.to_lowercase());
+    iced::Task::perform(async move {
+        tokio::task::spawn_blocking(move || -> Result<Value, String> {
+            let bills = be.call_now("docs.list", serde_json::json!({"type": "ACCPAY", "tab": tab, "limit": 300}))?;
+            let mut rows: Vec<Value> = bills["rows"].as_array().cloned().unwrap_or_default();
+            if tab == "all" || tab == "paid" {
+                for b in be.call_now("accounts.bank", serde_json::json!({}))?.as_array().cloned().unwrap_or_default() {
+                    for t in be.call_now("bank.transactions", serde_json::json!({"id": b["id"], "limit": 300}))?.as_array().cloned().unwrap_or_default() {
+                        let amt = t["amount"].as_i64().unwrap_or(0);
+                        if amt >= 0 || !(t["kind"] == "banktx" || (t["kind"] == "payment" && t["description"].as_str().unwrap_or("").starts_with("Payment"))) { continue; }
+                        if t["kind"] == "payment" && t["description"].as_str().map(|d| !d.contains('-')).unwrap_or(true) { continue; }
+                        let kind = if t["kind"] == "banktx" { "EXPENSE" } else { "BILLPAYMENT" };
+                        rows.push(serde_json::json!({"type": kind, "date": t["date"], "number": t["reference"], "contact_name": t["contact"], "total": -amt, "amount_due": 0,
+                            "status": "PAID", "document_id": t["document_id"], "account": b["name"], "id": t["id"]}));
+                    }
+                }
+            }
+            if !q.is_empty() { rows.retain(|r| r.to_string().to_lowercase().contains(&q)); }
+            rows.sort_by(|a, b| b["date"].as_str().cmp(&a["date"].as_str()));
+            Ok(serde_json::json!({"rows": rows, "counts": bills["counts"]}))
+        }).await.unwrap_or_else(|e| Err(e.to_string()))
+    }, move |r| Message::Loaded(g, r))
+}
+
 fn type_label(app: &App, kind: &str) -> &'static str {
-    match kind { "ACCREC" => app.term("invoice"), "QUOTE" => app.term("quote"), "ACCRECCREDIT" => app.term("credit_note"), "ACCPAY" => app.term("bill"),
+    match kind {
+        "EXPENSE" => if app.skin == Skin::QuickBooks { "Expense" } else { "Spend money" },
+        "BILLPAYMENT" => "Bill payment", "ACCREC" => app.term("invoice"), "QUOTE" => app.term("quote"), "ACCRECCREDIT" => app.term("credit_note"), "ACCPAY" => app.term("bill"),
         "ACCPAYCREDIT" => app.term("supplier_credit"), "PO" => app.term("po"), _ => "Transaction" }
 }
 
@@ -103,7 +133,11 @@ pub fn docs(app: &App) -> Element<'_, Message> {
     let rows = rows_v.iter().map(|r| {
         let kind = st(r, "type");
         let label = vocab::status(app.skin, kind, st(r, "status"), i(&r["overdue"]) == 1);
-        let msg = Message::Nav(Route::Doc { kind: kind.into(), id: r["id"].as_i64() });
+        let msg = match kind {
+            "EXPENSE" => None,
+            "BILLPAYMENT" => r["document_id"].as_i64().map(|id| Message::Nav(Route::Doc { kind: "ACCPAY".into(), id: Some(id) })),
+            _ => Some(Message::Nav(Route::Doc { kind: kind.into(), id: r["id"].as_i64() })),
+        };
         let cells: Vec<Element<Message>> = match app.skin {
             Skin::QuickBooks => vec![
                 ui::cell(app.d(st(r, "date"))), ui::cell_muted(type_label(app, kind)), ui::cell(st(r, "number")), ui::cell(st(r, "contact_name")),
@@ -114,7 +148,7 @@ pub fn docs(app: &App) -> Element<'_, Message> {
                 ui::cell_muted(app.d(st(r, "due_date"))), ui::cell_money(i(&r["amount_paid"])), ui::cell_money(i(&r["amount_due"])), ui::chip(label, status_color(label)),
             ],
         };
-        (cells, Some(msg))
+        (cells, msg)
     }).collect();
     let body = column![top, search_and_tabs(app, &tabs), ui::table(&cols, rows, "Nothing here yet.")].spacing(16);
     ui::page(ui::h1(title.to_string()), actions, body.into())
