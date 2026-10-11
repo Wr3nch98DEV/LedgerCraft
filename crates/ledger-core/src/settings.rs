@@ -11,6 +11,7 @@ pub const PUBLIC_KEYS: &[&str] = &[
     "sales_terms_type", "sales_terms_days", "bill_terms_type", "bill_terms_days",
     "default_sales_lat", "default_purchases_lat", "smtp_host", "smtp_port", "smtp_user", "smtp_from",
     "smtp_tls", "company_number", "invoice_reminders_enabled", "payroll_jurisdiction",
+    "payroll_brackets", "payroll_retirement_bp", "ocr_command", "public_url",
 ];
 
 impl Ledger {

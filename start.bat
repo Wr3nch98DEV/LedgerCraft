@@ -9,6 +9,7 @@ rem    start.bat           build (if needed) and open LedgerCraft in its own win
 rem    start.bat browser   same, but open in your default browser instead
 rem    start.bat test      run the accounting test-suite
 rem    start.bat clean     delete build output and rebuild from scratch
+rem    start.bat server    build and run the server only (no window), e.g. for testing
 rem  Your data lives in %APPDATA%\LedgerCraft (one .lcdb file per organisation).
 rem ---------------------------------------------------------------------------
 
@@ -55,6 +56,11 @@ rem Stop a previous instance so the new build can start.
 taskkill /im ledger-server.exe /f >nul 2>nul
 
 echo [3/3] Starting LedgerCraft...
+if /I "%MODE%"=="server" (
+  echo LedgerCraft server starting at http://127.0.0.1:4180 - press Ctrl+C to stop.
+  "%EXE%"
+  exit /b
+)
 if /I "%MODE%"=="browser" (
   start "LedgerCraft server" /min "%EXE%" --open
 ) else (

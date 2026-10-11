@@ -89,10 +89,11 @@ impl Ledger {
         let n: i64 = self.conn.query_row("SELECT COUNT(*) FROM asset_types", [], |r| r.get(0))?;
         if n > 0 { return Ok(()); }
         let dep = match self.account_by_code("416")? { Some(d) => d, None => return Ok(()) };
-        for (name, a, b, method, life) in [("Office equipment", "710", "711", "DIMINISHING200", 600), ("Computer equipment", "720", "721", "DIMINISHING200", 400), ("Motor vehicles", "730", "731", "DIMINISHING200", 800)] {
+        // (name, asset account, accumulated depreciation account, method, effective life in years)
+        for (name, a, b, method, life) in [("Office equipment", "710", "711", "DIMINISHING200", 5), ("Computer equipment", "720", "721", "DIMINISHING200", 4), ("Motor vehicles", "730", "731", "DIMINISHING200", 8)] {
             if let (Some(a), Some(b)) = (self.account_by_code(a)?, self.account_by_code(b)?) {
                 self.save_asset_type(None, &AssetTypeInput { name: name.into(), asset_account_id: a, accum_dep_account_id: b, dep_expense_account_id: dep, method: method.into(),
-                    life_years: Some(money::fmt_fixed(life * 100 / 12, 2)), rate: None })?;
+                    life_years: Some(life.to_string()), rate: None })?;
             }
         }
         Ok(())

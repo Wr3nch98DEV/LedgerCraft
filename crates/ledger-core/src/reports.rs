@@ -241,7 +241,8 @@ impl Ledger {
             last_group = g;
             out.push(s);
         }
-        out.push(json!({"title": "", "summary": true, "grand": true, "total": {"label": "Total Equity", "values": equity}}));
+        if let Some(last) = out.last_mut() { if last["group"] == "Equity" { last["grand"] = json!(true); } }
+        let _ = equity;
         Ok(json!({
             "title": "Balance Sheet", "org": self.setting_or("org_name", "")?, "subtitle": String::from("As at ") + &fmt_long(&date),
             "columns": dates.iter().map(|d| fmt_long(d)).collect::<Vec<_>>(), "sections": out,

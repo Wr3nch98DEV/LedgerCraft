@@ -9,7 +9,9 @@
   Promise.all([rpc('reports.run', { name: 'executive-summary', params: {} }), rpc('reports.run', { name: 'profit-and-loss', params: {} })])
     .then(([a, b]) => { ex = a; pl = b; }).catch(toastError);
   const metric = (label: string) => ex?.sections[0].rows.find((r: any) => r.label === label)?.values ?? [];
+  // Ratios use the last complete month; balances use today.
   const last = (label: string) => { const v = metric(label); return v[v.length - 1] ?? 0; };
+  const prev = (label: string) => { const v = metric(label); return v[v.length - 2] ?? 0; };
   const expenses = $derived(pl ? (pl.sections.find((s: any) => s.title === 'Operating Expenses')?.rows ?? []).slice().sort((a: any, b: any) => b.values[0] - a.values[0]).slice(0, 6) : []);
   const expTotal = $derived(expenses.reduce((s: number, r: any) => s + r.values[0], 0));
   const COLORS = ['var(--accent)', 'var(--info)', 'var(--warn)', 'var(--ok)', 'var(--bad)', 'var(--muted)'];
@@ -19,14 +21,14 @@
 {#if ex}
   <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
     <section class="card p-5"><div class="text-[12px] font-semibold uppercase tracking-wide text-faint">Profitability</div>
-      <div class="mt-2 text-[13px] text-muted">Net profit this month</div><div class="num text-2xl font-semibold">{money(last('Net profit'))}</div>
-      <div class="mt-2 text-[13px] text-muted">Gross margin <b class="text-text">{fixed(last('Gross margin %'), 2)}%</b> · Net margin <b class="text-text">{fixed(last('Net margin %'), 2)}%</b></div></section>
+      <div class="mt-2 text-[13px] text-muted">Net profit last month</div><div class="num text-2xl font-semibold">{money(prev('Net profit'))}</div>
+      <div class="mt-2 text-[13px] text-muted">Gross margin <b class="text-text">{fixed(prev('Gross margin %'), 2)}%</b> · Net margin <b class="text-text">{fixed(prev('Net margin %'), 2)}%</b></div></section>
     <section class="card p-5"><div class="text-[12px] font-semibold uppercase tracking-wide text-faint">Efficiency</div>
-      <div class="mt-2 text-[13px] text-muted">Average time to get paid</div><div class="num text-2xl font-semibold">{last('Debtor days')} days</div>
-      <div class="mt-2 text-[13px] text-muted">Average time to pay suppliers <b class="text-text">{last('Creditor days')} days</b></div></section>
+      <div class="mt-2 text-[13px] text-muted">Average time to get paid</div><div class="num text-2xl font-semibold">{prev('Debtor days')} days</div>
+      <div class="mt-2 text-[13px] text-muted">Average time to pay suppliers <b class="text-text">{prev('Creditor days')} days</b></div></section>
     <section class="card p-5"><div class="text-[12px] font-semibold uppercase tracking-wide text-faint">Financial position</div>
       <div class="mt-2 text-[13px] text-muted">Cash in the bank</div><div class="num text-2xl font-semibold">{money(last('Closing bank balance'))}</div>
-      <div class="mt-2 text-[13px] text-muted">Current ratio <b class="text-text">{fixed(last('Current ratio %') / 100, 2)}</b></div></section>
+      <div class="mt-2 text-[13px] text-muted">Current ratio <b class="text-text">{(last('Current ratio %') / 10000).toFixed(2)}</b></div></section>
     <section class="card p-5"><div class="text-[12px] font-semibold uppercase tracking-wide text-faint">Owed</div>
       <div class="mt-2 text-[13px] text-muted">Customers owe you</div><div class="num text-2xl font-semibold">{money(last('Debtors (receivables)'))}</div>
       <div class="mt-2 text-[13px] text-muted">You owe suppliers <b class="text-text">{money(last('Creditors (payables)'))}</b></div></section>
