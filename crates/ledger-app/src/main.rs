@@ -17,6 +17,8 @@ mod setup;
 mod shell;
 mod theme;
 mod ui;
+#[cfg(test)]
+mod ui_tests;
 mod vocab;
 
 use app::App;

@@ -15,3 +15,6 @@ tokio = { version = "1", features = ["rt", "time"] }
 iced = { version = "0.14", features = ["svg", "tokio", "advanced"] }
 serde_json = "1"
 chrono = "0.4"
+
+[dev-dependencies]
+iced_test = "0.14"
