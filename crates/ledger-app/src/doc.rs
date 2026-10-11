@@ -203,7 +203,15 @@ fn default_tax(app: &App, account: Option<i64>) -> Option<Opt> {
 
 pub fn open(app: &mut App, kind: String, id: Option<i64>) -> Task<Message> {
     app.doc = Some(Editor::new(app, &kind));
-    if let Some(e) = app.doc.as_mut() { e.id = id; e.editing = id.is_none(); }
+    let prefill = app.prefill_contact.take();
+    if let Some(e) = app.doc.as_mut() {
+        e.id = id;
+        e.editing = id.is_none();
+        if let Some(cid) = prefill.filter(|_| id.is_none()) {
+            e.contact = app.lk.contact_opts(sales(&kind)).into_iter().find(|o| o.id == cid);
+            e.contacts = combo_box::State::with_selection(app.lk.contact_opts(sales(&kind)), e.contact.as_ref());
+        }
+    }
     match id {
         Some(id) => app.be.call("docs.get", json!({"id": id}), |r| Message::Doc(Msg::Loaded(r))),
         None => { app.data = Some(json!({})); Task::none() }

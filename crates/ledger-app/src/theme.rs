@@ -184,7 +184,7 @@ pub fn input(_: &Theme, s: text_input::Status) -> text_input::Style {
 /// Borderless input used inside line-item grids.
 pub fn cell_input(_: &Theme, s: text_input::Status) -> text_input::Style {
     let k = t();
-    let (bg, border) = match s { text_input::Status::Focused { .. } => (k.bg2, k.accent), text_input::Status::Hovered => (Color::TRANSPARENT, k.line), _ => (Color::TRANSPARENT, Color::TRANSPARENT) };
+    let (bg, border) = match s { text_input::Status::Focused { .. } => (k.bg2, k.accent), text_input::Status::Hovered => (k.bg2, k.line2), _ => (Color::TRANSPARENT, k.line) };
     text_input::Style { background: Background::Color(bg), border: Border { color: border, width: 1.0, radius: radius(4.0) }, icon: k.muted, placeholder: k.faint, value: k.text, selection: Color { a: 0.35, ..k.accent } }
 }
 pub fn pick(_: &Theme, s: pick_list::Status) -> pick_list::Style {

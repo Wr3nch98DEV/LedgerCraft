@@ -7,6 +7,7 @@ mod backend;
 mod banking;
 mod dashboard;
 mod doc;
+mod forms;
 mod icons;
 mod lists;
 mod payments;

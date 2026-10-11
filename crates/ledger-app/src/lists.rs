@@ -144,8 +144,8 @@ pub fn contacts(app: &App) -> Element<'_, Message> {
             (Skin::QuickBooks, Some(cust)) => vec![
                 ui::cell(st(c, "name")), ui::cell_muted(st(c, "phone")), ui::cell_muted(st(c, "email")), ui::cell_money(open),
                 if cust {
-                    if open > 0 { ui::link("Receive payment", Message::Nav(Route::ReceivePayment(Some(id)))) } else { ui::link("Create invoice", Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None })) }
-                } else if open > 0 { ui::link("Make payment", Message::Nav(Route::PayBills)) } else { ui::link("Create bill", Message::Nav(Route::Doc { kind: "ACCPAY".into(), id: None })) },
+                    if open > 0 { ui::link("Receive payment", Message::Nav(Route::ReceivePayment(Some(id)))) } else { ui::link("Create invoice", Message::NewDocFor("ACCREC".into(), id)) }
+                } else if open > 0 { ui::link("Make payment", Message::Nav(Route::PayBills)) } else { ui::link("Create bill", Message::NewDocFor("ACCPAY".into(), id)) },
             ],
             _ => vec![ui::cell(st(c, "name")), ui::cell_muted(st(c, "email")), ui::cell_money(i(&c["payable"])), ui::cell_money(i(&c["receivable"]))],
         };
@@ -154,7 +154,7 @@ pub fn contacts(app: &App) -> Element<'_, Message> {
     let tabs: Vec<(&str, &str)> = if customers.is_none() { vec![("all", "All"), ("customers", "Customers"), ("suppliers", "Suppliers")] } else { vec![] };
     let body = column![top, search_and_tabs(app, &tabs), ui::table(&cols, rows, "No contacts yet.")].spacing(16);
     let new_label = match customers { Some(true) => "New customer", Some(false) => if app.skin == Skin::QuickBooks { "New vendor" } else { "New supplier" }, None => "New contact" };
-    ui::page(ui::h1(title.to_string()), vec![ui::btn_primary(new_label, None)], body.into())
+    ui::page(ui::h1(title.to_string()), vec![ui::btn_primary(new_label, Some(Message::Nav(Route::NewContact(customers != Some(false)))))], body.into())
 }
 
 pub fn contact(app: &App) -> Element<'_, Message> {
@@ -184,10 +184,10 @@ pub fn contact(app: &App) -> Element<'_, Message> {
     ].align_y(Alignment::Center));
     let mut actions: Vec<Element<Message>> = vec![];
     if is_supplier {
-        actions.push(ui::btn_primary("New bill", Some(Message::Nav(Route::Doc { kind: "ACCPAY".into(), id: None }))));
+        actions.push(ui::btn_primary("New bill", Some(Message::NewDocFor("ACCPAY".into(), id))));
     } else {
         actions.push(ui::btn(app.term("receive_payment"), Some(Message::Nav(Route::ReceivePayment(Some(id))))));
-        actions.push(ui::btn_primary("New invoice", Some(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None }))));
+        actions.push(ui::btn_primary("New invoice", Some(Message::NewDocFor("ACCREC".into(), id))));
     }
     let back = if is_supplier { Route::Vendors } else { Route::Customers };
     let title = column![ui::link(if is_supplier { app.term("suppliers") } else { app.term("customers") }, Message::Nav(back)), ui::h1(st(c, "name").to_string())].spacing(4);
@@ -208,7 +208,7 @@ pub fn products(app: &App) -> Element<'_, Message> {
             if tracked { ui::num(format!("{}", i(&x["qty_on_hand_e4"]) as f64 / 10000.0)) } else { ui::cell_muted("") }], None)
     }).collect();
     let note: Element<Message> = if low > 0 { container(text(format!("{low} item(s) low on stock")).size(13).color(k.warn)).padding([6, 10]).style(theme::bad_soft).into() } else { Space::new().into() };
-    ui::page(ui::h1(title), vec![ui::btn_primary("New", None)], column![note, search_and_tabs(app, &[]), ui::table(&cols, rows, "No products or services yet.")].spacing(16).into())
+    ui::page(ui::h1(title), vec![ui::btn_primary("New", Some(Message::Nav(Route::NewProduct)))], column![note, search_and_tabs(app, &[]), ui::table(&cols, rows, "No products or services yet.")].spacing(16).into())
 }
 
 /// QuickBooks shows a "detail type" under each account type; derived from the engine's type.
