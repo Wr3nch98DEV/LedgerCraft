@@ -17,6 +17,7 @@ pub mod accounts;
 pub mod tax;
 pub mod contacts;
 pub mod items;
+pub mod deposits;
 pub mod documents;
 pub mod payments;
 pub mod banking;

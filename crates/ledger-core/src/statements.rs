@@ -303,6 +303,7 @@ impl Ledger {
             "BANKTX" => self.conn.query_row("SELECT CASE WHEN type LIKE 'RECEIVE%' THEN total ELSE -total END, date, reconciled FROM bank_transactions WHERE id = ?1 AND status <> 'DELETED'", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?,
             "TRANSFER_FROM" => self.conn.query_row("SELECT -amount, date, from_reconciled FROM transfers WHERE id = ?1 AND status <> 'DELETED'", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?,
             "TRANSFER_TO" => self.conn.query_row("SELECT to_amount, date, to_reconciled FROM transfers WHERE id = ?1 AND status <> 'DELETED'", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?,
+            "DEPOSIT" => self.conn.query_row("SELECT total, date, reconciled FROM deposits WHERE id = ?1 AND status <> 'DELETED'", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?,
             // A batch payment matches the single bank line for its total.
             "BATCH" => self.conn.query_row(
                 "SELECT COALESCE(SUM(CASE WHEN a.currency = d.currency THEN p.amount ELSE p.base_amount END * CASE WHEN d.type IN ('ACCREC','ACCPAYCREDIT') THEN 1 ELSE -1 END), 0), b.date, COALESCE(MAX(p.reconciled), 0)
@@ -318,6 +319,7 @@ impl Ledger {
             "BANKTX" => "UPDATE bank_transactions SET reconciled = ?2 WHERE id = ?1",
             "TRANSFER_FROM" => "UPDATE transfers SET from_reconciled = ?2 WHERE id = ?1",
             "TRANSFER_TO" => "UPDATE transfers SET to_reconciled = ?2 WHERE id = ?1",
+            "DEPOSIT" => "UPDATE deposits SET reconciled = ?2 WHERE id = ?1",
             "BATCH" => {
                 self.conn.execute("UPDATE batch_payments SET reconciled = ?2 WHERE id = ?1", params![id, v])?;
                 "UPDATE payments SET reconciled = ?2 WHERE batch_id = ?1 AND status <> 'DELETED'"
@@ -496,6 +498,9 @@ impl Ledger {
              SELECT 'BANKTX', b.id, b.date, CASE WHEN b.type LIKE 'RECEIVE%' THEN b.total ELSE -b.total END, c.name, b.reference, CASE WHEN b.type LIKE 'RECEIVE%' THEN 'Receive money' ELSE 'Spend money' END
              FROM bank_transactions b LEFT JOIN contacts c ON c.id = b.contact_id WHERE b.account_id = ?1 AND b.status <> 'DELETED' AND b.reconciled = 0
              UNION ALL
+             SELECT 'DEPOSIT', dp.id, dp.date, dp.total, 'Bank deposit', dp.reference, 'Deposit (' || (SELECT COUNT(*) FROM payments x WHERE x.deposit_id = dp.id) || ' payments)'
+             FROM deposits dp WHERE dp.account_id = ?1 AND dp.status <> 'DELETED' AND dp.reconciled = 0
+             UNION ALL
              SELECT 'TRANSFER_FROM', t.id, t.date, -t.amount, (SELECT name FROM accounts WHERE id = t.to_account_id), t.reference, 'Transfer out'
              FROM transfers t WHERE t.from_account_id = ?1 AND t.status <> 'DELETED' AND t.from_reconciled = 0
              UNION ALL
@@ -554,7 +559,8 @@ impl Ledger {
                UNION ALL SELECT CASE WHEN b.type LIKE 'RECEIVE%' THEN b.total ELSE -b.total END FROM bank_transactions b
                 WHERE b.account_id = ?1 AND b.status <> 'DELETED' AND b.reconciled = 1 AND b.date < ?2
                UNION ALL SELECT -t.amount FROM transfers t WHERE t.from_account_id = ?1 AND t.status <> 'DELETED' AND t.from_reconciled = 1 AND t.date < ?2
-               UNION ALL SELECT t.to_amount FROM transfers t WHERE t.to_account_id = ?1 AND t.status <> 'DELETED' AND t.to_reconciled = 1 AND t.date < ?2)",
+               UNION ALL SELECT t.to_amount FROM transfers t WHERE t.to_account_id = ?1 AND t.status <> 'DELETED' AND t.to_reconciled = 1 AND t.date < ?2
+               UNION ALL SELECT dp.total FROM deposits dp WHERE dp.account_id = ?1 AND dp.status <> 'DELETED' AND dp.reconciled = 1 AND dp.date < ?2)",
             params![account, first], |r| r.get(0))?;
         Ok(before - cleared_later)
     }

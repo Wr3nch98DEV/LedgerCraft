@@ -314,6 +314,9 @@ impl Ledger {
                  CASE WHEN b.subtype = 'CHECK' THEN 'Check ' || b.check_number WHEN b.type LIKE 'RECEIVE%' THEN 'Receive money' ELSE 'Spend money' END, b.reconciled, NULL
                FROM bank_transactions b LEFT JOIN contacts c ON c.id = b.contact_id WHERE b.account_id = ?1 AND b.status <> 'DELETED'
                UNION ALL
+               SELECT 'deposit', dp.id, dp.date, dp.total, 'Bank deposit', dp.reference, 'Deposit', dp.reconciled, NULL
+               FROM deposits dp WHERE dp.account_id = ?1 AND dp.status <> 'DELETED'
+               UNION ALL
                SELECT 'transfer_from', t.id, t.date, -t.amount, (SELECT name FROM accounts WHERE id = t.to_account_id), t.reference, 'Transfer to ' || (SELECT name FROM accounts WHERE id = t.to_account_id), t.from_reconciled, NULL
                FROM transfers t WHERE t.from_account_id = ?1 AND t.status <> 'DELETED'
                UNION ALL

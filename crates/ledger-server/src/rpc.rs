@@ -245,6 +245,15 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
         "batch.get" => Ok(l.batch_payment_detail(id(p)?)?),
 
         // ---- banking ----
+        "deposits.undeposited" => { need("banking:read")?; Ok(json!({"account_id": l.undeposited_funds_account()?, "payments": l.undeposited_payments()?})) }
+        "deposits.create" => {
+            need("banking:write")?;
+            let ids: Vec<i64> = de(&p["payment_ids"])?;
+            Ok(json!({"id": l.bank_deposit(i(p, "account_id")?, s(p, "date"), s(p, "reference"), &ids)?}))
+        }
+        "deposits.list" => { need("banking:read")?; Ok(json!(l.list_deposits(oi(p, "account_id"))?)) }
+        "deposits.delete" => { need("banking:write")?; l.delete_deposit(id(p)?)?; ok() }
+        "accounts.undeposited" => { need("banking:read")?; Ok(json!({"id": l.undeposited_funds_account()?})) }
         "banktx.nextCheck" => { need("banking:read")?; Ok(json!({"number": l.next_check_number(i(p, "account_id")?)?})) }
         "banktx.save" => { need("banking:write")?; Ok(json!({"id": l.save_bank_transaction(oi(p, "id"), &de::<BankTxInput>(&p["tx"])?)?})) }
         "banktx.get" => { need("banking:read")?; Ok(l.get_bank_transaction(id(p)?)?) }

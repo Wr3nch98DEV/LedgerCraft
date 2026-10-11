@@ -355,6 +355,41 @@ fn checks_are_numbered_spend_money() {
 }
 
 #[test]
+fn undeposited_funds_and_bank_deposit() {
+    let l = org();
+    let bank = acct(&l, "090");
+    let sales = acct(&l, "200");
+    let uf = l.undeposited_funds_account().unwrap();
+    assert_eq!(l.undeposited_funds_account().unwrap(), uf, "created once");
+    let a = invoice(&l, "2026-07-01", vec![line(sales, None, "1", "100")], "AUTHORISED");
+    let b = invoice(&l, "2026-07-02", vec![line(sales, None, "1", "250")], "AUTHORISED");
+    let pa = l.add_payment(&PaymentInput { document_id: a, account_id: uf, date: "2026-07-05".into(), amount: "100".into(), ..Default::default() }).unwrap();
+    let pb = l.add_payment(&PaymentInput { document_id: b, account_id: uf, date: "2026-07-06".into(), amount: "250".into(), ..Default::default() }).unwrap();
+    assert_eq!(l.undeposited_payments().unwrap().len(), 2);
+    assert_eq!(bal(&l, uf), 35000);
+    assert_eq!(bal(&l, bank), 0, "money isn't in the bank until it's deposited");
+    let dep = l.bank_deposit(bank, "2026-07-07", "Deposit #1", &[pa, pb]).unwrap();
+    assert_eq!((bal(&l, uf), bal(&l, bank)), (0, 35000));
+    assert!(l.undeposited_payments().unwrap().is_empty());
+    assert!(l.bank_deposit(bank, "2026-07-07", "again", &[pa]).is_err(), "can't deposit twice");
+    // The deposit is one item to match against the one statement line.
+    let items = l.unreconciled_ledger_items(bank).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!((items[0]["kind"].as_str(), items[0]["amount"].as_i64()), (Some("DEPOSIT"), Some(35000)));
+    l.import_lines(bank, "s.csv", "CSV", &[StmtLine { date: "2026-07-08".into(), amount: 35000, payee: "Deposit".into(), ..Default::default() }]).unwrap();
+    let line_id = l.statement_lines(bank, "UNRECONCILED", 10).unwrap()[0]["id"].as_i64().unwrap();
+    assert_eq!(l.reconcile_suggestions(line_id).unwrap()["matches"][0]["kind"], "DEPOSIT");
+    l.reconcile_match(line_id, &[("DEPOSIT".into(), dep)]).unwrap();
+    assert_eq!(l.reconciliation_report(bank, "2026-07-31").unwrap()["difference"], 0);
+    assert!(l.delete_deposit(dep).is_err(), "reconciled deposits can't be deleted");
+    l.unreconcile(line_id).unwrap();
+    l.delete_deposit(dep).unwrap();
+    assert_eq!((bal(&l, uf), bal(&l, bank)), (35000, 0));
+    assert_eq!(l.undeposited_payments().unwrap().len(), 2, "payments go back to Undeposited Funds");
+    assert_invariants(&l);
+}
+
+#[test]
 fn reports_add_up() {
     let l = org();
     let sales = acct(&l, "200");
