@@ -66,6 +66,42 @@ pub fn dispatch_ext(l: &mut Ledger, method: &str, p: &Value, need: Need) -> Resu
         "webhooks.delete" => { need("settings:write")?; l.conn.execute("DELETE FROM webhooks WHERE id = ?1", [i(p, "id")?])?; return ok(); }
         "webhooks.deliveries" => json!(crate::util::query_json(&l.conn, "SELECT * FROM webhook_deliveries ORDER BY id DESC LIMIT 100", [])?),
         "openapi" => openapi(),
+        // branding themes & email templates
+        "branding.list" => json!(crate::util::query_json(&l.conn, "SELECT * FROM branding_themes ORDER BY is_default DESC, name", [])?),
+        "branding.save" => {
+            need("settings:write")?;
+            let t = &p["theme"];
+            let id = match p["id"].as_i64() {
+                Some(id) => id,
+                None => { l.conn.execute("INSERT INTO branding_themes(name) VALUES (?1)", [t["name"].as_str().unwrap_or("New theme")])?; l.conn.last_insert_rowid() }
+            };
+            l.conn.execute("UPDATE branding_themes SET name=?2, font=?3, accent=?4, terms=?5, payment_advice=?6, show_tax_number=?7, payment_instructions=?8, invoice_title=?9, credit_title=?10, quote_title=?11, po_title=?12, logo_attachment_id=?13 WHERE id=?1",
+                params![id, t["name"].as_str().unwrap_or("Theme"), t["font"].as_str().unwrap_or("Inter"), t["accent"].as_str().unwrap_or("#0f766e"), t["terms"].as_str().unwrap_or(""),
+                    t["payment_advice"].as_bool().unwrap_or(true) as i64, t["show_tax_number"].as_bool().unwrap_or(true) as i64, t["payment_instructions"].as_str().unwrap_or(""),
+                    t["invoice_title"].as_str().unwrap_or("Tax Invoice"), t["credit_title"].as_str().unwrap_or("Credit Note"), t["quote_title"].as_str().unwrap_or("Quote"), t["po_title"].as_str().unwrap_or("Purchase Order"), t["logo_attachment_id"].as_i64()])?;
+            if p["default"].as_bool() == Some(true) { l.conn.execute("UPDATE branding_themes SET is_default = (id = ?1)", [id])?; }
+            json!({"id": id})
+        }
+        "branding.delete" => { need("settings:write")?; l.conn.execute("DELETE FROM branding_themes WHERE id = ?1 AND is_default = 0", [i(p, "id")?])?; return ok(); }
+        "emailTemplates.list" => json!(crate::util::query_json(&l.conn, "SELECT * FROM email_templates ORDER BY kind, is_default DESC", [])?),
+        "emailTemplates.save" => {
+            need("settings:write")?;
+            l.conn.execute("UPDATE email_templates SET subject = ?2, body = ?3, name = ?4 WHERE id = ?1", params![i(p, "id")?, s(p, "subject"), s(p, "body"), s(p, "name")])?;
+            return ok();
+        }
+        "reminders.list" => json!(crate::util::query_json(&l.conn, "SELECT r.*, t.name AS template_name FROM reminder_rules r LEFT JOIN email_templates t ON t.id = r.template_id ORDER BY days", [])?),
+        "reminders.save" => {
+            need("settings:write")?;
+            match p["id"].as_i64() {
+                Some(id) => { l.conn.execute("UPDATE reminder_rules SET days = ?2, active = ?3 WHERE id = ?1", params![id, p["days"].as_i64().unwrap_or(7), p["active"].as_bool().unwrap_or(true) as i64])?; }
+                None => { l.conn.execute("INSERT INTO reminder_rules(days, template_id, active) SELECT ?1, id, 1 FROM email_templates WHERE kind = 'REMINDER' LIMIT 1", [p["days"].as_i64().unwrap_or(7)])?; }
+            }
+            return ok();
+        }
+        "reminders.delete" => { l.conn.execute("DELETE FROM reminder_rules WHERE id = ?1", [i(p, "id")?])?; return ok(); }
+        "reminders.run" => json!({"queued": crate::email::run_reminders(l)?}),
+        "outbox.list" => json!(crate::email::outbox(l)?),
+        "reports.catalogue" => json!(crate::extra_reports::CATALOGUE.iter().map(|(k, t, c, d)| json!({"key": k, "title": t, "category": c, "description": d})).collect::<Vec<_>>()),
         _ => return crate::modules::dispatch(l, method, p, need),
     };
     Ok(Some(r))

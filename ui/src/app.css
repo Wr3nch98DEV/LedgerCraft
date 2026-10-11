@@ -1,0 +1,137 @@
+@import "tailwindcss";
+
+/* Design tokens. Dark is the default theme; light is opt-in. */
+:root {
+  --bg: #0a0f1c;
+  --bg2: #0e1526;
+  --panel: #121a2d;
+  --panel2: #172036;
+  --hover: #1c2742;
+  --line: #24304b;
+  --line2: #2e3c5c;
+  --text: #e6eaf2;
+  --muted: #93a0b8;
+  --faint: #66738c;
+  --accent: #2dd4bf;
+  --accent-ink: #04201c;
+  --accent-soft: rgba(45, 212, 191, 0.12);
+  --info: #60a5fa;
+  --info-soft: rgba(96, 165, 250, 0.14);
+  --ok: #34d399;
+  --ok-soft: rgba(52, 211, 153, 0.14);
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.14);
+  --bad: #f87171;
+  --bad-soft: rgba(248, 113, 113, 0.14);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --bg: #f4f6fa;
+  --bg2: #eef1f6;
+  --panel: #ffffff;
+  --panel2: #f8fafc;
+  --hover: #eef2f8;
+  --line: #e2e8f0;
+  --line2: #cbd5e1;
+  --text: #0f172a;
+  --muted: #526077;
+  --faint: #8592a8;
+  --accent: #0d9488;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(13, 148, 136, 0.1);
+  --info: #2563eb;
+  --info-soft: rgba(37, 99, 235, 0.08);
+  --ok: #059669;
+  --ok-soft: rgba(5, 150, 105, 0.1);
+  --warn: #b45309;
+  --warn-soft: rgba(217, 119, 6, 0.12);
+  --bad: #dc2626;
+  --bad-soft: rgba(220, 38, 38, 0.08);
+  --shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg2: var(--bg2);
+  --color-panel: var(--panel);
+  --color-panel2: var(--panel2);
+  --color-hover: var(--hover);
+  --color-line: var(--line);
+  --color-line2: var(--line2);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --font-sans: "Inter", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+}
+
+html, body { background: var(--bg); color: var(--text); }
+body { font-family: var(--font-sans); font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+* { scrollbar-color: var(--line2) transparent; }
+::selection { background: var(--accent-soft); }
+:focus-visible { outline: none; box-shadow: var(--focus); border-radius: 6px; }
+a { color: inherit; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* Controls */
+.input, .select, .textarea {
+  width: 100%; background: var(--bg2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 8px; padding: 7px 10px; font-size: 14px; transition: border-color .12s, box-shadow .12s;
+}
+.input:hover, .select:hover, .textarea:hover { border-color: var(--line2); }
+.input:focus, .select:focus, .textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.input::placeholder, .textarea::placeholder { color: var(--faint); }
+.input.invalid { border-color: var(--bad); }
+.select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 15px) 52%, calc(100% - 10px) 52%; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 28px; }
+.label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; letter-spacing: .01em; }
+.btn { display: inline-flex; align-items: center; gap: 6px; border-radius: 8px; padding: 7px 14px; font-weight: 600; font-size: 14px;
+  border: 1px solid var(--line2); background: var(--panel2); color: var(--text); cursor: pointer; white-space: nowrap; transition: background .12s, border-color .12s, opacity .12s; }
+.btn:hover { background: var(--hover); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn-primary:hover { filter: brightness(1.08); background: var(--accent); }
+.btn-danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); background: transparent; }
+.btn-danger:hover { background: var(--bad-soft); }
+.btn-ghost { background: transparent; border-color: transparent; }
+.btn-ghost:hover { background: var(--hover); }
+.btn-sm { padding: 4px 10px; font-size: 13px; border-radius: 7px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.link { color: var(--accent); cursor: pointer; }
+.link:hover { text-decoration: underline; }
+
+/* Tables */
+.tbl { width: 100%; border-collapse: separate; border-spacing: 0; }
+.tbl th { position: sticky; top: 0; z-index: 1; background: var(--panel); text-align: left; font-size: 12px; font-weight: 600; color: var(--muted);
+  padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.tbl td { padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.tbl tbody tr { transition: background .08s; }
+.tbl tbody tr.clickable { cursor: pointer; }
+.tbl tbody tr:hover { background: var(--hover); }
+.tbl .n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tbl tr.sel { background: var(--accent-soft); }
+
+/* Line items grid */
+.grid-in { width: 100%; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 6px 8px; color: var(--text); font-size: 14px; }
+.grid-in:hover { border-color: var(--line); }
+.grid-in:focus { outline: none; border-color: var(--accent); background: var(--bg2); }
+
+@media print {
+  .no-print { display: none !important; }
+  html, body { background: #fff; color: #000; }
+}

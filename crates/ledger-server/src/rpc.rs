@@ -64,11 +64,13 @@ pub fn handle(st: &AppState, token: Option<&str>, method: &str, p: Value) -> R {
         _ => {}
     }
 
+    // Computed before taking the org lock (list_orgs locks it too).
+    let orgs = if method == "session.get" { json!(st.list_orgs()) } else { Value::Null };
     let mut guard = st.org.lock().unwrap();
     let org = match guard.as_mut() {
         Some(o) => o,
         None => {
-            if method == "session.get" { return Ok(json!({"org": null, "orgs": st.list_orgs()})); }
+            if method == "session.get" { return Ok(json!({"org": null, "orgs": orgs})); }
             return Err(ApiError::Bad("no organisation is open".into()));
         }
     };
@@ -90,7 +92,7 @@ pub fn handle(st: &AppState, token: Option<&str>, method: &str, p: Value) -> R {
         None => {
             if l.any_password_set()? {
                 if method == "session.get" {
-                    return Ok(json!({"org": {"name": l.setting("org_name")?, "file": org.path.file_name().unwrap().to_string_lossy()}, "login_required": true, "orgs": st.list_orgs()}));
+                    return Ok(json!({"org": {"name": l.setting("org_name")?, "file": org.path.file_name().unwrap().to_string_lossy()}, "login_required": true, "orgs": orgs}));
                 }
                 return Err(ApiError::Unauthorized("please sign in".into()));
             }
@@ -104,7 +106,7 @@ pub fn handle(st: &AppState, token: Option<&str>, method: &str, p: Value) -> R {
         if session.perms.iter().any(|p| p == perm) { Ok(()) } else { Err(ApiError::Forbidden(format!("you don't have permission ({perm})"))) }
     };
     let file = org.path.file_name().unwrap().to_string_lossy().to_string();
-    dispatch(l, method, &p, &need, &session, &file, st)
+    dispatch(l, method, &p, &need, &session, &file, &orgs)
 }
 
 fn report(l: &Ledger, name: &str, p: &ReportParams) -> R {
@@ -139,12 +141,12 @@ fn report(l: &Ledger, name: &str, p: &ReportParams) -> R {
     })
 }
 
-fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Result<(), ApiError>, session: &Session, file: &str, st: &AppState) -> R {
+fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Result<(), ApiError>, session: &Session, file: &str, orgs: &Value) -> R {
     match method {
         "session.get" => {
             let user = ledger_core::util::query_one_json(&l.conn, "SELECT id, name, email, role FROM users WHERE id = ?1", [session.user_id])?;
             Ok(json!({"org": {"name": l.setting("org_name")?, "file": file}, "user": user, "role": session.role, "perms": session.perms,
-                "settings": l.settings_json()?, "orgs": st.list_orgs(), "version": env!("CARGO_PKG_VERSION")}))
+                "settings": l.settings_json()?, "orgs": orgs, "version": env!("CARGO_PKG_VERSION")}))
         }
         // ---- settings / users / audit ----
         "settings.get" => { need("settings:read")?; Ok(l.settings_json()?) }
