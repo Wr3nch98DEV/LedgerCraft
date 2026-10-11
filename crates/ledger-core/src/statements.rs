@@ -525,7 +525,10 @@ impl Ledger {
 
     /// Bank reconciliation report as at a date.
     pub fn reconciliation_report(&self, account: i64, date: &str) -> Result<Value> {
-        let stmt_bal: i64 = self.conn.query_row("SELECT COALESCE(SUM(amount), 0) FROM statement_lines WHERE account_id = ?1 AND status <> 'DELETED' AND date <= ?2", params![account, date], |r| r.get(0))?;
+        // Statement opening balance = ledger balance before the first imported statement line.
+        let stmt_bal: i64 = self.conn.query_row("SELECT COALESCE(SUM(amount), 0) FROM statement_lines WHERE account_id = ?1 AND status <> 'DELETED' AND date <= ?2", params![account, date], |r| r.get::<_, i64>(0))?
+            + self.conn.query_row("SELECT COALESCE(SUM(COALESCE(jl.fx_amount, jl.amount)), 0) FROM journal_lines jl JOIN journals j ON j.id = jl.journal_id WHERE jl.account_id = ?1 AND j.posted = 1
+                AND j.date < (SELECT MIN(date) FROM statement_lines s WHERE s.account_id = ?1 AND s.status <> 'DELETED')", [account], |r| r.get::<_, i64>(0))?;
         let unrec_stmt = util::query_json(&self.conn, "SELECT id, date, payee, description, reference, amount FROM statement_lines WHERE account_id = ?1 AND status = 'UNRECONCILED' AND date <= ?2 ORDER BY date", params![account, date])?;
         let mut unrec_ledger = self.unreconciled_ledger_items(account)?;
         unrec_ledger.retain(|l| l["date"].as_str().unwrap_or("") <= date);

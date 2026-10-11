@@ -33,12 +33,14 @@ import Batch from './pages/Batch.svelte';
 import Cashflow from './pages/Cashflow.svelte';
 import Snapshot from './pages/Snapshot.svelte';
 import Module from './pages/Module.svelte';
+import JournalView from './pages/JournalView.svelte';
 
 const wrap = (c: any, extra: Record<string, any>) => (anchor: any, props: any) => c(anchor, { ...props, ...extra });
 
 export const routes: [string, any][] = [
   ['/', Dashboard],
   ['/doc/:id', DocRedirect],
+  ['/journal/:id', JournalView],
   ['/sales', wrap(Overview, { side: 'sales' })],
   ['/purchases', wrap(Overview, { side: 'purchases' })],
   ['/sales/invoices', wrap(DocList, { type: 'ACCREC' })],
@@ -83,6 +85,7 @@ export const routes: [string, any][] = [
   ['/accounting/chart', Chart],
   ['/accounting/tax-rates', TaxRates],
   ['/accounting/journals', Journals],
+  ['/accounting/repeating-journals', wrap(Repeating, { kind: 'MJ' })],
   ['/accounting/journals/new', JournalEdit],
   ['/accounting/journals/:id', JournalEdit],
   ['/accounting/recode', Recode],
