@@ -68,7 +68,7 @@
             <td onclick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(c.id)} onchange={() => toggle(c.id)} class="accent-[var(--accent)]" aria-label="Select" /></td>
             <td><div class="flex items-center gap-2.5"><span class="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-panel2 text-[11px] font-bold ring-1 ring-line">{c.name.split(' ').map((s: string) => s[0]).join('').slice(0, 2).toUpperCase()}</span>
               <span class="font-medium">{c.name}</span>{#if c.is_customer}<span class="chip bg-accent-soft text-accent">Customer</span>{/if}{#if c.is_supplier}<span class="chip bg-info-soft text-info">Supplier</span>{/if}</div></td>
-            <td class="text-muted">{c.email}</td><td class="text-muted">{c.phone}</td>
+            <td class="text-muted">{c.email}</td><td class="whitespace-nowrap text-muted">{c.phone}</td>
             <td class="n">{money(c.payable, { blankZero: true })}</td><td class="n">{money(c.receivable, { blankZero: true })}</td>
             <td class="n text-bad">{money(c.overdue, { blankZero: true })}</td>
           </tr>
