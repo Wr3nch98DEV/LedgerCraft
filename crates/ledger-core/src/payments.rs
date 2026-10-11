@@ -203,6 +203,12 @@ impl Ledger {
             FROM batch_payments b JOIN accounts a ON a.id = b.account_id ORDER BY b.date DESC", [])
     }
 
+    pub fn batch_payment_ids(&self, batch_id: i64) -> Result<Vec<i64>> {
+        let mut st = self.conn.prepare("SELECT id FROM payments WHERE batch_id = ?1 AND status <> 'DELETED' ORDER BY id")?;
+        let ids = st.query_map([batch_id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<i64>>>()?;
+        Ok(ids)
+    }
+
     pub fn batch_payment_detail(&self, id: i64) -> Result<Value> {
         let mut b = util::query_one_json(&self.conn, "SELECT b.*, a.name AS account_name, a.bank_account_number FROM batch_payments b JOIN accounts a ON a.id = b.account_id WHERE b.id = ?1", [id])?;
         b["payments"] = json!(util::query_json(&self.conn,

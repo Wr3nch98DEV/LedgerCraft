@@ -60,7 +60,7 @@ macOS / Linux: `cd ui && npm install && npm run build && cd .. && cargo run --re
 | | Print / PDF | ✅ (print-to-PDF) |
 | **Purchases** | Bills, approvals, supplier credits, repeating bills | ✅ |
 | | Purchase orders → bill | ✅ |
-| | Batch payments + ABA / BACS / NACHA / SEPA files | ✅ |
+| | Batch payments + ABA / BACS / NACHA / SEPA files, remittance advice emails | ✅ |
 | | Files inbox / bill capture | 🟡 PDF text extraction built in; photos need an OCR plugin (Tesseract) |
 | | Expense claims (receipts & mileage) | ✅ |
 | **Banking** | Bank, credit card, payment-service, cash accounts | ✅ |

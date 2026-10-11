@@ -155,6 +155,9 @@
       allocOpen = false; toast('Credit allocated'); await load();
     } catch (e) { toastError(e); }
   }
+  async function sendRemittance(pid: number) {
+    try { const r = await rpc('payments.remittance', { ids: [pid] }); if (r.queued) { toast('Remittance advice queued'); await load(); } else toastError(new Error('The supplier has no email address')); } catch (e) { toastError(e); }
+  }
   async function removeAllocation(aid: number) { try { await rpc('credits.deleteAllocation', { id: aid }); toast('Allocation removed'); await load(); } catch (e) { toastError(e); } }
 
   // ---------- email ----------
@@ -355,7 +358,7 @@
           {#each doc.payments as p}
             <div class="flex items-center justify-between border-t border-line py-2 text-[13px] first:border-0">
               <div><div>{date(p.date)} · {p.account_name}</div><div class="text-faint">{p.reference}{p.reconciled ? ' · Reconciled' : ''}</div></div>
-              <div class="flex items-center gap-2"><span class="num font-medium">{money(p.amount)}</span>{#if can('banking:write') && !p.reconciled}<button class="text-faint hover:text-bad" title="Remove payment" onclick={() => removePayment(p.id)}><Icon name="trash" size={14} /></button>{/if}</div>
+              <div class="flex items-center gap-2"><span class="num font-medium">{money(p.amount)}</span>{#if type === 'ACCPAY' && can('purchases:write')}<button class="text-faint hover:text-accent" title="Email remittance advice" aria-label="Email remittance advice" onclick={() => sendRemittance(p.id)}><Icon name="mail" size={14} /></button>{/if}{#if can('banking:write') && !p.reconciled}<button class="text-faint hover:text-bad" title="Remove payment" onclick={() => removePayment(p.id)}><Icon name="trash" size={14} /></button>{/if}</div>
             </div>
           {/each}
           {#each doc.allocations as a}

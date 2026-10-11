@@ -1,7 +1,7 @@
 <script lang="ts">
   import { rpc } from '../lib/api';
   import { money, date } from '../lib/format';
-  import { toastError } from '../lib/stores.svelte';
+  import { can, toast, toastError } from '../lib/stores.svelte';
   import PageHeader from '../components/PageHeader.svelte';
   import Modal from '../components/Modal.svelte';
   import Icon from '../components/Icon.svelte';
@@ -9,7 +9,13 @@
   rpc('batch.list').then((r) => (rows = r)).catch(toastError);
   let detail = $state<any>(null);
   let open = $state(false);
-  async function show(id: number) { detail = await rpc('batch.get', { id }); open = true; }
+  async function show(id: number) { detail = { ...(await rpc('batch.get', { id })), id }; open = true; }
+  async function remit() {
+    try {
+      const r = await rpc('payments.remittance', { batch_id: detail.id });
+      toast(`${r.queued} remittance advice email${r.queued === 1 ? '' : 's'} queued${r.missing_email.length ? ` — no email address for ${r.missing_email.join(', ')}` : ''}`);
+    } catch (e) { toastError(e); }
+  }
 </script>
 
 <PageHeader title="Batch payments" crumbs={[{ label: 'Purchases', href: '/purchases' }]}>
@@ -28,5 +34,6 @@
     <div class="mb-3 text-muted">{date(detail.date)} · {detail.account_name} · {detail.reference}</div>
     <table class="tbl text-[13px]"><thead><tr><th>Contact</th><th>Document</th><th>Bank details</th><th class="n">Amount</th></tr></thead>
       <tbody>{#each detail.payments as p}<tr><td>{p.contact_name}</td><td>{p.number}</td><td class="text-muted">{p.bank_account || '—'}</td><td class="n">{money(p.amount)}</td></tr>{/each}</tbody></table>
+    {#if detail.type === 'PAYBATCH' && can('purchases:write')}<div class="mt-4 flex justify-end"><button class="btn" onclick={remit}><Icon name="mail" />Send remittance advice</button></div>{/if}
   {/if}
 </Modal>

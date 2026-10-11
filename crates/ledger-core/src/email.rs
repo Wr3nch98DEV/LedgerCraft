@@ -21,8 +21,8 @@ fn doc_fields(l: &Ledger, d: &Value) -> Result<Vec<(&'static str, String)>> {
         ("Trading Name", org.clone()), ("Contact Name", d["contact_name"].as_str().unwrap_or("").into()), ("Contact First Name", first),
         ("Invoice Number", num.clone()), ("Quote Number", num.clone()), ("Purchase Order Number", num.clone()), ("Credit Note Number", num.clone()),
         ("Currency Code", d["currency"].as_str().unwrap_or("").into()),
-        ("Invoice Total", money::fmt_money(d["total"].as_i64().unwrap_or(0))), ("Quote Total", money::fmt_money(d["total"].as_i64().unwrap_or(0))),
-        ("Credit Note Total", money::fmt_money(d["total"].as_i64().unwrap_or(0))), ("Amount Due", money::fmt_money(d["amount_due"].as_i64().unwrap_or(0))),
+        ("Invoice Total", money::fmt_money_grouped(d["total"].as_i64().unwrap_or(0))), ("Quote Total", money::fmt_money_grouped(d["total"].as_i64().unwrap_or(0))),
+        ("Credit Note Total", money::fmt_money_grouped(d["total"].as_i64().unwrap_or(0))), ("Amount Due", money::fmt_money_grouped(d["amount_due"].as_i64().unwrap_or(0))),
         ("Due Date", d["due_date"].as_str().map(crate::reports::fmt_long).unwrap_or_default()), ("Online Invoice Link", link),
         ("Reference", d["reference"].as_str().unwrap_or("").into()),
     ])
@@ -58,6 +58,44 @@ pub fn email_document(l: &Ledger, id: i64, to: Option<String>, subject: Option<S
     l.mark_sent(id)?;
     l.add_note("document", id, "HISTORY", &format!("Emailed to {to}{}", if configured { "" } else { " (saved to outbox — SMTP not configured)" }))?;
     Ok(json!({"outbox_id": oid, "queued": configured}))
+}
+
+/// Remittance advice: tell suppliers which bills a payment (or a batch of payments) settled.
+/// One email per supplier. Returns how many were queued and which suppliers have no email address.
+pub fn email_remittance(l: &Ledger, payment_ids: &[i64]) -> Result<Value> {
+    use std::collections::BTreeMap;
+    let org = l.setting_or("org_name", "")?;
+    let mut by_contact: BTreeMap<i64, Vec<Value>> = BTreeMap::new();
+    for pid in payment_ids {
+        let p = util::query_one_json(&l.conn,
+            "SELECT p.id, p.date, p.amount, p.reference, p.document_id, d.number, d.reference AS doc_reference, d.currency, d.contact_id, d.type
+             FROM payments p JOIN documents d ON d.id = p.document_id WHERE p.id = ?1 AND p.status <> 'DELETED'", [pid])?;
+        if p.is_null() || p["type"] != "ACCPAY" { continue; }
+        by_contact.entry(p["contact_id"].as_i64().unwrap_or(0)).or_default().push(p);
+    }
+    let (mut queued, mut missing) = (0, Vec::new());
+    for (cid, pays) in by_contact {
+        let (name, first, email): (String, String, String) = l.conn.query_row(
+            "SELECT name, COALESCE(NULLIF(first_name,''), name), COALESCE(email,'') FROM contacts WHERE id = ?1", [cid], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        if email.trim().is_empty() { missing.push(name); continue; }
+        let total: i64 = pays.iter().map(|p| p["amount"].as_i64().unwrap_or(0)).sum();
+        let cur = pays[0]["currency"].as_str().unwrap_or("").to_string();
+        let date = pays[0]["date"].as_str().map(crate::reports::fmt_long).unwrap_or_default();
+        let mut lines = String::new();
+        for p in &pays {
+            let refs = [p["number"].as_str().unwrap_or(""), p["doc_reference"].as_str().unwrap_or("")].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(" / ");
+            lines.push_str(&format!("  {:<32} {:>14}\n", if refs.is_empty() { "Bill".to_string() } else { refs }, money::fmt_money_grouped(p["amount"].as_i64().unwrap_or(0))));
+        }
+        let subject = format!("Remittance advice from {org}");
+        let reference = pays[0]["reference"].as_str().filter(|s| !s.is_empty()).unwrap_or("—");
+        let body = format!(
+            "Hi {first},\n\nThis is to let you know that {org} has paid {cur} {} on {date} for:\n\n{lines}\n  {:<32} {:>14}\n\nPayment reference: {reference}\n\nRegards,\n{org}\n",
+            money::fmt_money_grouped(total), "Total paid", money::fmt_money_grouped(total));
+        queue_email(l, &email, &subject, &body, "contact", cid)?;
+        for p in &pays { l.add_note("document", p["document_id"].as_i64().unwrap_or(0), "HISTORY", &format!("Remittance advice emailed to {email}"))?; }
+        queued += 1;
+    }
+    Ok(json!({"queued": queued, "missing_email": missing}))
 }
 
 pub fn queue_email(l: &Ledger, to: &str, subject: &str, body: &str, entity: &str, entity_id: i64) -> Result<i64> {
@@ -119,10 +157,10 @@ pub fn email_statements(l: &Ledger, contact_ids: &[i64]) -> Result<i64> {
         let docs = util::query_json(&l.conn, "SELECT number, date, due_date, total - amount_paid - amount_credited AS due, currency FROM documents WHERE contact_id = ?1 AND type = 'ACCREC' AND status = 'AUTHORISED' ORDER BY date", [cid])?;
         if docs.is_empty() { continue; }
         let total: i64 = docs.iter().map(|d| d["due"].as_i64().unwrap_or(0)).sum();
-        let lines: Vec<String> = docs.iter().map(|d| format!("  {}  {}  due {}  {}", d["number"].as_str().unwrap_or(""), d["date"].as_str().unwrap_or(""), d["due_date"].as_str().unwrap_or(""), money::fmt_money(d["due"].as_i64().unwrap_or(0)))).collect();
+        let lines: Vec<String> = docs.iter().map(|d| format!("  {}  {}  due {}  {}", d["number"].as_str().unwrap_or(""), d["date"].as_str().unwrap_or(""), d["due_date"].as_str().unwrap_or(""), money::fmt_money_grouped(d["due"].as_i64().unwrap_or(0)))).collect();
         let first = c["first_name"].as_str().filter(|s| !s.is_empty()).or(c["name"].as_str()).unwrap_or("").to_string();
         let f = vec![("Trading Name", org.clone()), ("Contact Name", c["name"].as_str().unwrap_or("").to_string()), ("Contact First Name", first),
-            ("Amount Due", money::fmt_money(total)), ("Currency Code", docs[0]["currency"].as_str().unwrap_or("").to_string())];
+            ("Amount Due", money::fmt_money_grouped(total)), ("Currency Code", docs[0]["currency"].as_str().unwrap_or("").to_string())];
         let text = merge(&body, &f) + "\n\nOutstanding invoices:\n" + &lines.join("\n");
         queue_email(l, &to, &merge(&subject, &f), &text, "contact", *cid)?;
         l.add_note("contact", *cid, "HISTORY", "Statement emailed")?;

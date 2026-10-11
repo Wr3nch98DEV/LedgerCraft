@@ -228,6 +228,14 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
             Ok(json!({"id": l.batch_payment(i(p, "account_id")?, s(p, "date"), s(p, "reference"), &items)?}))
         }
         "batch.list" => Ok(json!(l.list_batch_payments()?)),
+        "payments.remittance" => {
+            need("purchases:write")?;
+            let ids: Vec<i64> = match p["batch_id"].as_i64() {
+                Some(b) => l.batch_payment_ids(b)?,
+                None => de::<Vec<i64>>(&p["ids"])?,
+            };
+            Ok(ledger_core::email::email_remittance(l, &ids)?)
+        }
         "batch.get" => Ok(l.batch_payment_detail(id(p)?)?),
 
         // ---- banking ----

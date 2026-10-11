@@ -274,6 +274,24 @@ fn invoice_numbering_settings() {
 }
 
 #[test]
+fn remittance_advice_for_bill_payments() {
+    let l = org();
+    let bank = acct(&l, "090");
+    let bill = l.save_document(None, &DocInput { kind: "ACCPAY".into(), contact_name: Some("Paper Co".into()), date: "2026-07-01".into(), number: Some("PC-77".into()), line_amount_type: Some("NOTAX".into()),
+        lines: vec![line(acct(&l, "429"), None, "1", "1234.5")], status: Some("AUTHORISED".into()), ..Default::default() }).unwrap();
+    let pid = l.add_payment(&PaymentInput { document_id: bill, account_id: bank, date: "2026-07-10".into(), amount: "1234.50".into(), reference: "EFT 991".into(), ..Default::default() }).unwrap();
+    // no email address yet -> reported, nothing queued
+    let r = ledger_core::email::email_remittance(&l, &[pid]).unwrap();
+    assert_eq!(r["queued"], 0);
+    assert_eq!(r["missing_email"][0], "Paper Co");
+    l.conn.execute("UPDATE contacts SET email = 'ap@paper.test' WHERE name = 'Paper Co'", []).unwrap();
+    let r = ledger_core::email::email_remittance(&l, &[pid]).unwrap();
+    assert_eq!(r["queued"], 1);
+    let body: String = l.conn.query_row("SELECT body FROM outbox ORDER BY id DESC LIMIT 1", [], |r| r.get(0)).unwrap();
+    assert!(body.contains("PC-77") && body.contains("1,234.50") && body.contains("EFT 991"), "{body}");
+}
+
+#[test]
 fn reports_add_up() {
     let l = org();
     let sales = acct(&l, "200");

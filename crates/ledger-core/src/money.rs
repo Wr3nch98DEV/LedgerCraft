@@ -73,9 +73,29 @@ pub fn fmt_fixed(v: i64, dp: u32) -> String {
 
 pub fn fmt_money(v: Cents) -> String { fmt_fixed(v, 2) }
 
+/// Human-facing money with thousands separators, e.g. `12,345.60` (emails, printed text).
+pub fn fmt_money_grouped(v: Cents) -> String {
+    let s = fmt_money(v.abs());
+    let (whole, frac) = s.split_once('.').unwrap_or((&s, "00"));
+    let mut g = String::new();
+    for (i, ch) in whole.chars().enumerate() {
+        if i > 0 && (whole.len() - i) % 3 == 0 { g.push(','); }
+        g.push(ch);
+    }
+    format!("{}{g}.{frac}", if v < 0 { "-" } else { "" })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn grouped() {
+        assert_eq!(fmt_money_grouped(0), "0.00");
+        assert_eq!(fmt_money_grouped(99), "0.99");
+        assert_eq!(fmt_money_grouped(123456), "1,234.56");
+        assert_eq!(fmt_money_grouped(-123456789), "-1,234,567.89");
+        assert_eq!(fmt_money_grouped(10000000), "100,000.00");
+    }
     #[test]
     fn rounding() {
         assert_eq!(div_round(5, 10), 1);
