@@ -251,13 +251,13 @@
         <button class="btn btn-primary" disabled={saving} onclick={() => save('SENT', 'email')}>Save & send</button>
         <button class="btn" disabled={saving} onclick={() => save('SENT')}>Mark as sent</button>
       {:else}
-        <button class="btn" disabled={saving} onclick={() => save(doc?.status === 'AUTHORISED' ? 'AUTHORISED' : 'DRAFT')} title="Ctrl+S">{doc?.status === 'AUTHORISED' ? 'Save changes' : 'Save draft'}</button>
+        <button class="btn" disabled={saving} onclick={() => save(doc?.status === 'AUTHORISED' ? 'AUTHORISED' : 'DRAFT')} title={(doc?.status === 'AUTHORISED' ? 'Save changes' : 'Save draft') + ' (Ctrl+S)'}>{doc?.status === 'AUTHORISED' ? 'Save changes' : 'Save draft'}</button>
         {#if doc?.status !== 'AUTHORISED'}
           <button class="btn" disabled={saving} onclick={() => save('SUBMITTED')}>Submit for approval</button>
           <button class="btn" disabled={saving} onclick={() => save('AUTHORISED', 'new')}>Approve & add another</button>
           {#if sales || type === 'PO'}<button class="btn" disabled={saving} onclick={() => save('AUTHORISED', 'email')}>Approve & email</button>{/if}
           <button class="btn" disabled={saving} onclick={() => save('AUTHORISED', 'print')}>Approve & print</button>
-          <button class="btn btn-primary" disabled={saving} onclick={() => save('AUTHORISED')} title="Ctrl+Enter">Approve</button>
+          <button class="btn btn-primary" disabled={saving} onclick={() => save('AUTHORISED')} title="Approve (Ctrl+Enter)">Approve</button>
         {/if}
       {/if}
     </div>
@@ -282,6 +282,7 @@
           <div class="flex justify-between"><span class="text-muted">Subtotal</span><span class="num">{money(doc.subtotal)}</span></div>
           {#each doc.tax_summary as tx}<div class="flex justify-between text-muted"><span>{doc.line_amount_type === 'INCLUSIVE' ? 'Includes' : 'Total'} {tx.name}</span><span class="num">{money(tx.tax)}</span></div>{/each}
           <div class="flex justify-between border-t-2 border-text pt-2 text-[17px] font-semibold"><span>Total {doc.currency}</span><span class="num">{money(doc.total)}</span></div>
+          {#if doc.currency !== baseCur && doc.rate_e8}<div class="flex justify-between text-[12px] text-faint"><span>{baseCur} equivalent at {fmtRate(doc.rate_e8)}</span><span class="num">{money(Math.round((doc.total * 1e8) / doc.rate_e8))}</span></div>{/if}
           {#if ledger}
             {#each doc.payments as p}<div class="flex justify-between text-muted"><span>Less {credit ? 'refund' : 'payment'} {date(p.date)}</span><span class="num">{money(-p.amount)}</span></div>{/each}
             {#each doc.allocations as a}<div class="flex justify-between text-muted"><span>{a.credit_note_id === doc.id ? `Allocated to ${a.document_number}` : `Less credit ${a.credit_number}`}</span><span class="num">{money(-a.amount)}</span></div>{/each}
