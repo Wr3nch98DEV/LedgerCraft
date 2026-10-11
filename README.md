@@ -54,7 +54,7 @@ macOS / Linux: `cd ui && npm install && npm run build && cd .. && cargo run --re
 | | Credit notes, allocation, refunds | ✅ |
 | | Repeating invoices with [Month]/[Year] placeholders, auto-approve, auto-email | ✅ |
 | | Online invoice link, online quote accept/decline | ✅ · card "Pay now" via plugin 🟡 |
-| | Email invoices, statements, templates, reminders | ✅ SMTP sending (your mail server) · Outbox · .eml download |
+| | Email invoices, statements, templates, reminders | ✅ SMTP sending (your mail server) with the invoice attached as a printable HTML file · Outbox · .eml download |
 | | Customer statements (outstanding & activity) | ✅ |
 | | Branding themes with logo | ✅ |
 | | Print / PDF | ✅ (print-to-PDF) |

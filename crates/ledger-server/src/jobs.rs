@@ -47,14 +47,23 @@ fn smtp_settings(l: &Ledger) -> Option<Smtp> {
     })
 }
 
-fn send_one(cfg: &Smtp, to: &str, subject: &str, body: &str) -> Result<(), String> {
-    use lettre::{message::{header::ContentType, Mailbox}, transport::smtp::authentication::Credentials, Message, SmtpTransport, Transport};
+/// An attachment: (file name, HTML content).
+type Attachment = Option<(String, String)>;
+
+fn send_one(cfg: &Smtp, to: &str, subject: &str, body: &str, attachment: &Attachment) -> Result<(), String> {
+    use lettre::{message::{header::ContentType, Attachment as MailAttachment, Mailbox, MultiPart, SinglePart}, transport::smtp::authentication::Credentials, Message, SmtpTransport, Transport};
     let from: Mailbox = cfg.from.parse().map_err(|e| format!("invalid from address: {e}"))?;
-    let mut b = Message::builder().from(from).subject(subject).header(ContentType::TEXT_PLAIN);
+    let mut b = Message::builder().from(from).subject(subject);
     for addr in to.split([',', ';']).map(str::trim).filter(|a| !a.is_empty()) {
         b = b.to(addr.parse().map_err(|e| format!("invalid address {addr}: {e}"))?);
     }
-    let msg = b.body(body.to_string()).map_err(|e| e.to_string())?;
+    let msg = match attachment {
+        // The printable document goes along as a self-contained HTML file (open it and print to PDF).
+        Some((name, html)) => b.multipart(MultiPart::mixed()
+            .singlepart(SinglePart::plain(body.to_string()))
+            .singlepart(MailAttachment::new(name.clone()).body(html.clone(), ContentType::TEXT_HTML))),
+        None => b.header(ContentType::TEXT_PLAIN).body(body.to_string()),
+    }.map_err(|e| e.to_string())?;
     let builder = match cfg.tls.as_str() {
         "TLS" => SmtpTransport::relay(&cfg.host).map_err(|e| e.to_string())?,
         "NONE" => SmtpTransport::builder_dangerous(&cfg.host),
@@ -71,12 +80,23 @@ pub fn send_queued_email(st: &AppState) -> i64 {
         let guard = st.org.lock().unwrap();
         let Some(org) = guard.as_ref() else { return 0 };
         let Some(cfg) = smtp_settings(&org.ledger) else { return 0 };
-        let q = util::query_json(&org.ledger.conn, "SELECT id, to_addr, subject, body FROM outbox WHERE status = 'QUEUED' ORDER BY id LIMIT 50", []).unwrap_or_default();
+        let q = util::query_json(&org.ledger.conn, "SELECT id, to_addr, subject, body, entity, entity_id FROM outbox WHERE status = 'QUEUED' ORDER BY id LIMIT 50", []).unwrap_or_default();
+        // Render document attachments while we hold the lock; sending happens without it.
+        let q: Vec<(Value, Attachment)> = q.into_iter().map(|m| {
+            let att = match (m["entity"].as_str(), m["entity_id"].as_i64()) {
+                (Some("document"), Some(id)) => crate::render::document_html(&org.ledger, id, false).ok().map(|html| {
+                    let number = org.ledger.get_document(id).ok().and_then(|d| d["number"].as_str().map(str::to_string)).filter(|n| !n.is_empty()).unwrap_or_else(|| format!("document-{id}"));
+                    (format!("{}.html", number.replace(|c: char| "/\\:*?\"<>|".contains(c), "-")), html)
+                }),
+                _ => None,
+            };
+            (m, att)
+        }).collect();
         (cfg, q)
     };
     let mut results = Vec::new();
-    for m in &queued {
-        let r = send_one(&cfg, m["to_addr"].as_str().unwrap_or(""), m["subject"].as_str().unwrap_or(""), m["body"].as_str().unwrap_or(""));
+    for (m, att) in &queued {
+        let r = send_one(&cfg, m["to_addr"].as_str().unwrap_or(""), m["subject"].as_str().unwrap_or(""), m["body"].as_str().unwrap_or(""), att);
         results.push((m["id"].as_i64().unwrap_or(0), r));
     }
     let guard = st.org.lock().unwrap();
@@ -93,7 +113,7 @@ pub fn send_queued_email(st: &AppState) -> i64 {
 
 pub fn test_email(st: &AppState, to: &str) -> Result<(), String> {
     let cfg = { let g = st.org.lock().unwrap(); let org = g.as_ref().ok_or("no organisation open")?; smtp_settings(&org.ledger).ok_or("SMTP is not configured")? };
-    send_one(&cfg, to, "LedgerCraft test email", "Your SMTP settings work. Emails from LedgerCraft will be sent automatically.")
+    send_one(&cfg, to, "LedgerCraft test email", "Your SMTP settings work. Emails from LedgerCraft will be sent automatically.", &None)
 }
 
 /// POST queued webhook events with an HMAC-SHA256 signature header.
