@@ -11,6 +11,8 @@ export function accountOptions(filter?: (a: any) => boolean) {
 export const salesAccounts = () => accountOptions((a) => a.class === 'REVENUE' || a.class === 'LIABILITY' || a.class === 'ASSET' && a.type !== 'BANK' || a.class === 'EQUITY');
 export const purchaseAccounts = () => accountOptions((a) => a.type !== 'BANK');
 export const bankAccounts = () => accountOptions((a) => a.type === 'BANK');
+/** Accounts a payment can be made to/from: bank accounts plus accounts with "Enable payments" ticked. */
+export const paymentAccounts = () => accountOptions((a) => a.type === 'BANK' || !!a.enable_payments);
 export const nonBankAccounts = () => accountOptions((a) => a.type !== 'BANK');
 
 export function taxOptions() {

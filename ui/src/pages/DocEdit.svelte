@@ -13,7 +13,7 @@
   import Attachments from '../components/Attachments.svelte';
   import Modal from '../components/Modal.svelte';
   import Icon from '../components/Icon.svelte';
-  import { bankAccounts, currencyOptions } from '../components/Pickers';
+  import { paymentAccounts, currencyOptions } from '../components/Pickers';
 
   let { type, id = undefined }: { type: string; id?: string } = $props();
   const isNew = $derived(!id);
@@ -331,7 +331,7 @@
           <div class="space-y-2.5">
             <div><label class="label" for="pa">Amount {doc.currency}</label><input id="pa" class="input num" bind:value={pay.amount} /></div>
             <div><label class="label" for="pd">Date</label><input id="pd" type="date" class="input" bind:value={pay.date} /></div>
-            <div><label class="label" for="cb-docedit-credit-sales-paid-fr-2">{credit ? (sales ? 'Paid from' : 'Received into') : sales ? 'Paid to' : 'Paid from'}</label><Combo id="cb-docedit-credit-sales-paid-fr-2" bind:value={pay.account_id} options={bankAccounts()} placeholder="Bank account" /></div>
+            <div><label class="label" for="cb-docedit-credit-sales-paid-fr-2">{credit ? (sales ? 'Paid from' : 'Received into') : sales ? 'Paid to' : 'Paid from'}</label><Combo id="cb-docedit-credit-sales-paid-fr-2" bind:value={pay.account_id} options={paymentAccounts()} placeholder="Bank account" /></div>
             {#if doc.currency !== baseCur}<div><label class="label" for="pr">Rate (1 {baseCur} =)</label><input id="pr" class="input num" bind:value={pay.rate} placeholder={fmtRate(doc.rate_e8)} /></div>{/if}
             <div><label class="label" for="pref">Reference</label><input id="pref" class="input" bind:value={pay.reference} /></div>
             <button class="btn btn-primary w-full justify-center" disabled={!pay.account_id} onclick={addPayment}>Add {credit ? 'refund' : 'payment'}</button>
