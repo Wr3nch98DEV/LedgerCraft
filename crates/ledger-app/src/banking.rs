@@ -282,9 +282,52 @@ pub fn view(app: &App) -> Element<'_, Message> {
         if review && app.bank.expanded == Some(id) { table = table.push(detail(app, l)); }
         table = table.push(ui::hr());
     }
-    let body = column![tiles, tabs, container(table).style(theme::card).width(Fill).clip(true)].spacing(16);
+    let list: Element<Message> = if !qb && review { xero_cards(app, lines) } else { container(table).style(theme::card).width(Fill).clip(true).into() };
+    let body = column![tiles, tabs, list].spacing(16);
     let actions: Vec<Element<Message>> = vec![ui::btn(if qb { "Record expense" } else { "Spend money" }, Some(Message::Nav(Route::Spend(acc))))];
     ui::page(ui::h1(title), actions, body.into())
+}
+
+/// Xero-style reconcile: statement line on the left, the match (or a new transaction) on the right, OK in between.
+fn xero_cards<'a>(app: &'a App, lines: &'a [Value]) -> Element<'a, Message> {
+    let k = t();
+    if lines.is_empty() { return ui::card(ui::muted("All reconciled — import a new statement to keep going.")); }
+    let mut col = column![row![
+        text("Review your bank statement lines...").size(12).font(BOLD).color(k.muted).width(Fill),
+        Space::new().width(110),
+        text("...then match with your transactions in LedgerCraft").size(12).font(BOLD).color(k.muted).width(Fill),
+    ]].spacing(12);
+    for l in lines {
+        let id = i(&l["id"]);
+        let amount = i(&l["amount"]);
+        let left = container(column![
+            row![text(app.d(l["date"].as_str().unwrap_or(""))).size(13).color(k.muted), ui::hspace(),
+                text(if amount < 0 { "Spent" } else { "Received" }).size(11).font(BOLD).color(k.muted)],
+            row![column![text(title_case(l["payee"].as_str().unwrap_or(""))).size(15).font(BOLD), ui::muted(l["description"].as_str().unwrap_or("").to_string())].spacing(2).width(Fill),
+                text(ui::money(amount.abs())).size(17).font(BOLD).color(if amount < 0 { k.text } else { k.ok })].align_y(Alignment::Center),
+        ].spacing(6)).padding(14).width(Fill).style(theme::card);
+        let action = primary_action(l);
+        let (sugg, is_match) = suggestion_text(app, l);
+        let right: Element<Message> = if action.is_some() {
+            container(column![
+                text(if is_match { "Match" } else { "Create (bank rule)" }).size(11).font(BOLD).color(k.ok),
+                text(sugg).size(14),
+                text(ui::money(amount.abs())).size(13).color(k.muted),
+            ].spacing(4)).padding(14).width(Fill).style(theme::accent_soft).into()
+        } else if app.bank.expanded == Some(id) {
+            detail(app, l)
+        } else {
+            container(column![ui::muted("No match found."), row![ui::btn("Create", Some(Message::Bank(Msg::Expand(id)))), ui::btn("Find & match", Some(Message::Bank(Msg::Expand(id))))].spacing(8)].spacing(8))
+                .padding(14).width(Fill).style(theme::soft).into()
+        };
+        let ok: Element<Message> = match action {
+            Some(a) => container(button(text("OK").size(15).font(BOLD).align_x(iced::alignment::Horizontal::Center).width(Fill)).style(theme::primary).padding([18, 0]).width(90)
+                .on_press_maybe(if app.bank.busy { None } else { Some(Message::Bank(a)) })).padding([0, 10]).into(),
+            None => Space::new().width(110).into(),
+        };
+        col = col.push(row![left, ok, right].align_y(Alignment::Center));
+    }
+    col.into()
 }
 
 /// Expanded row: categorise (create a transaction) or pick a different match.

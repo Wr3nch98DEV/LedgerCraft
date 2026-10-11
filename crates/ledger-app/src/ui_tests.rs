@@ -187,3 +187,23 @@ fn edit_company_details() {
     assert_eq!(app.be.call_now("settings.get", json!({})).unwrap()["phone"], "555 0100");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn xero_reconcile_ok_button() {
+    let (mut app, dir) = demo_app("xerorec", Skin::Xero);
+    let _ = app.update(Message::Nav(Route::Banking(None)));
+    let acc = app.be.call_now("accounts.bank", json!({})).unwrap()[0]["id"].as_i64().unwrap();
+    let mut lines = app.be.call_now("statements.lines", json!({"account_id": acc})).unwrap();
+    for l in lines.as_array_mut().unwrap() { l["suggest"] = app.be.call_now("rec.suggestions", json!({"id": l["id"]})).unwrap(); }
+    let n = lines.as_array().unwrap().len();
+    let banks = app.be.call_now("accounts.bank", json!({})).unwrap();
+    app.data = Some(json!({"banks": banks, "lines": lines, "account": acc}));
+    let msgs = click(&app, "OK");
+    let Some(Message::Bank(m)) = msgs.into_iter().next() else { panic!("OK produced nothing") };
+    match &m {
+        crate::banking::Msg::MatchDoc(..) | crate::banking::Msg::MatchTx(..) => { let (method, p) = crate::banking::match_command(&m).unwrap(); app.be.call_now(method, p).unwrap(); }
+        other => panic!("unexpected {other:?}"),
+    }
+    assert_eq!(app.be.call_now("statements.lines", json!({"account_id": acc})).unwrap().as_array().unwrap().len(), n - 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
