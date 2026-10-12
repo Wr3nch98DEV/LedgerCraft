@@ -1087,3 +1087,17 @@ fn desktop_preferences() {
     assert!(!app.desktop() && app.desk.windows.is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_doc_lists() {
+    let (mut app, dir) = desktop_app("desklistdocs");
+    for (r, t, new) in [(Route::Quotes, "QUOTE", "New Estimate"), (Route::CreditNotes, "ACCRECCREDIT", "New Credit Memo"), (Route::PurchaseOrders, "PO", "New Purchase Order")] {
+        let _ = app.update(Message::Nav(r.clone()));
+        app.data = Some(app.be.call_now("docs.list", json!({"type": t})).unwrap());
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        assert!(ui.find(new).is_ok(), "missing {new}");
+        assert!(ui.find("NUM").is_ok());
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}

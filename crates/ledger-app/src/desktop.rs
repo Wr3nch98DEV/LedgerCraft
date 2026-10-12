@@ -149,7 +149,8 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::AllSales | Route::Invoices => "Income Tracker".into(),
         Route::Quotes => "Estimates".into(),
         Route::CreditNotes => "Credit Memos".into(),
-        Route::Bills | Route::Expenses | Route::PurchaseOrders => "Bill Tracker".into(),
+        Route::PurchaseOrders => "Purchase Orders".into(),
+        Route::Bills | Route::Expenses => "Bill Tracker".into(),
         Route::Customers | Route::Contacts => "Customer Center".into(),
         Route::Vendors => "Vendor Center".into(),
         Route::Contact(_) => "Customer Center".into(),
@@ -638,6 +639,24 @@ fn list_window<'a>(cols: &[(&str, u16, bool)], rows: Vec<(Vec<Element<'a, Messag
         container(column![head, scrollable(list).style(theme::scroll).height(Fill)]).style(theme::card).width(Fill).height(Fill).clip(true),
         row(bottom).spacing(8).align_y(Alignment::Center),
     ].spacing(8).padding(12).height(Fill).into()
+}
+
+/// Estimates, Credit Memos and Purchase Orders lists.
+pub fn doc_list(app: &App) -> Element<'_, Message> {
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let (kind, who, new_label) = match app.route { Route::Quotes => ("QUOTE", "Customer:Job", "New Estimate"), Route::CreditNotes => ("ACCRECCREDIT", "Customer:Job", "New Credit Memo"), _ => ("PO", "Vendor", "New Purchase Order") };
+    let cols: Vec<(&str, u16, bool)> = vec![("Num", 10, false), ("Date", 11, false), (who, 26, false), ("Memo", 22, false), ("Amount", 12, true), ("Status", 12, false)];
+    let rows = d["rows"].as_array().cloned().unwrap_or_default().iter().map(|r| {
+        let st = crate::vocab::status(app.skin, kind, r["status"].as_str().unwrap_or(""), r["overdue"].as_i64() == Some(1));
+        (vec![ui::cell(r["number"].as_str().unwrap_or("").to_string()), ui::cell(app.d(r["date"].as_str().unwrap_or(""))), ui::cell(r["contact_name"].as_str().unwrap_or("").to_string()),
+            ui::cell_muted(r["reference"].as_str().unwrap_or("").to_string()), ui::cell_money(r["total"].as_i64().unwrap_or(0)), text(st).size(13).color(crate::lists::status_color(st)).into()],
+         Some(Message::Nav(Route::Doc { kind: kind.into(), id: r["id"].as_i64() })))
+    }).collect();
+    let mut bottom = vec![ui::btn(new_label, doc_new(kind))];
+    if kind == "PO" { bottom.push(ui::btn("Enter Bills", doc_new("ACCPAY"))); } else { bottom.push(ui::btn("Create Invoices", doc_new("ACCREC"))); }
+    bottom.push(ui::hspace());
+    bottom.push(text_input("Search", &app.list_q).on_input(Message::ListQuery).padding([5, 7]).size(13).style(theme::input).width(220).into());
+    list_window(&cols, rows, bottom)
 }
 
 /// Lists ▸ Chart of Accounts.
