@@ -215,8 +215,12 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
             let input: DocInput = de(&p["doc"])?;
             let kind = match oi(p, "id") { Some(x) => l.get_document(x)?["type"].as_str().unwrap_or("").to_string(), None => input.kind.clone() };
             need(if ledger_core::documents::is_sales(&kind) { "sales:write" } else { "purchases:write" })?;
-            Ok(json!({"id": l.save_document(oi(p, "id"), &input)?}))
+            // An invoice can take in open delayed charges/credits (QuickBooks), closing them.
+            let delayed: Vec<i64> = if p["close_delayed"].is_array() { de(&p["close_delayed"])? } else { vec![] };
+            Ok(json!({"id": l.save_invoice_with_delayed(oi(p, "id"), &input, &delayed)?}))
         }
+        "docs.saveDelayed" => { need("sales:write")?; Ok(json!({"id": l.save_delayed(oi(p, "id"), &de::<DocInput>(&p["doc"])?, p["credit"].as_bool().unwrap_or(false))?})) }
+        "docs.openDelayed" => { need("sales:read")?; Ok(json!(l.open_delayed(i(p, "contact_id")?)?)) }
         "docs.setStatus" => { let d = l.get_document(id(p)?)?; need(doc_perm(&d, true))?; l.set_document_status(id(p)?, s(p, "status"))?; ok() }
         "docs.copy" => { let d = l.get_document(id(p)?)?; need(doc_perm(&d, true))?; Ok(json!({"id": l.copy_document(id(p)?, s(p, "to"), p["date"].as_str())?})) }
         "docs.markSent" => { l.mark_sent(id(p)?)?; ok() }

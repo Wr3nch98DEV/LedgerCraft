@@ -572,3 +572,62 @@ fn new_account_with_detail_type() {
     assert_eq!(crate::coa::qb_type("OVERHEADS", ""), "Other Expense");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn delayed_charge_added_to_invoice() {
+    use crate::doc::Msg as D;
+    let (mut app, dir) = demo_app("delayed", Skin::QuickBooks);
+    // + New → Delayed charge.
+    let _ = app.update(Message::ToggleNew);
+    let msgs = click(&app, "Delayed charge");
+    let Some(Message::Nav(r)) = msgs.into_iter().next() else { panic!("Delayed charge isn't enabled in + New") };
+    assert_eq!(r, Route::Doc { kind: "DELAYEDCHARGE".into(), id: None });
+    let _ = app.update(Message::Nav(r));
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    {
+        let e = app.doc.as_mut().unwrap();
+        e.contact = Some(cust.clone());
+        e.lines[0].description = "Extra site visit".into();
+        e.lines[0].price = "180".into();
+    }
+    let p = app.doc.as_ref().unwrap().payload(&app, "SENT").unwrap();
+    assert_eq!((p["doc"]["type"].as_str(), p["credit"].as_bool()), (Some("QUOTE"), Some(false)));
+    let charge = app.be.call_now("docs.saveDelayed", p).unwrap()["id"].as_i64().unwrap();
+    // A new invoice for that customer offers it; Add copies its lines in.
+    let _ = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None }));
+    let _ = app.update(Message::Doc(D::Contact(cust.clone())));
+    let open = app.be.call_now("docs.openDelayed", json!({"contact_id": cust.id}));
+    let _ = app.update(Message::Doc(D::Delayed(open)));
+    let msgs = click(&app, "Add");
+    assert!(matches!(msgs.as_slice(), [Message::Doc(D::AddDelayed(x))] if *x == charge), "{msgs:?}");
+    let _ = app.update(Message::Doc(D::AddDelayed(charge)));
+    let e = app.doc.as_ref().unwrap();
+    assert!(e.lines.iter().any(|l| l.description == "Extra site visit"));
+    assert!(e.delayed.is_empty() && e.added == vec![charge]);
+    let p = e.payload(&app, "AUTHORISED").unwrap();
+    assert_eq!(p["close_delayed"], json!([charge]));
+    let inv = app.be.call_now("docs.save", p).unwrap()["id"].as_i64().unwrap();
+    assert_eq!(app.be.call_now("docs.get", json!({"id": charge})).unwrap()["status"], "INVOICED");
+    assert!(app.be.call_now("docs.get", json!({"id": inv})).unwrap()["total"].as_i64().unwrap() >= 18000);
+    assert_eq!(crate::vocab::status(Skin::QuickBooks, "DELAYEDCHARGE", "INVOICED", false), "Closed");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Renders a new invoice with an open delayed charge to `%TEMP%\lc-delayed-wgpu.png` (run with --ignored).
+#[test]
+#[ignore]
+fn render_add_to_invoice() {
+    use crate::doc::Msg as D;
+    let (mut app, dir) = demo_app("delayed-shot", Skin::QuickBooks);
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    app.be.call_now("docs.saveDelayed", json!({"doc": {"contact_id": cust.id, "date": "2026-10-05", "line_amount_type": "NOTAX", "lines": [{"description": "Extra site visit", "quantity": "1", "unit_price": "180"}]}, "credit": false})).unwrap();
+    let _ = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None }));
+    let _ = app.update(Message::Doc(D::Contact(cust.clone())));
+    let open = app.be.call_now("docs.openDelayed", json!({"contact_id": cust.id}));
+    let _ = app.update(Message::Doc(D::Delayed(open)));
+    let _ = std::fs::remove_file(std::env::temp_dir().join("lc-delayed-wgpu.png"));
+    let _g = sim_lock();
+    let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
+    ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join("lc-delayed.png")).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -22,6 +22,27 @@ fn loading_or_error<'a>(app: &'a App, title: &str) -> Option<Element<'a, Message
     Some(ui::page(ui::h1(title.to_string()), vec![], body))
 }
 
+/// QuickBooks "All sales": invoices and credit memos, plus delayed charges/credits.
+pub fn load_all_sales(app: &mut App) -> iced::Task<Message> {
+    let be = app.be.clone();
+    let g = app.page_gen;
+    let qb = app.skin == Skin::QuickBooks;
+    let (tab, q) = (app.list_tab, app.list_q.clone());
+    iced::Task::perform(async move {
+        tokio::task::spawn_blocking(move || -> Result<Value, String> {
+            let mut sales = be.call_now("docs.list", serde_json::json!({"type": "SALES", "tab": tab, "q": q, "limit": 300}))?;
+            if qb && tab == "all" {
+                let delayed = be.call_now("docs.list", serde_json::json!({"type": "DELAYED", "tab": "all", "q": q, "limit": 300}))?;
+                let mut rows = sales["rows"].as_array().cloned().unwrap_or_default();
+                rows.extend(delayed["rows"].as_array().cloned().unwrap_or_default());
+                rows.sort_by(|a, b| b["date"].as_str().cmp(&a["date"].as_str()));
+                sales["rows"] = serde_json::json!(rows);
+            }
+            Ok(sales)
+        }).await.unwrap_or_else(|e| Err(e.to_string()))
+    }, move |r| Message::Loaded(g, r))
+}
+
 /// QuickBooks "Expense transactions": bills plus money already spent from bank accounts.
 pub fn load_expenses(app: &mut App) -> iced::Task<Message> {
     let be = app.be.clone();
@@ -56,6 +77,8 @@ fn type_label(app: &App, kind: &str) -> &'static str {
     match kind {
         "EXPENSE" => if app.skin == Skin::QuickBooks { "Expense" } else { "Spend money" },
         "SALESRECEIPT_ROW" => "Sales receipt",
+        "DELAYEDCHARGE" => "Delayed Charge",
+        "DELAYEDCREDIT" => "Delayed Credit",
         "CHECK" => "Check",
         "BILLPAYMENT" => "Bill payment", "ACCREC" => app.term("invoice"), "QUOTE" => app.term("quote"), "ACCRECCREDIT" => app.term("credit_note"), "ACCPAY" => app.term("bill"),
         "ACCPAYCREDIT" => app.term("supplier_credit"), "PO" => app.term("po"), _ => "Transaction" }
@@ -139,7 +162,7 @@ pub fn docs(app: &App) -> Element<'_, Message> {
         Skin::Xero => vec![col("Number", 10), col("Ref", 10), col("To", 22), col("Date", 11), col("Due date", 11), coln("Paid", 11), coln("Due", 11), col("Status", 12)],
     };
     let rows = rows_v.iter().map(|r| {
-        let kind = if r["subtype"] == "RECEIPT" { "SALESRECEIPT_ROW" } else { st(r, "type") };
+        let kind = match st(r, "subtype") { "RECEIPT" => "SALESRECEIPT_ROW", s @ ("DELAYEDCHARGE" | "DELAYEDCREDIT") => s, _ => st(r, "type") };
         let label = vocab::status(app.skin, kind, st(r, "status"), i(&r["overdue"]) == 1);
         let msg = match kind {
             "EXPENSE" | "CHECK" => None,

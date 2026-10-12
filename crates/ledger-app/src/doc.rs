@@ -44,6 +44,9 @@ pub struct Editor {
     pub error: Option<String>,
     /// Email the document once the save succeeds ("Save and send").
     pub send_after: bool,
+    /// QuickBooks invoices: the customer's open delayed charges/credits, and those added.
+    pub delayed: Vec<Value>,
+    pub added: Vec<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -83,6 +86,8 @@ pub enum Msg {
     SaveAndSend,
     Send,
     Sent(Result<Value, String>),
+    Delayed(Result<Value, String>),
+    AddDelayed(i64),
 }
 
 /// How line amounts relate to tax.
@@ -100,11 +105,12 @@ fn div_round(n: i128, d: i128) -> i64 { let q = (n.abs() + d.abs() / 2) / d.abs(
 /// Line amount in cents from e4 quantity × e4 price.
 fn line_cents(q: i64, p: i64) -> i64 { div_round(q as i128 * p as i128, 1_000_000) }
 
-fn sales(kind: &str) -> bool { matches!(kind, "ACCREC" | "QUOTE" | "ACCRECCREDIT" | "SALESRECEIPT") }
+fn sales(kind: &str) -> bool { matches!(kind, "ACCREC" | "QUOTE" | "ACCRECCREDIT" | "SALESRECEIPT" | "DELAYEDCHARGE" | "DELAYEDCREDIT") }
+fn delayed(kind: &str) -> bool { matches!(kind, "DELAYEDCHARGE" | "DELAYEDCREDIT") }
 fn ledger_doc(kind: &str) -> bool { matches!(kind, "ACCREC" | "ACCPAY" | "ACCRECCREDIT" | "ACCPAYCREDIT") }
 
 pub fn title_for(app: &App, kind: &str) -> &'static str {
-    match kind { "SALESRECEIPT" => "Sales receipt", "ACCREC" => app.term("invoice"), "QUOTE" => app.term("quote"), "ACCRECCREDIT" => app.term("credit_note"), "ACCPAY" => app.term("bill"), "ACCPAYCREDIT" => app.term("supplier_credit"), "PO" => app.term("po"), _ => "Document" }
+    match kind { "SALESRECEIPT" => "Sales receipt", "DELAYEDCHARGE" => "Delayed charge", "DELAYEDCREDIT" => "Delayed credit", "ACCREC" => app.term("invoice"), "QUOTE" => app.term("quote"), "ACCRECCREDIT" => app.term("credit_note"), "ACCPAY" => app.term("bill"), "ACCPAYCREDIT" => app.term("supplier_credit"), "PO" => app.term("po"), _ => "Document" }
 }
 
 fn fmt_e4(v: i64) -> String {
@@ -144,12 +150,14 @@ impl Editor {
             lines: vec![Line { qty: "1".into(), ..Default::default() }, Line { qty: "1".into(), ..Default::default() }],
             terms: String::new(), busy: false, editing: true,
             pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false,
+            delayed: vec![], added: vec![],
         };
         if let Some(a) = default_account(app, kind) { for l in &mut e.lines { l.account = Some(a.clone()); l.tax = default_tax(app, Some(a.id)); } }
         e
     }
 
     fn editable(&self) -> bool {
+        if delayed(&self.kind) { return self.doc.as_ref().map(|d| d["status"] == "SENT" && self.editing).unwrap_or(true); }
         match self.doc.as_ref().and_then(|d| d["status"].as_str()) { None | Some("DRAFT") | Some("SUBMITTED") => true, Some("AUTHORISED") | Some("SENT") => self.editing, _ => false }
     }
 
@@ -187,13 +195,16 @@ impl Editor {
                 "account_id": l.account.as_ref().map(|a| a.id), "tax_rate_id": l.tax.as_ref().map(|t| t.id)}));
         }
         if lines.is_empty() { return Err("Add at least one line".into()); }
-        let kind = if self.kind == "SALESRECEIPT" { "ACCREC" } else { self.kind.as_str() };
+        let kind = match self.kind.as_str() { "SALESRECEIPT" => "ACCREC", k if delayed(k) => "QUOTE", k => k };
         let mut doc = json!({"type": kind, "date": date, "due_date": due, "reference": self.reference, "line_amount_type": self.lat, "terms": self.terms, "lines": lines, "status": status});
         if self.kind == "QUOTE" { doc["expiry_date"] = doc["due_date"].take(); }
         if self.kind == "PO" { doc["delivery_date"] = doc["due_date"].take(); }
         if !self.number.trim().is_empty() { doc["number"] = json!(self.number.trim()); }
         match &self.contact { Some(c) => doc["contact_id"] = json!(c.id), None => doc["contact_name"] = json!(self.contact_text.trim()) }
-        Ok(json!({"id": self.id, "doc": doc}))
+        let mut p = json!({"id": self.id, "doc": doc});
+        if !self.added.is_empty() { p["close_delayed"] = json!(self.added); }
+        if delayed(&self.kind) { p["credit"] = json!(self.kind == "DELAYEDCREDIT"); }
+        Ok(p)
     }
 }
 
@@ -227,9 +238,22 @@ pub fn open(app: &mut App, kind: String, id: Option<i64>) -> Task<Message> {
     }
 }
 
+/// An editor line from a saved document line (`negate` turns a delayed credit into a minus line).
+fn line_from(app: &App, taxes: &[Opt], l: &Value, negate: bool) -> Line {
+    let q = l["qty_e4"].as_i64().unwrap_or(0);
+    Line {
+        item: l["item_id"].as_i64().map(|id| Opt { id, label: format!("{} — {}", l["item_code"].as_str().unwrap_or(""), app.lk.item(id).and_then(|i| i["name"].as_str()).unwrap_or("")) }),
+        description: l["description"].as_str().unwrap_or("").to_string(),
+        qty: fmt_e4(if negate { -q } else { q }),
+        price: fmt_price(l["unit_e2"].as_i64().unwrap_or(0)),
+        account: l["account_id"].as_i64().map(|id| Opt { id, label: format!("{} {}", l["account_code"].as_str().unwrap_or(""), l["account_name"].as_str().unwrap_or("")) }),
+        tax: l["tax_rate_id"].as_i64().and_then(|id| taxes.iter().find(|t| t.id == id).cloned()),
+    }
+}
+
 fn fill_from(app: &App, e: &mut Editor, d: &Value) {
     let style = app.date_style();
-    e.kind = d["type"].as_str().unwrap_or(&e.kind).to_string();
+    e.kind = match d["subtype"].as_str() { Some(s) if delayed(s) => s, _ => d["type"].as_str().unwrap_or(&e.kind) }.to_string();
     e.contact = d["contact_id"].as_i64().map(|id| Opt { id, label: d["contact_name"].as_str().unwrap_or("").to_string() });
     e.contacts = combo_box::State::with_selection(app.lk.contact_opts(sales(&e.kind)), e.contact.as_ref());
     e.date = ui::date(d["date"].as_str().unwrap_or(""), style);
@@ -240,14 +264,7 @@ fn fill_from(app: &App, e: &mut Editor, d: &Value) {
     e.lat = d["line_amount_type"].as_str().unwrap_or("EXCLUSIVE").to_string();
     e.terms = d["terms"].as_str().unwrap_or("").to_string();
     let taxes = app.lk.tax_opts();
-    e.lines = d["lines"].as_array().cloned().unwrap_or_default().iter().map(|l| Line {
-        item: l["item_id"].as_i64().map(|id| Opt { id, label: format!("{} — {}", l["item_code"].as_str().unwrap_or(""), app.lk.item(id).and_then(|i| i["name"].as_str()).unwrap_or("")) }),
-        description: l["description"].as_str().unwrap_or("").to_string(),
-        qty: fmt_e4(l["qty_e4"].as_i64().unwrap_or(0)),
-        price: fmt_price(l["unit_e2"].as_i64().unwrap_or(0)),
-        account: l["account_id"].as_i64().map(|id| Opt { id, label: format!("{} {}", l["account_code"].as_str().unwrap_or(""), l["account_name"].as_str().unwrap_or("")) }),
-        tax: l["tax_rate_id"].as_i64().and_then(|id| taxes.iter().find(|t| t.id == id).cloned()),
-    }).collect();
+    e.lines = d["lines"].as_array().cloned().unwrap_or_default().iter().map(|l| line_from(app, &taxes, l, false)).collect();
     let due_amt = d["amount_due"].as_i64().unwrap_or(0);
     e.pay_amount = if due_amt > 0 { ui::plain(due_amt) } else { String::new() };
     e.doc = Some(d.clone());
@@ -263,10 +280,31 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::Contact(c) => {
             // Use the contact's defaults for the first line's account (QuickBooks/Xero both do this).
             e.contact_text = c.label.clone();
+            let cid = c.id;
             e.contact = Some(c);
+            // QuickBooks offers the customer's open delayed charges/credits to add to an invoice.
+            e.delayed.clear();
+            if e.kind == "ACCREC" && app.skin == Skin::QuickBooks && e.added.is_empty() {
+                app.doc = Some(e);
+                return app.be.call("docs.openDelayed", json!({"contact_id": cid}), |r| Message::Doc(Msg::Delayed(r)));
+            }
             Task::none()
         }
         Msg::ContactText(s) => { e.contact_text = s; e.contact = None; Task::none() }
+        Msg::Delayed(r) => { e.delayed = r.ok().and_then(|v| v.as_array().cloned()).unwrap_or_default(); Task::none() }
+        Msg::AddDelayed(id) => {
+            if let Some(pos) = e.delayed.iter().position(|d| d["id"].as_i64() == Some(id)) {
+                let d = e.delayed.remove(pos);
+                let credit = d["subtype"] == "DELAYEDCREDIT";
+                let taxes = app.lk.tax_opts();
+                // Drop the blank starter lines, then append the charge's lines.
+                e.lines.retain(|l| l.item.is_some() || !l.description.trim().is_empty() || parse_e4(&l.price).unwrap_or(0) != 0);
+                for l in d["lines"].as_array().cloned().unwrap_or_default() { e.lines.push(line_from(app, &taxes, &l, credit)); }
+                if e.lat == "EXCLUSIVE" { if let Some(lat) = d["line_amount_type"].as_str() { e.lat = lat.to_string(); } }
+                e.added.push(id);
+            }
+            Task::none()
+        }
         Msg::Date(s) => {
             // Keep the due date's offset (terms) when the date changes.
             if let (Some(old), Some(new), Some(due)) = (ui::to_iso(&e.date, style), ui::to_iso(&s, style), ui::to_iso(&e.due, style)) {
@@ -430,6 +468,12 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
 fn save(app: &mut App, e: &mut Editor, approve: bool, new_after: bool) -> Task<Message> {
     if e.busy { return Task::none(); }
     let status = if approve { "AUTHORISED" } else { "DRAFT" };
+    if delayed(&e.kind) {
+        return match e.payload(app, "SENT") {
+            Ok(p) => { e.busy = true; e.error = None; app.be.call("docs.saveDelayed", p, move |r| Message::Doc(Msg::Saved(r, new_after))) }
+            Err(err) => { e.error = Some(err.clone()); app.toast(err, true) }
+        };
+    }
     if e.kind == "SALESRECEIPT" {
         let Some(acc) = e.pay_account.clone() else { e.error = Some("Choose the account the money went into".into()); return app.toast("Choose the account the money went into", true) };
         return match e.payload(app, "AUTHORISED") {
@@ -472,7 +516,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         column![ui::label(contact_label), ui::link(e.contact.as_ref().map(|c| c.label.clone()).unwrap_or_default(), e.contact.as_ref().map(|c| Message::Nav(Route::Contact(c.id))).unwrap_or(Message::Noop))].spacing(8).width(Fill).into()
     };
     let date_label = match e.kind.as_str() { "ACCREC" => "Invoice date", "QUOTE" => if app.skin == Skin::QuickBooks { "Estimate date" } else { "Date" }, _ => "Date" };
-    let due_label = match e.kind.as_str() { "QUOTE" => "Expiration date", "PO" => "Delivery date", "ACCRECCREDIT" | "ACCPAYCREDIT" | "SALESRECEIPT" => "", _ if is_receipt => "", _ => "Due date" };
+    let due_label = match e.kind.as_str() { "QUOTE" => "Expiration date", "PO" => "Delivery date", "ACCRECCREDIT" | "ACCPAYCREDIT" | "SALESRECEIPT" | "DELAYEDCHARGE" | "DELAYEDCREDIT" => "", _ if is_receipt => "", _ => "Due date" };
     let date_label = if is_receipt { "Sales receipt date" } else { date_label };
     let field = |lbl: &str, ph: &str, val: &str, f: fn(String) -> Msg| -> Element<'_, Message> {
         if editable { ui::field_ph(lbl, ph, val, move |s| Message::Doc(f(s))) } else { column![ui::label(lbl.to_string()), ui::body(val.to_string())].spacing(8).width(Fill).into() }
@@ -484,7 +528,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         fields = fields.push(column![ui::label("Deposit to"), pick_list(app.lk.bank_opts(), e.pay_account.clone(), |a| Message::Doc(Msg::PayAccount(a))).padding([7, 10]).text_size(14).style(theme::pick).width(Fill)].spacing(5).width(Fill));
     }
     let mut fields2 = row![].spacing(14);
-    fields2 = fields2.push(field(if app.skin == Skin::QuickBooks { if sales(&e.kind) { "Invoice no." } else { "Bill no." } } else { "Number" }, "Auto", &e.number, Msg::Number));
+    fields2 = fields2.push(field(if app.skin == Skin::QuickBooks { if delayed(&e.kind) { "No." } else if sales(&e.kind) { "Invoice no." } else { "Bill no." } } else { "Number" }, "Auto", &e.number, Msg::Number));
     fields2 = fields2.push(field(if app.skin == Skin::QuickBooks { "Ref no. / PO" } else { "Reference" }, "", &e.reference, Msg::Reference));
     fields2 = fields2.push(column![ui::label("Amounts are"), if editable {
         Element::from(pick_list(&LATS[..], Some(LatOpt(match e.lat.as_str() { "INCLUSIVE" => "INCLUSIVE", "NOTAX" => "NOTAX", _ => "EXCLUSIVE" })), |l| Message::Doc(Msg::Lat(l))).padding([7, 10]).text_size(14).style(theme::pick).width(Fill))
@@ -572,7 +616,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
             Skin::QuickBooks => {
                 if e.doc.is_none() || status == "DRAFT" { actions.push(ui::btn("Save draft", m(Msg::Save(false)))); }
                 actions.push(ui::btn("Save and new", m(Msg::SaveAndNew)));
-                if sales(&e.kind) { actions.push(ui::btn("Save and close", m(Msg::Save(true)))); actions.push(ui::btn_primary("Save and send", m(Msg::SaveAndSend))); }
+                if delayed(&e.kind) { actions.push(ui::btn_primary("Save and close", m(Msg::Save(true)))); }
+                else if sales(&e.kind) { actions.push(ui::btn("Save and close", m(Msg::Save(true)))); actions.push(ui::btn_primary("Save and send", m(Msg::SaveAndSend))); }
                 else { actions.push(ui::btn_primary(if e.kind == "PO" { "Save" } else { "Save and close" }, m(Msg::Save(true)))); }
             }
             Skin::Xero => {
@@ -587,7 +632,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             ("PO", "AUTHORISED") => actions.push(ui::btn_primary("Copy to bill", m(Msg::Action("to_bill")))),
             _ => {}
         }
-        if status == "AUTHORISED" && e.doc.as_ref().map(|d| d["amount_paid"].as_i64().unwrap_or(0) == 0 && d["amount_credited"].as_i64().unwrap_or(0) == 0).unwrap_or(false) {
+        if (status == "AUTHORISED" || delayed(&e.kind) && status == "SENT") && e.doc.as_ref().map(|d| d["amount_paid"].as_i64().unwrap_or(0) == 0 && d["amount_credited"].as_i64().unwrap_or(0) == 0).unwrap_or(false) {
             actions.push(ui::btn("Edit", m(Msg::Edit)));
         }
         actions.push(ui::btn(if app.skin == Skin::QuickBooks { "Print or preview" } else { "Print / PDF" }, m(Msg::Print)));
@@ -608,7 +653,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             let balance = column![text(if ledger_doc(&e.kind) { if sales(&e.kind) { "BALANCE DUE" } else { "BALANCE DUE" } } else { "TOTAL" }).size(12).font(BOLD).color(k.muted), text(ui::money(if e.doc.is_some() { due_amt } else { total })).size(30).font(BOLD)]
                 .spacing(2).align_x(Alignment::End);
             let header = ui::card(column![row![column![fields].width(Fill), Space::new().width(30), balance].align_y(Alignment::Start), fields2].spacing(16));
-            column![error, header, pay_panel, table, add_line, ui::card(bottom), footer_bar(actions)].spacing(14).into()
+            column![error, header, pay_panel, add_delayed(app, e), table, add_line, ui::card(bottom), footer_bar(actions)].spacing(14).into()
         }
         Skin::Xero => {
             let header = ui::card(column![fields, fields2].spacing(14));
@@ -620,6 +665,26 @@ pub fn view(app: &App) -> Element<'_, Message> {
         row![ui::h1(title), status_chip].spacing(12).align_y(Alignment::Center),
     ].spacing(4);
     ui::page(title_el.into(), vec![], body)
+}
+
+/// QuickBooks "Add to invoice": the customer's open delayed charges and credits.
+fn add_delayed<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
+    if e.delayed.is_empty() || !e.editable() { return Space::new().into(); }
+    let k = t();
+    let mut col = column![row![icon("plus", 16.0, k.accent), text("Add to invoice").size(15).font(BOLD)].spacing(8).align_y(Alignment::Center)].spacing(8);
+    for d in &e.delayed {
+        let credit = d["subtype"] == "DELAYEDCREDIT";
+        let total = d["total"].as_i64().unwrap_or(0);
+        let desc = d["lines"][0]["description"].as_str().unwrap_or("").to_string();
+        col = col.push(row![
+            text(if credit { "Delayed Credit" } else { "Delayed Charge" }).size(14).font(BOLD).width(Length::FillPortion(14)),
+            text(app.d(d["date"].as_str().unwrap_or(""))).size(13).color(k.muted).width(Length::FillPortion(12)),
+            text(desc).size(13).width(Length::FillPortion(36)),
+            text(ui::money(if credit { -total } else { total })).size(14).width(Length::FillPortion(12)).align_x(iced::alignment::Horizontal::Right),
+            ui::btn("Add", Some(Message::Doc(Msg::AddDelayed(d["id"].as_i64().unwrap_or(0))))),
+        ].spacing(12).align_y(Alignment::Center));
+    }
+    container(col).padding([12, 16]).style(theme::accent_soft).width(Fill).into()
 }
 
 /// The heading printed on the document.

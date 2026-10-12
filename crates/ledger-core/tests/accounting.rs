@@ -462,6 +462,32 @@ fn account_detail_types_and_auto_numbers() {
 }
 
 #[test]
+fn delayed_charges_and_credits() {
+    let l = org();
+    let sales = acct(&l, "200");
+    let doc = |price: &str| DocInput { contact_name: Some("Acme".into()), date: "2026-07-01".into(), line_amount_type: Some("NOTAX".into()), lines: vec![line(sales, None, "1", price)], ..Default::default() };
+    let charge = l.save_delayed(None, &doc("300"), false).unwrap();
+    let credit = l.save_delayed(None, &doc("50"), true).unwrap();
+    assert_eq!(l.ledger_imbalance().unwrap(), 0);
+    assert_eq!(bal(&l, sales), 0, "delayed charges post nothing");
+    let contact = l.get_document(charge).unwrap()["contact_id"].as_i64().unwrap();
+    assert_eq!(l.open_delayed(contact).unwrap().len(), 2);
+    assert_eq!(l.list_documents("QUOTE", "all", "", None, 50, 0).unwrap()["rows"].as_array().unwrap().len(), 0, "not listed as quotes");
+    assert_eq!(l.list_documents("DELAYED", "all", "", None, 50, 0).unwrap()["rows"].as_array().unwrap().len(), 2);
+    // Invoice with the charge and the credit added (credit as a negative line).
+    let inv_input = DocInput { kind: "ACCREC".into(), contact_id: Some(contact), date: "2026-07-31".into(), line_amount_type: Some("NOTAX".into()),
+        lines: vec![line(sales, None, "1", "300"), line(sales, None, "-1", "50")], status: Some("AUTHORISED".into()), ..Default::default() };
+    let inv = l.save_invoice_with_delayed(None, &inv_input, &[charge, credit]).unwrap();
+    assert_eq!(l.get_document(inv).unwrap()["total"], 25000);
+    assert!(l.open_delayed(contact).unwrap().is_empty(), "both closed");
+    assert_eq!(l.get_document(charge).unwrap()["status"], "INVOICED");
+    assert!(l.save_invoice_with_delayed(None, &inv_input, &[charge]).is_err(), "can't be invoiced twice");
+    assert_eq!(l.list_documents("ACCREC", "all", "", None, 50, 0).unwrap()["rows"].as_array().unwrap().len(), 1, "the failed save left nothing behind");
+    assert!(l.save_delayed(Some(charge), &doc("1"), false).is_err(), "closed ones can't be edited");
+    assert_invariants(&l);
+}
+
+#[test]
 fn reports_add_up() {
     let l = org();
     let sales = acct(&l, "200");
