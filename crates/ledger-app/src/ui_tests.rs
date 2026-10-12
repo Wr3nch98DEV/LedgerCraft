@@ -873,3 +873,22 @@ fn desktop_money_forms() {
     }
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_check_register() {
+    let (mut app, dir) = desktop_app("register");
+    let _ = app.update(Message::Nav(Route::Register(None)));
+    let banks = app.be.call_now("accounts.bank", json!({})).unwrap();
+    let acc = banks[0]["id"].as_i64().unwrap();
+    let rows = app.be.call_now("bank.transactions", json!({"id": acc, "limit": 1000})).unwrap();
+    let bal = banks[0]["ledger_balance_fx"].as_i64().unwrap();
+    app.data = Some(json!({"banks": banks, "account": acc, "balance": bal, "rows": rows}));
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["PAYMENT", "DEPOSIT", "BALANCE", "ENDING BALANCE", "Go to"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+        assert!(ui.find(crate::ui::money(bal).as_str()).is_ok(), "top row shows the ledger balance");
+    }
+    assert_eq!(crate::desktop::title(&app, &Route::Register(None)), banks[0]["name"].as_str().unwrap(), "window titled with the account");
+    let _ = std::fs::remove_dir_all(dir);
+}

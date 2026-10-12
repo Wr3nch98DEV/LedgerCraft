@@ -8,7 +8,7 @@ use crate::icons::icon;
 use crate::theme::{self, t};
 use crate::ui::{self, BOLD};
 use crate::{doc, forms, payments};
-use iced::widget::{Space, button, column, container, mouse_area, opaque, row, scrollable, stack, text, text_input};
+use iced::widget::{Space, button, column, container, mouse_area, opaque, pick_list, row, scrollable, stack, text, text_input};
 use iced::{Alignment, Element, Fill, Length, Padding, Task};
 use serde_json::Value;
 
@@ -151,6 +151,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::Report(k) => crate::reports::name(app.skin, k, "Report"),
         Route::Settings => "Preferences".into(),
         Route::Reconcile => "Reconcile".into(),
+        Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
             "ACCREC" => "Create Invoices", "QUOTE" => "Create Estimates", "ACCRECCREDIT" => "Create Credit Memos/Refunds", "SALESRECEIPT" => "Enter Sales Receipts",
             "ACCPAY" => "Enter Bills", "ACCPAYCREDIT" => "Enter Bills (Credit)", "PO" => "Create Purchase Orders", "DELAYEDCHARGE" | "DELAYEDCREDIT" => "Enter Statement Charges", _ => "Transaction",
@@ -215,7 +216,7 @@ fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Messag
         "Employees" => vec![e("Employee Center", "", nav(Route::Payroll)), e("Payroll Center", "", nav(Route::Payroll)), sep(), e("Pay Employees", "", nav(Route::Payroll)),
             e("Pay Liabilities", "", None), e("Process Payroll Forms", "", None), sep(), e("Enter Time", "", None)],
         "Banking" => vec![e("Write Checks", "Ctrl+W", nav(Route::Check(None))), e("Order Checks & Envelopes", "", None), e("Enter Credit Card Charges", "", nav(Route::Spend(None))), sep(),
-            e("Use Register", "Ctrl+R", nav(Route::Banking(None))), e("Make Deposits", "", nav(Route::Deposit)), e("Transfer Funds", "", nav(Route::Transfer)), e("Reconcile", "", nav(Route::Reconcile)),
+            e("Use Register", "Ctrl+R", nav(Route::Register(None))), e("Make Deposits", "", nav(Route::Deposit)), e("Transfer Funds", "", nav(Route::Transfer)), e("Reconcile", "", nav(Route::Reconcile)),
             sep(), e("Bank Feeds Center", "", nav(Route::Banking(None)))],
         "Reports" => vec![e("Report Center", "", nav(Route::Reports)), e("Memorized Reports", "", None), e("Company Snapshot", "", Some(Message::Desk(Msg::Insights(true)))), sep(),
             e("#Company & Financial", "", None), e("Profit & Loss Standard", "", rep("profit-and-loss")), e("Balance Sheet Standard", "", rep("balance-sheet")), e("Statement of Cash Flows", "", rep("cash-flow-statement")),
@@ -377,6 +378,61 @@ pub fn frame<'a>(app: &'a App, content: Element<'a, Message>) -> Element<'a, Mes
     layers.into()
 }
 
+// ---------------- Register ----------------
+
+/// A bank account register: every transaction with a running balance, newest first.
+pub fn register(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let banks: Vec<crate::app::Opt> = d["banks"].as_array().cloned().unwrap_or_default().iter()
+        .map(|b| crate::app::Opt { id: b["id"].as_i64().unwrap_or(0), label: b["name"].as_str().unwrap_or("").to_string() }).collect();
+    let sel = banks.iter().find(|b| Some(b.id) == d["account"].as_i64()).cloned();
+    let cols: Vec<(&str, u16, bool)> = vec![("Date", 10, false), ("Number", 9, false), ("Payee", 20, false), ("Memo", 22, false), ("Payment", 11, true), ("✓", 3, false), ("Deposit", 11, true), ("Balance", 12, true)];
+    let head = container(row(cols.iter().map(|(h, w, r)| {
+        let tx = text(h.to_uppercase()).size(11).font(BOLD).color(k.muted);
+        container(if *r { tx.align_x(iced::alignment::Horizontal::Right).width(Fill) } else { tx.width(Fill) }).width(Length::FillPortion(*w)).into()
+    })).spacing(6).padding([6, 10])).style(theme::header_row).width(Fill);
+    let mut list = column![].spacing(0);
+    let mut bal = d["balance"].as_i64().unwrap_or(0);
+    for (n, r) in d["rows"].as_array().cloned().unwrap_or_default().iter().enumerate() {
+        let amt = r["amount"].as_i64().unwrap_or(0);
+        let desc = r["description"].as_str().unwrap_or("");
+        let number = if let Some(no) = desc.strip_prefix("Check ") { no.to_string() } else { r["reference"].as_str().unwrap_or("").to_string() };
+        let kind = match r["kind"].as_str().unwrap_or("") { "payment" if amt > 0 => "PMT", "payment" => "BILLPMT", "deposit" => "DEP", "transfer_from" | "transfer_to" => "TRANSFR", _ if desc.starts_with("Check") => "CHK", _ if amt > 0 => "DEP", _ => "EXP" };
+        let cells: Vec<Element<Message>> = vec![
+            column![ui::cell(app.d(r["date"].as_str().unwrap_or(""))), text(kind).size(10).color(k.faint)].spacing(0).into(),
+            ui::cell_muted(number),
+            ui::cell(r["contact"].as_str().unwrap_or("").to_string()),
+            ui::cell_muted(desc.to_string()),
+            if amt < 0 { ui::cell_money(-amt) } else { Space::new().into() },
+            text(if r["reconciled"].as_i64() == Some(1) { "✓" } else { "" }).size(13).color(k.ok).into(),
+            if amt > 0 { ui::cell_money(amt) } else { Space::new().into() },
+            text(ui::money(bal)).size(13).color(if bal < 0 { k.bad } else { k.text }).align_x(iced::alignment::Horizontal::Right).width(Fill).into(),
+        ];
+        bal -= amt;
+        let msg = r["document_id"].as_i64().map(|id| Message::Nav(Route::Doc { kind: if amt > 0 { "ACCREC".into() } else { "ACCPAY".into() }, id: Some(id) }));
+        let rr = row(cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into())).spacing(6).align_y(Alignment::Center).padding([4, 10]);
+        let shade = n % 2 == 1;
+        list = list.push(button(rr).padding(0).width(Fill).on_press_maybe(msg)
+            .style(move |_, s| button::Style { background: Some(iced::Background::Color(if matches!(s, button::Status::Hovered) { k.hover } else if shade { k.panel2 } else { k.panel })),
+                text_color: k.text, border: iced::Border::default(), shadow: Default::default(), snap: true }));
+    }
+    let top = row![
+        text("Go to").size(13).color(k.muted),
+        pick_list(banks, sel, |b: crate::app::Opt| Message::Nav(Route::Register(Some(b.id)))).padding([5, 7]).text_size(13).style(theme::pick).width(300),
+        ui::hspace(),
+        ui::btn("Write Checks", nav(Route::Check(d["account"].as_i64()))),
+        ui::btn("Make Deposits", nav(Route::Deposit)),
+        ui::btn("Reconcile", nav(Route::Reconcile)),
+    ].spacing(10).align_y(Alignment::Center);
+    let ending = row![ui::hspace(), text("ENDING BALANCE").size(12).font(BOLD).color(k.info), text(ui::money(d["balance"].as_i64().unwrap_or(0))).size(15).font(BOLD)].spacing(14).align_y(Alignment::Center);
+    column![
+        top,
+        container(column![head, scrollable(list).style(theme::scroll).height(Fill)]).style(theme::card).width(Fill).height(Fill).clip(true),
+        ending,
+    ].spacing(10).padding(12).height(Fill).into()
+}
+
 // ---------------- Customer / Vendor Center ----------------
 
 fn type_name(kind: &str, sub: &str) -> &'static str {
@@ -514,7 +570,7 @@ pub fn home(app: &App) -> Element<'_, Message> {
     ]);
     let banking = band("BANKING", vec![
         row![node("deposit", "Record Deposits", nav(Route::Deposit)), node("reconcile", "Reconcile", nav(Route::Reconcile))].into(),
-        row![node("check-write", "Write Checks", nav(Route::Check(None))), node("register", "Check Register", nav(Route::Banking(None)))].into(),
+        row![node("check-write", "Write Checks", nav(Route::Check(None))), node("register", "Check Register", nav(Route::Register(None)))].into(),
         row![node("card", "Enter Credit Card Charges", nav(Route::Spend(None))), node("swap", "Transfer Funds", nav(Route::Transfer))].into(),
     ]);
     let body = row![

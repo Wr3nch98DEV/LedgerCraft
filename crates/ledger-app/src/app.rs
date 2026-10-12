@@ -46,6 +46,8 @@ pub enum Route {
     Check(Option<i64>),
     Deposit,
     Reconcile,
+    /// Bank account register (QuickBooks Desktop "Use Register").
+    Register(Option<i64>),
     NewProduct,
     NewAccount,
     Journal,
@@ -188,7 +190,7 @@ pub fn parse_route(s: &str) -> Option<Route> {
         "customers" => Route::Customers, "products" => Route::Products, "expenses" => Route::Expenses, "bills" => Route::Bills, "vendors" => Route::Vendors,
         "pos" => Route::PurchaseOrders, "contacts" => Route::Contacts, "contact" => Route::Contact(id(1)?), "banking" => Route::Banking(id(1)), "chart" => Route::Chart,
         "reports" => Route::Reports, "report" => Route::Report(parts.get(1)?.to_string()), "settings" => Route::Settings, "setup" => Route::Setup,
-        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
+        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
         _ => return None,
     })
 }
@@ -417,6 +419,19 @@ impl App {
             Route::Check(acc) => payments::open_spend(self, acc, true),
             Route::Deposit => payments::open_deposit(self),
             Route::Reconcile => crate::reconcile::load(self),
+            Route::Register(acc) => {
+                let be = self.be.clone();
+                Task::perform(async move {
+                    tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                        let banks: Vec<Value> = be.call_now("accounts.bank", json!({}))?.as_array().cloned().unwrap_or_default().into_iter().filter(|b| b["status"] == "ACTIVE").collect();
+                        let acc = acc.or_else(|| banks.first().and_then(|b| b["id"].as_i64()));
+                        let Some(acc) = acc else { return Ok(json!({"banks": banks, "rows": []})) };
+                        let rows = be.call_now("bank.transactions", json!({"id": acc, "limit": 1000}))?;
+                        let bal = banks.iter().find(|b| b["id"].as_i64() == Some(acc)).and_then(|b| b["ledger_balance_fx"].as_i64()).unwrap_or(0);
+                        Ok(json!({"banks": banks, "account": acc, "balance": bal, "rows": rows}))
+                    }).await.unwrap_or_else(|e| Err(e.to_string()))
+                }, move |r| Message::Loaded(g, r))
+            }
             Route::NewContact(_) | Route::NewProduct | Route::NewAccount | Route::Journal | Route::Transfer => forms::open(self),
             Route::Payroll | Route::PayRun(_) | Route::Taxes | Route::TaxReturn(_) | Route::Projects | Route::Mileage => people::load(self),
             Route::Setup => setup::load(self),
@@ -558,7 +573,7 @@ impl App {
                 // QuickBooks Desktop shortcuts.
                 keyboard::Key::Character(c) if modifiers.command() && self.desktop() && self.session.is_some() => {
                     let r = match c { "i" => Some(Route::Doc { kind: "ACCREC".into(), id: None }), "w" => Some(Route::Check(None)), "a" => Some(Route::Chart),
-                        "j" => Some(Route::Customers), "r" => Some(Route::Banking(None)), "e" => Some(Route::Doc { kind: "ACCPAY".into(), id: None }), _ => None };
+                        "j" => Some(Route::Customers), "r" => Some(Route::Register(None)), "e" => Some(Route::Doc { kind: "ACCPAY".into(), id: None }), _ => None };
                     if let Some(r) = r { return self.go(r); }
                 }
                 _ => {}
