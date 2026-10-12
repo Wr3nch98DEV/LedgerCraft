@@ -662,3 +662,55 @@ fn track_vendor_for_1099() {
     }
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn sales_tax_rate_by_agency() {
+    use crate::people::Msg as P;
+    let (mut app, dir) = demo_app("agency", Skin::QuickBooks);
+    let _ = app.update(Message::Nav(Route::Taxes));
+    let mut v = app.be.call_now("taxReturns.list", json!({})).unwrap();
+    v["agencies"] = app.be.call_now("agencies.list", json!({})).unwrap();
+    app.data = Some(v);
+    let msgs = click(&app, "Add sales tax rate");
+    assert!(matches!(msgs.as_slice(), [Message::People(P::AddRate)]), "{msgs:?}");
+    let _ = app.update(Message::People(P::AddRate));
+    let _ = app.update(Message::People(P::PartAgency(0, "California CDTFA".into())));
+    let _ = app.update(Message::People(P::PartRate(0, "6".into())));
+    let _ = app.update(Message::People(P::AddPart));
+    let _ = app.update(Message::People(P::PartAgency(1, "LA County".into())));
+    let _ = app.update(Message::People(P::PartRate(1, "abc".into())));
+    let _ = app.update(Message::People(P::SaveRate));
+    assert!(app.toasts.iter().any(|t| t.2) && !app.people.busy, "bad rate is flagged");
+    let _ = app.update(Message::People(P::PartRate(1, "1.25".into())));
+    let msgs = click(&app, "Save");
+    assert!(matches!(msgs.as_slice(), [Message::People(P::SaveRate)]), "{msgs:?}");
+    let _ = app.update(Message::People(P::SaveRate));
+    assert!(app.people.busy, "sent to the engine");
+    // What the form sends:
+    let r = app.be.call_now("taxRates.createSales", json!({"name": "Sales Tax 7.25%", "parts": [{"agency": "California CDTFA", "name": "California CDTFA", "rate_bp": 600}, {"agency": "LA County", "name": "LA County", "rate_bp": 125}]})).unwrap();
+    let _ = app.update(Message::People(P::Created(Ok(r), "rate")));
+    assert!(!app.people.adding_rate);
+    let ag = app.be.call_now("agencies.list", json!({})).unwrap();
+    assert_eq!(ag.as_array().unwrap().len(), 2);
+    let rates = app.be.call_now("taxRates.list", json!({})).unwrap();
+    assert!(rates.as_array().unwrap().iter().any(|t| t["name"] == "Sales Tax 7.25%" && t["rate_bp"] == 725));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Renders the US Taxes screen with agencies to `%TEMP%\lc-agencies-wgpu.png` (run with --ignored).
+#[test]
+#[ignore]
+fn render_agencies() {
+    let (mut app, dir) = demo_app("agency-shot", Skin::QuickBooks);
+    app.be.call_now("taxRates.createSales", json!({"name": "Los Angeles 7.25%", "parts": [{"agency": "California CDTFA", "name": "State", "rate_bp": 600}, {"agency": "LA County", "name": "County", "rate_bp": 125}]})).unwrap();
+    let _ = app.update(Message::Nav(Route::Taxes));
+    let mut v = app.be.call_now("taxReturns.list", json!({})).unwrap();
+    v["agencies"] = app.be.call_now("agencies.list", json!({})).unwrap();
+    app.data = Some(v);
+    let _ = app.update(Message::People(crate::people::Msg::AddRate));
+    let _ = std::fs::remove_file(std::env::temp_dir().join("lc-agencies-wgpu.png"));
+    let _g = sim_lock();
+    let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
+    ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join("lc-agencies.png")).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}

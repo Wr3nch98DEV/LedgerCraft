@@ -18,6 +18,7 @@ pub mod tax;
 pub mod contacts;
 pub mod items;
 pub mod deposits;
+pub mod agencies;
 pub mod us1099;
 pub mod delayed;
 pub mod documents;

@@ -219,6 +219,15 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
             let delayed: Vec<i64> = if p["close_delayed"].is_array() { de(&p["close_delayed"])? } else { vec![] };
             Ok(json!({"id": l.save_invoice_with_delayed(oi(p, "id"), &input, &delayed)?}))
         }
+        "agencies.list" => { need("reports:read")?; Ok(json!(l.list_agencies()?)) }
+        "agencies.create" => { need("accounting:write")?; Ok(json!({"id": l.agency(s(p, "name"), p["frequency"].as_str())?})) }
+        "agencies.setFrequency" => { need("accounting:write")?; l.set_agency_frequency(id(p)?, s(p, "frequency"))?; ok() }
+        "taxRates.createSales" => {
+            need("accounting:write")?;
+            let parts: Vec<(String, String, i64)> = p["parts"].as_array().cloned().unwrap_or_default().iter()
+                .map(|x| (x["agency"].as_str().unwrap_or("").to_string(), x["name"].as_str().unwrap_or("").to_string(), x["rate_bp"].as_i64().unwrap_or(0))).collect();
+            Ok(json!({"id": l.create_sales_tax_rate(s(p, "name"), &parts)?}))
+        }
         "contacts.set1099" => { need("contacts:write")?; l.set_track_1099(id(p)?, p["on"].as_bool().unwrap_or(true))?; ok() }
         "docs.saveDelayed" => { need("sales:write")?; Ok(json!({"id": l.save_delayed(oi(p, "id"), &de::<DocInput>(&p["doc"])?, p["credit"].as_bool().unwrap_or(false))?})) }
         "docs.openDelayed" => { need("sales:read")?; Ok(json!(l.open_delayed(i(p, "contact_id")?)?)) }

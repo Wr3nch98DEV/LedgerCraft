@@ -515,6 +515,31 @@ fn contractor_1099_summary() {
 }
 
 #[test]
+fn sales_tax_by_agency() {
+    let mut l = Ledger::open_in_memory().unwrap();
+    l.setup_org(&SetupInput { org_name: "US Co".into(), country: "US".into(), base_currency: None, fy_end_month: None, tax_basis: None,
+        tax_registered: Some(true), tax_number: None, tax_period: None, industry: None, owner_name: None, owner_email: None, conversion_date: None }).unwrap();
+    let sales = acct(&l, "200");
+    // 7.25% = California 6% (state) + Los Angeles County 1.25%.
+    let rate = l.create_sales_tax_rate("Los Angeles 7.25%", &[("California CDTFA".into(), "State".into(), 600), ("LA County".into(), "County".into(), 125)]).unwrap();
+    assert_eq!(l.agency("california cdtfa", None).unwrap(), l.agency("California CDTFA", None).unwrap(), "agencies are matched by name");
+    invoice(&l, "2026-07-01", vec![line(sales, Some(rate), "1", "1000")], "AUTHORISED");
+    invoice(&l, "2026-07-02", vec![line(sales, Some(rate), "1", "333")], "AUTHORISED");
+    let rows = l.tax_by_agency("2026-07-01", "2026-07-31", false).unwrap();
+    let get = |n: &str| rows.iter().find(|r| r["name"] == n).unwrap()["tax"].as_i64().unwrap();
+    let total_tax = 7250 + 2414; // 72.50 + 24.14 (333 × 7.25% = 24.1425)
+    assert_eq!(get("California CDTFA") + get("LA County"), total_tax, "split adds back up exactly");
+    assert_eq!(get("California CDTFA"), 6000 + 1998);
+    let (f, t) = l.agency_period("QUARTERLY", "2026-08-15").unwrap();
+    assert_eq!((f.as_str(), t.as_str()), ("2026-07-01", "2026-09-30"));
+    let (f, t) = l.agency_period("MONTHLY", "2026-02-10").unwrap();
+    assert_eq!((f.as_str(), t.as_str()), ("2026-02-01", "2026-02-28"));
+    let r = l.report_tax_by_agency(&ReportParams { from: Some("2026-07-01".into()), to: Some("2026-07-31".into()), ..Default::default() }).unwrap();
+    assert_eq!(r["sections"][0]["total"]["values"][1], total_tax);
+    assert_eq!(l.list_agencies().unwrap().len(), 2);
+}
+
+#[test]
 fn reports_add_up() {
     let l = org();
     let sales = acct(&l, "200");

@@ -42,6 +42,7 @@ pub const CATALOGUE: &[(&str, &str, &str, &str)] = &[
     ("fx-gains-losses", "Foreign Currency Gains and Losses", "Accounting", "Realised and unrealised currency gains"),
     ("income-by-contact", "Income by Contact", "Receivables", "Income per contact (cash and accrual)"),
     ("contractor-1099", "1099 Contractor Summary", "Payables", "Payments to vendors tracked for 1099s (US)"),
+    ("sales-tax-by-agency", "Sales Tax Liability by Agency", "Tax", "Taxable sales and tax collected per sales tax agency (US)"),
 ];
 
 /// Statement of cash flows, indirect method.

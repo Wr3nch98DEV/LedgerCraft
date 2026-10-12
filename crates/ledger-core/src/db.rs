@@ -11,6 +11,7 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
     ("v6_tickoff_reconcile", include_str!("schema_v6.sql")),
     ("v7_account_detail_types", include_str!("schema_v7.sql")),
     ("v8_1099_tracking", include_str!("schema_v8.sql")),
+    ("v9_sales_tax_agencies", include_str!("schema_v9.sql")),
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

@@ -17,10 +17,19 @@ pub enum Msg {
     PrepareReturn,
     FileReturn(i64),
     InvoiceProject(i64),
+    /// US sales tax: new rate split across agencies.
+    AddRate, RateName(String), PartAgency(usize, String), PartRate(usize, String), AddPart, SaveRate, CancelRate,
 }
 
 #[derive(Default)]
-pub struct State { pub bank: Option<Opt>, pub busy: bool }
+pub struct State {
+    pub bank: Option<Opt>,
+    pub busy: bool,
+    /// New sales tax rate form: name and (agency, rate %) parts.
+    pub adding_rate: bool,
+    pub rate_name: String,
+    pub parts: Vec<(String, String)>,
+}
 
 fn i(v: &Value) -> i64 { v.as_i64().unwrap_or(0) }
 
@@ -34,7 +43,11 @@ pub fn load(app: &mut App) -> Task<Message> {
             Ok(match route {
                 Route::Payroll => json!({"employees": be.call_now("payroll.employees", json!({}))?, "runs": be.call_now("payroll.payRuns", json!({}))?, "settings": be.call_now("payroll.settings", json!({}))?}),
                 Route::PayRun(id) => be.call_now("payroll.payRun", json!({"id": id}))?,
-                Route::Taxes => be.call_now("taxReturns.list", json!({}))?,
+                Route::Taxes => {
+                    let mut v = be.call_now("taxReturns.list", json!({}))?;
+                    if let Ok(a) = be.call_now("agencies.list", json!({})) { v["agencies"] = a; }
+                    v
+                }
                 Route::TaxReturn(id) => be.call_now("taxReturns.get", json!({"id": id}))?,
                 Route::Projects => be.call_now("projects.list", json!({}))?,
                 Route::Mileage => be.call_now("receipts.list", json!({}))?,
@@ -64,7 +77,8 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                         "filed" => app.route.clone(),
                         _ => app.route.clone(),
                     };
-                    let msg = match what { "project_invoice" => "Draft invoice created from the project's unbilled work", "run" => "Pay run created — check it, then submit", "posted" => "Payroll submitted and posted", "deleted" => "Pay run deleted", "return" => "Return prepared", "filed" => "Marked as filed", _ => "Done" };
+                    if what == "rate" { app.people.adding_rate = false; }
+                    let msg = match what { "rate" => "Sales tax rate added", "project_invoice" => "Draft invoice created from the project's unbilled work", "run" => "Pay run created — check it, then submit", "posted" => "Payroll submitted and posted", "deleted" => "Pay run deleted", "return" => "Return prepared", "filed" => "Marked as filed", _ => "Done" };
                     let t1 = app.toast(msg, false);
                     if next == app.route { return Task::batch([t1, app.load()]); }
                     Task::batch([t1, app.go(next)])
@@ -73,6 +87,27 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }
         }
         Msg::Bank(b) => { app.people.bank = Some(b); Task::none() }
+        Msg::AddRate => { app.people.adding_rate = true; app.people.rate_name.clear(); app.people.parts = vec![(String::new(), String::new())]; Task::none() }
+        Msg::CancelRate => { app.people.adding_rate = false; Task::none() }
+        Msg::RateName(v) => { app.people.rate_name = v; Task::none() }
+        Msg::PartAgency(n, v) => { if let Some(p) = app.people.parts.get_mut(n) { p.0 = v; } Task::none() }
+        Msg::PartRate(n, v) => { if let Some(p) = app.people.parts.get_mut(n) { p.1 = v; } Task::none() }
+        Msg::AddPart => { if app.people.parts.len() < 5 { app.people.parts.push((String::new(), String::new())); } Task::none() }
+        Msg::SaveRate => {
+            let st = &app.people;
+            let mut parts = vec![];
+            for (agency, rate) in st.parts.iter().filter(|p| !p.0.trim().is_empty() || !p.1.trim().is_empty()) {
+                if agency.trim().is_empty() { return app.toast("Enter the agency for each rate", true); }
+                // Rates are typed as percentages ("6", "1.25") and stored in basis points.
+                let Some(bp) = ui::parse_money(rate).filter(|bp| *bp > 0 && *bp < 10000) else { return app.toast(format!("Check the rate for {agency}"), true) };
+                parts.push(json!({"agency": agency.trim(), "name": agency.trim(), "rate_bp": bp}));
+            }
+            if parts.is_empty() { return app.toast("Add an agency and its rate", true); }
+            let total: i64 = parts.iter().map(|p| p["rate_bp"].as_i64().unwrap_or(0)).sum();
+            let name = if st.rate_name.trim().is_empty() { format!("Sales Tax {}%", ui::plain(total).trim_end_matches('0').trim_end_matches('.')) } else { st.rate_name.trim().to_string() };
+            app.people.busy = true;
+            app.be.call("taxRates.createSales", json!({"name": name, "parts": parts}), |r| Message::People(Msg::Created(r, "rate")))
+        }
         Msg::Submit(id) => {
             app.people.busy = true;
             app.be.call("payroll.post", json!({"id": id, "bank_account_id": app.people.bank.as_ref().map(|b| b.id)}), |r| Message::People(Msg::Created(r, "posted")))
@@ -171,8 +206,44 @@ pub fn taxes(app: &App) -> Element<'_, Message> {
     ui::page(ui::h1(title), vec![ui::btn("Liability report", Some(Message::Nav(Route::Report("tax-reconciliation".into())))), ui::btn_primary("Prepare return", Some(Message::People(Msg::PrepareReturn)))], column![
         ui::muted(next),
         ui::table(&[col("Return", 30), col("Period", 30), coln("Amount", 16), col("Status", 12)], rows, "No returns yet — prepare your first one."),
+        agencies(app, d),
         ui::muted("LedgerCraft calculates the figures; lodging/filing with the tax office is done by you (direct e-filing needs government developer registration)."),
     ].spacing(14).into())
+}
+
+/// US sales tax agencies with the current period's collected tax, and the new-rate form.
+fn agencies<'a>(app: &'a App, d: &Value) -> Element<'a, Message> {
+    if app.country() != "US" { return Space::new().into(); }
+    let freq = |f: &str| match f { "MONTHLY" => "Monthly", "ANNUALLY" => "Annually", _ => "Quarterly" };
+    let rows = d["agencies"].as_array().cloned().unwrap_or_default().iter().map(|a| {
+        let rates: Vec<String> = a["rates"].as_array().cloned().unwrap_or_default().iter().map(|r| format!("{} ({}%)", r["name"].as_str().unwrap_or(""), ui::plain(i(&r["rate_bp"])))).collect();
+        (vec![
+            ui::cell(a["name"].as_str().unwrap_or("").to_string()),
+            ui::cell_muted(freq(a["frequency"].as_str().unwrap_or(""))),
+            ui::cell(format!("{} – {}", app.d(a["period_from"].as_str().unwrap_or("")), app.d(a["period_to"].as_str().unwrap_or("")))),
+            ui::cell_muted(rates.join(", ")),
+            ui::cell_money(i(&a["tax"])),
+        ], None)
+    }).collect();
+    let st = &app.people;
+    let mut col_ = column![row![ui::h2("Sales tax agencies"), ui::hspace(),
+        ui::btn("Agency report", Some(Message::Nav(Route::Report("sales-tax-by-agency".into())))),
+        if st.adding_rate { Space::new().into() } else { ui::btn_primary("Add sales tax rate", Some(Message::People(Msg::AddRate))) }].spacing(8).align_y(Alignment::Center)].spacing(10);
+    if st.adding_rate {
+        let mut form = column![ui::field_ph("Rate name", "e.g. Los Angeles 9.5% (optional)", &st.rate_name, |v| Message::People(Msg::RateName(v)))].spacing(10);
+        for (n, (agency, rate)) in st.parts.iter().enumerate() {
+            form = form.push(row![
+                ui::field_ph(if n == 0 { "Agency" } else { "" }, "e.g. California Department of Tax and Fee Administration", agency, move |v| Message::People(Msg::PartAgency(n, v))),
+                iced::widget::container(ui::field_ph(if n == 0 { "Rate %" } else { "" }, "6", rate, move |v| Message::People(Msg::PartRate(n, v)))).width(140),
+            ].spacing(12));
+        }
+        form = form.push(row![ui::btn("Add another agency", Some(Message::People(Msg::AddPart))), ui::hspace(), ui::btn("Cancel", Some(Message::People(Msg::CancelRate))),
+            ui::btn_primary("Save", if st.busy { None } else { Some(Message::People(Msg::SaveRate)) })].spacing(8));
+        col_ = col_.push(container(form).padding(14).style(theme::soft).width(Fill));
+    }
+    col_ = col_.push(ui::table(&[col("Agency", 26), col("Filing", 10), col("Current period", 20), col("Rates", 28), coln("Collected so far", 14)], rows,
+        "No agencies yet — add a sales tax rate to set one up."));
+    col_.into()
 }
 
 pub fn tax_return(app: &App) -> Element<'_, Message> {
