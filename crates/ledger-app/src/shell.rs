@@ -78,6 +78,8 @@ fn page(app: &App) -> Element<'_, Message> {
     match &app.route {
         Route::Dashboard if app.desktop() => crate::desktop::home(app),
         Route::Dashboard => dashboard::view(app),
+        Route::AllSales | Route::Invoices if app.desktop() => crate::desktop::tracker(app, true),
+        Route::Bills | Route::Expenses if app.desktop() => crate::desktop::tracker(app, false),
         Route::AllSales | Route::Invoices | Route::Quotes | Route::CreditNotes | Route::Bills | Route::Expenses | Route::PurchaseOrders => lists::docs(app),
         Route::Customers | Route::Contacts if app.desktop() => crate::desktop::center(app, true),
         Route::Vendors if app.desktop() => crate::desktop::center(app, false),

@@ -386,6 +386,8 @@ impl App {
         let call = |m: &str, p: Value| self.be.call(m, p, move |r| Message::Loaded(g, r));
         match self.route.clone() {
             Route::Dashboard => crate::dashboard::load(self),
+            Route::AllSales | Route::Invoices if self.desktop() => crate::desktop::load_tracker(self, true),
+            Route::Bills | Route::Expenses if self.desktop() => crate::desktop::load_tracker(self, false),
             Route::AllSales => crate::lists::load_all_sales(self),
             Route::Invoices => call("docs.list", json!({"type": "ACCREC", "tab": self.list_tab, "q": self.list_q, "limit": 300})),
             Route::Quotes => call("docs.list", json!({"type": "QUOTE", "tab": self.list_tab, "q": self.list_q, "limit": 300})),

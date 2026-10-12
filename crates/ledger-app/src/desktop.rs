@@ -37,10 +37,12 @@ pub struct State {
     pub detail: Option<Value>,
     /// Report Center category.
     pub report_cat: Option<&'static str>,
+    /// Income/Bill Tracker: which summary box is selected ("all" when none).
+    pub tracker: &'static str,
 }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str) }
 
 impl App {
     /// Keep the current screen's unsaved state with its window.
@@ -118,6 +120,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, move |r| Message::Desk(Msg::Detail(id, r)))
         }
         Msg::ReportCat(c) => { app.desk.report_cat = Some(c); Task::none() }
+        Msg::Tracker(f) => { app.desk.tracker = if app.desk.tracker == f { "all" } else { f }; Task::none() }
         Msg::Detail(id, r) => {
             if app.desk.sel == Some(id) { app.desk.detail = r.ok(); }
             Task::none()
@@ -389,6 +392,109 @@ pub fn frame<'a>(app: &'a App, content: Element<'a, Message>) -> Element<'a, Mes
     }
     layers.into()
 }
+
+// ---------------- Income / Bill Tracker ----------------
+
+/// Everything the trackers show: sales (or purchases) with their open estimates (or POs).
+pub fn load_tracker(app: &mut App, sales: bool) -> Task<Message> {
+    let be = app.be.clone();
+    let g = app.page_gen;
+    Task::perform(async move {
+        tokio::task::spawn_blocking(move || -> Result<Value, String> {
+            let kinds: &[&str] = if sales { &["SALES", "QUOTE", "DELAYED"] } else { &["ACCPAY", "ACCPAYCREDIT", "PO"] };
+            let mut rows = vec![];
+            for k in kinds { rows.extend(be.call_now("docs.list", serde_json::json!({"type": k, "limit": 1000}))?["rows"].as_array().cloned().unwrap_or_default()); }
+            rows.retain(|r| !matches!(r["status"].as_str(), Some("DELETED")));
+            rows.sort_by(|a, b| b["date"].as_str().cmp(&a["date"].as_str()));
+            Ok(serde_json::json!({"rows": rows}))
+        }).await.unwrap_or_else(|e| Err(e.to_string()))
+    }, move |r| Message::Loaded(g, r))
+}
+
+/// Which tracker box a row falls in.
+fn tracker_bucket(r: &Value, since: &str) -> &'static str {
+    let kind = r["type"].as_str().unwrap_or("");
+    let st = r["status"].as_str().unwrap_or("");
+    match (kind, st) {
+        ("QUOTE", "SENT" | "DRAFT" | "ACCEPTED") if !r["subtype"].as_str().unwrap_or("").starts_with("DELAYED") => "estimates",
+        ("PO", "AUTHORISED" | "DRAFT" | "SUBMITTED") => "estimates",
+        ("ACCREC" | "ACCPAY", "AUTHORISED") if r["overdue"].as_i64() == Some(1) => "overdue",
+        ("ACCREC" | "ACCPAY", "AUTHORISED" | "DRAFT" | "SUBMITTED") => "open",
+        ("ACCREC" | "ACCPAY", "PAID") if r["paid_date"].as_str().unwrap_or("") >= since => "paid",
+        _ => "",
+    }
+}
+
+/// Customers ▸ Income Tracker / Vendors ▸ Bill Tracker.
+pub fn tracker(app: &App, sales: bool) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let rows = d["rows"].as_array().cloned().unwrap_or_default();
+    let since = ui::add_days_iso(&ui::today_iso(), -30);
+    let sum = |b: &str| -> (usize, i64) {
+        rows.iter().filter(|r| in_box(r, &since, b)).fold((0, 0), |(n, s), r| (n + 1, s + if b == "paid" { r["total"].as_i64().unwrap_or(0) } else if b == "estimates" { r["total"].as_i64().unwrap_or(0) } else { r["amount_due"].as_i64().unwrap_or(0) }))
+    };
+    let filter = if app.desk.tracker.is_empty() { "all" } else { app.desk.tracker };
+    let boxes: Vec<(&'static str, &'static str, iced::Color)> = if sales {
+        vec![("estimates", "ESTIMATES", hexc(0x2f6fb5)), ("open", "OPEN INVOICES", hexc(0x7a52b0)), ("overdue", "OVERDUE", hexc(0xd7502b)), ("paid", "PAID LAST 30 DAYS", hexc(0x3c9a3e))]
+    } else {
+        vec![("estimates", "PURCHASE ORDERS", hexc(0x2f6fb5)), ("open", "OPEN BILLS", hexc(0x7a52b0)), ("overdue", "OVERDUE", hexc(0xd7502b)), ("paid", "PAID LAST 30 DAYS", hexc(0x3c9a3e))]
+    };
+    let bar = row(boxes.into_iter().map(|(key, lbl, c)| {
+        let (n, amt) = sum(key);
+        let on = filter == key;
+        button(column![text(ui::money(amt)).size(20).font(BOLD).color(iced::Color::WHITE), text(format!("{n} {lbl}")).size(11).font(BOLD).color(iced::Color::WHITE)].spacing(2))
+            .padding([10, 14]).width(Fill)
+            .style(move |_, s| button::Style { background: Some(iced::Background::Color(if matches!(s, button::Status::Hovered) || on { iced::Color { a: 0.85, ..c } } else { c })),
+                text_color: iced::Color::WHITE, border: iced::Border { color: if on { k.text } else { c }, width: if on { 2.0 } else { 0.0 }, radius: 3.0.into() }, shadow: Default::default(), snap: true })
+            .on_press(Message::Desk(Msg::Tracker(key))).into()
+    })).spacing(4);
+    let q = app.list_q.to_lowercase();
+    let shown: Vec<&Value> = rows.iter().filter(|r| filter == "all" || in_box(r, &since, filter))
+        .filter(|r| q.is_empty() || r["contact_name"].as_str().unwrap_or("").to_lowercase().contains(&q) || r["number"].as_str().unwrap_or("").to_lowercase().contains(&q)).collect();
+    let cols: Vec<(&str, u16, bool)> = vec![(if sales { "Customer:Job" } else { "Vendor" }, 20, false), ("Type", 12, false), ("Number", 10, false), ("Date", 10, false), ("Due Date", 10, false),
+        ("Amount", 11, true), ("Open Balance", 11, true), ("Status", 10, false), ("Action", 12, false)];
+    let rows_el: Vec<(Vec<Element<Message>>, Option<Message>)> = shown.iter().map(|r| {
+        let kind = r["type"].as_str().unwrap_or("");
+        let sub = r["subtype"].as_str().unwrap_or("");
+        let route_kind = if sub.starts_with("DELAYED") { sub.to_string() } else { kind.to_string() };
+        let status = crate::vocab::status(app.skin, if sub.starts_with("DELAYED") { sub } else { kind }, r["status"].as_str().unwrap_or(""), r["overdue"].as_i64() == Some(1));
+        let open = r["amount_due"].as_i64().unwrap_or(0);
+        let cid = r["contact_id"].as_i64();
+        let action: Element<Message> = match kind {
+            "ACCREC" if open > 0 && r["status"] == "AUTHORISED" => ui::link("Receive Payment", Message::Nav(Route::ReceivePayment(cid))),
+            "ACCPAY" if open > 0 && r["status"] == "AUTHORISED" => ui::link("Pay Bill", Message::Nav(Route::PayBills)),
+            "QUOTE" if bucket_is(r, &since, "estimates") => ui::link("Create Invoice", Message::Nav(Route::Doc { kind: route_kind.clone(), id: r["id"].as_i64() })),
+            _ => Space::new().into(),
+        };
+        (vec![ui::cell(r["contact_name"].as_str().unwrap_or("").to_string()), ui::cell_muted(type_name(kind, sub)), ui::cell(r["number"].as_str().unwrap_or("").to_string()),
+            ui::cell(app.d(r["date"].as_str().unwrap_or(""))), ui::cell_muted(app.d(r["due_date"].as_str().unwrap_or(""))),
+            ui::cell_money(r["total"].as_i64().unwrap_or(0)), ui::cell_money(if matches!(kind, "ACCREC" | "ACCPAY" | "ACCRECCREDIT" | "ACCPAYCREDIT") { open } else { 0 }),
+            text(status).size(13).color(crate::lists::status_color(status)).into(), action],
+         Some(Message::Nav(Route::Doc { kind: route_kind, id: r["id"].as_i64() })))
+    }).collect();
+    let filters = row![
+        text(if sales { "CUSTOMER:JOB" } else { "VENDOR" }).size(11).font(BOLD).color(k.info),
+        text_input("All", &app.list_q).on_input(Message::ListQuery).padding([4, 7]).size(13).style(theme::input).width(220),
+        text("STATUS").size(11).font(BOLD).color(k.info),
+        text(match filter { "estimates" => if sales { "Estimates" } else { "Purchase Orders" }, "open" => "Open", "overdue" => "Overdue", "paid" => "Paid", _ => "All" }).size(13),
+        ui::hspace(),
+        if filter != "all" { ui::btn("Clear Filter", Some(Message::Desk(Msg::Tracker(filter)))) } else { Space::new().into() },
+    ].spacing(10).align_y(Alignment::Center);
+    let manage = if sales {
+        row![ui::btn("Create Invoices", doc_new("ACCREC")), ui::btn("Create Estimates", doc_new("QUOTE")), ui::btn("Receive Payments", nav(Route::ReceivePayment(None))), ui::btn("Enter Sales Receipts", doc_new("SALESRECEIPT"))]
+    } else {
+        row![ui::btn("Enter Bills", doc_new("ACCPAY")), ui::btn("Pay Bills", nav(Route::PayBills)), ui::btn("Create Purchase Orders", doc_new("PO")), ui::btn("Write Checks", nav(Route::Check(None)))]
+    }.spacing(8);
+    let cols_ui: Vec<ui::Col> = cols.iter().map(|(h, w, r)| ui::Col { title: *h, width: *w, right: *r }).collect();
+    scrollable(column![bar, filters, ui::table(&cols_ui, rows_el, "Nothing to show."), row![text("Manage Transactions").size(12).color(k.muted), manage].spacing(12).align_y(Alignment::Center)]
+        .spacing(10).padding(12)).style(theme::scroll).height(Fill).into()
+}
+
+fn bucket_is(r: &Value, since: &str, b: &str) -> bool { tracker_bucket(r, since) == b }
+/// Tracker box membership: Open includes Overdue (as in QuickBooks Desktop).
+fn in_box(r: &Value, since: &str, b: &str) -> bool { let x = tracker_bucket(r, since); x == b || (b == "open" && x == "overdue") }
+fn hexc(v: u32) -> iced::Color { iced::Color::from_rgb8((v >> 16) as u8, (v >> 8) as u8, v as u8) }
 
 // ---------------- Report Center ----------------
 

@@ -977,3 +977,27 @@ fn desktop_report_center() {
     drop(ui);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_income_and_bill_trackers() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("tracker");
+    let _ = app.update(Message::Nav(Route::AllSales));
+    let mut rows = vec![];
+    for k in ["SALES", "QUOTE", "DELAYED"] { rows.extend(app.be.call_now("docs.list", json!({"type": k, "limit": 1000})).unwrap()["rows"].as_array().cloned().unwrap()); }
+    app.data = Some(json!({"rows": rows}));
+    assert_eq!(crate::desktop::title(&app, &Route::AllSales), "Income Tracker");
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["CUSTOMER:JOB", "OPEN BALANCE", "Manage Transactions", "Receive Payment"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    // Clicking a box filters; clicking it again clears the filter.
+    let _ = app.update(Message::Desk(W::Tracker("overdue")));
+    assert_eq!(app.desk.tracker, "overdue");
+    let _ = app.update(Message::Desk(W::Tracker("overdue")));
+    assert_eq!(app.desk.tracker, "all");
+    let _ = app.update(Message::Nav(Route::Bills));
+    assert_eq!(crate::desktop::title(&app, &Route::Bills), "Bill Tracker");
+    let _ = std::fs::remove_dir_all(dir);
+}
