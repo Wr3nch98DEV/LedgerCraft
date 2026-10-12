@@ -20,6 +20,7 @@ pub mod items;
 pub mod deposits;
 pub mod agencies;
 pub mod pricelevels;
+pub mod assemblies;
 pub mod us1099;
 pub mod delayed;
 pub mod documents;

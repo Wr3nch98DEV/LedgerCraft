@@ -201,6 +201,22 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
         "items.update" => { need("inventory:write")?; l.update_item(id(p)?, &de::<ItemInput>(&p["item"])?)?; ok() }
         "items.setStatus" => { need("inventory:write")?; l.set_item_status(id(p)?, s(p, "status"))?; ok() }
         "items.delete" => { need("inventory:write")?; l.delete_item(id(p)?)?; ok() }
+        "items.components" => { need("inventory:read")?; let i = id(p)?; Ok(json!({"components": l.assembly_components(i)?, "max_buildable": l.max_buildable(i)?, "builds": l.list_builds(Some(i))?})) }
+        "items.setComponents" => {
+            need("inventory:write")?;
+            let mut comps = vec![];
+            for c in p["components"].as_array().cloned().unwrap_or_default() {
+                let q = c["quantity"].as_str().map(String::from).unwrap_or_else(|| c["quantity"].to_string());
+                let q = ledger_core::money::parse_fixed(&q, 4).ok_or_else(|| ApiError::Bad("invalid component quantity".into()))?;
+                comps.push((c["item_id"].as_i64().ok_or_else(|| ApiError::Bad("component item_id required".into()))?, q));
+            }
+            l.set_assembly_components(id(p)?, &comps)?; ok()
+        }
+        "items.build" => {
+            need("inventory:write")?;
+            let qty = ledger_core::money::parse_fixed(s(p, "quantity"), 4).ok_or_else(|| ApiError::Bad("invalid quantity".into()))?;
+            Ok(json!({"id": l.build_assembly(id(p)?, qty, s(p, "date"), s(p, "memo"))?}))
+        }
         "items.adjust" => {
             need("inventory:write")?;
             let qty = ledger_core::money::parse_fixed(s(p, "quantity"), 4).ok_or_else(|| ApiError::Bad("invalid quantity".into()))?;

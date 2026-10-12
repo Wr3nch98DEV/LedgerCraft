@@ -1767,7 +1767,7 @@ fn every_screen_in_every_layout_loads() {
         Route::ReceivePayment(None), Route::PayBills, Route::Spend(None), Route::Check(None), Route::Deposit, Route::Transfer, Route::Journal,
         Route::NewContact(true), Route::NewProduct, Route::NewAccount, Route::Payroll, Route::Taxes, Route::Projects, Route::Mileage, Route::Reconcile,
         Route::Register(None), Route::Calendar, Route::Statements, Route::Memorized, Route::PaySalesTax, Route::AdjustInventory, Route::Help, Route::DocCenter,
-        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates, Route::PriceLevels, Route::PrintForms, Route::PayrollForms, Route::CustomizeFavorites];
+        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates, Route::PriceLevels, Route::PrintForms, Route::PayrollForms, Route::CustomizeFavorites, Route::BuildAssemblies];
     for layout in Layout::ALL {
         let (mut app, dir) = desktop_app(&format!("all-{}", layout.key()));
         let t = app.update(Message::SetLayout(layout));
@@ -2322,5 +2322,64 @@ fn desktop_set_closing_date() {
     press(&mut app, "OK");
     assert_eq!(app.setting("lock_date_all"), "");
     assert!(app.be.call_now("docs.save", inv("2026-01-15")).is_ok());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn end_to_end_build_assemblies() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("e2e-build");
+    let adj = app.lk.account_opts(|a| a["type"] == "EXPENSE" || a["type"] == "DIRECTCOSTS")[0].id;
+    let mk = |app: &App, code: &str, qty: &str, cost: &str| -> i64 {
+        let id = app.be.call_now("items.create", json!({"code": code, "name": code, "is_tracked": true, "sale_price": "50"})).unwrap()["id"].as_i64().unwrap();
+        if qty != "0" { app.be.call_now("items.adjust", json!({"id": id, "quantity": qty, "unit_cost": cost, "date": "2026-06-01", "account_id": adj, "reason": "Opening"})).unwrap(); }
+        id
+    };
+    let (leg, top, table) = (mk(&app, "LEG", "10", "5"), mk(&app, "TOP", "3", "40"), mk(&app, "TABLE", "0", "0"));
+    let t = app.update(Message::Nav(Route::BuildAssemblies)); settle(&mut app, t);
+    let opt = |id: i64| crate::app::Opt { id, label: "x".into() };
+    let t = app.update(Message::Desk(W::BaItem(opt(table)))); settle(&mut app, t);
+    // No components yet: the component editor opens.
+    assert!(app.desk.ba_edit.is_some());
+    for m in [W::BaComp(0, opt(leg)), W::BaCompQty(0, "4".into()), W::BaCompAdd, W::BaComp(1, opt(top)), W::BaCompQty(1, "1".into())] { let _ = app.update(Message::Desk(m)); }
+    press(&mut app, "Save Components");
+    assert!(app.desk.ba_edit.is_none(), "{:?}", app.toasts);
+    assert_eq!(app.desk.ba_data.as_ref().unwrap()["max_buildable"], 20000);
+    // Build 2.
+    let _ = app.update(Message::Desk(W::BaField(0, "2".into())));
+    let _ = app.update(Message::Desk(W::BaField(1, app.d("2026-06-02"))));
+    press(&mut app, "Build");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let item = app.be.call_now("items.get", json!({"id": table})).unwrap();
+    assert_eq!(item["qty_on_hand_e4"], 20000);
+    assert_eq!(item["total_cost"], 12000);
+    assert_eq!(app.desk.ba_data.as_ref().unwrap()["builds"].as_array().unwrap().len(), 1);
+    // Building more than the parts allow is refused.
+    let _ = app.update(Message::Desk(W::BaField(0, "5".into())));
+    press(&mut app, "Build");
+    assert!(app.toasts.iter().any(|t| t.2));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+#[ignore]
+fn render_build_assemblies() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("build-shot");
+    let adj = app.lk.account_opts(|a| a["type"] == "EXPENSE" || a["type"] == "DIRECTCOSTS")[0].id;
+    let mk = |app: &App, code: &str, name: &str, qty: &str, cost: &str| -> i64 {
+        let id = app.be.call_now("items.create", json!({"code": code, "name": name, "is_tracked": true})).unwrap()["id"].as_i64().unwrap();
+        if qty != "0" { app.be.call_now("items.adjust", json!({"id": id, "quantity": qty, "unit_cost": cost, "date": "2026-06-01", "account_id": adj, "reason": "Opening"})).unwrap(); }
+        id
+    };
+    let (leg, top, table) = (mk(&app, "LEG", "Oak leg", "10", "5"), mk(&app, "TOP", "Oak table top", "3", "40"), mk(&app, "TABLE", "Oak dining table", "0", "0"));
+    app.be.call_now("items.setComponents", json!({"id": table, "components": [{"item_id": leg, "quantity": "4"}, {"item_id": top, "quantity": "1"}]})).unwrap();
+    let t = app.update(Message::Nav(Route::BuildAssemblies)); settle(&mut app, t);
+    let t = app.update(Message::Desk(W::BaItem(crate::app::Opt { id: table, label: "TABLE — Oak dining table".into() }))); settle(&mut app, t);
+    let _ = app.update(Message::Desk(W::BaField(0, "3".into())));
+    let _ = std::fs::remove_file(std::env::temp_dir().join("lc-route-wgpu.png"));
+    let _g = sim_lock();
+    let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
+    ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join("lc-route.png")).unwrap();
     let _ = std::fs::remove_dir_all(dir);
 }

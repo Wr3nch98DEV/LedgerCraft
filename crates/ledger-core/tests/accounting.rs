@@ -794,3 +794,33 @@ fn cash_flow_statement_ties_to_bank() {
     let r = ledger_core::extra_reports::run_any(&l, "cash-flow-statement", &ReportParams { from: Some("2020-01-01".into()), ..Default::default() }).unwrap();
     assert_eq!(r["check"][0], 0, "indirect cash flow reconciles to the change in bank balances");
 }
+
+#[test]
+fn build_assemblies_move_component_cost() {
+    let l = org();
+    let mk = |code: &str| l.create_item(&ItemInput { code: code.into(), name: code.into(), is_tracked: true, sale_price: Some("50".into()), sale_account_id: Some(acct(&l, "200")),
+        purchase_account_id: Some(acct(&l, "310")), purchase_price: Some("1".into()), ..Default::default() }).unwrap();
+    let (leg, top, table) = (mk("LEG"), mk("TOP"), mk("TABLE"));
+    let buy = |item: i64, qty: &str, price: &str| { l.save_document(None, &DocInput { kind: "ACCPAY".into(), contact_name: Some("Supplier".into()), date: "2026-06-01".into(), line_amount_type: Some("NOTAX".into()),
+        lines: vec![LineInput { item_id: Some(item), quantity: Some(qty.into()), unit_price: Some(price.into()), ..Default::default() }], status: Some("AUTHORISED".into()), ..Default::default() }).unwrap(); };
+    buy(leg, "10", "5");   // 10 legs @ 5.00
+    buy(top, "3", "40");   // 3 tops @ 40.00
+    // A table = 4 legs + 1 top.
+    l.set_assembly_components(table, &[(leg, 40_000), (top, 10_000)]).unwrap();
+    assert!(l.set_assembly_components(leg, &[(table, 10_000)]).is_err(), "no cycles");
+    assert!(l.set_assembly_components(table, &[(table, 10_000)]).is_err(), "not its own component");
+    assert_eq!(l.max_buildable(table).unwrap(), 20_000, "10 legs make 2 tables");
+    assert!(l.build_assembly(table, 30_000, "2026-06-02", "").is_err(), "not enough legs for 3");
+    let inv = l.sys_account("INVENTORY").unwrap();
+    let before = bal(&l, inv);
+    l.build_assembly(table, 20_000, "2026-06-02", "first batch").unwrap();
+    let q = |id: i64| -> (i64, i64) { l.conn.query_row("SELECT qty_on_hand_e4, total_cost FROM items WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap() };
+    assert_eq!(q(leg), (20_000, 1_000));     // 2 legs left, 10.00
+    assert_eq!(q(top), (10_000, 4_000));     // 1 top left, 40.00
+    assert_eq!(q(table), (20_000, 12_000));  // 2 tables at 60.00 each
+    assert_eq!(bal(&l, inv), before, "same inventory account: value just moves between items");
+    let comps = l.assembly_components(table).unwrap();
+    assert_eq!(comps.len(), 2);
+    assert_eq!(l.list_builds(Some(table)).unwrap().len(), 1);
+    assert_invariants(&l);
+}

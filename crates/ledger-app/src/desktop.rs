@@ -56,6 +56,15 @@ pub struct State {
     pub one_window: bool,
     /// Favorites menu: "Menu ▸ Item" entries, in order.
     pub favorites: Vec<String>,
+    /// Build Assemblies: the assembly, its components/builds (from items.components), quantity, date, memo,
+    /// and the component list being edited (item, quantity per assembly).
+    pub ba_item: Option<crate::app::Opt>,
+    pub ba_data: Option<Value>,
+    pub ba_qty: String,
+    pub ba_date: String,
+    pub ba_memo: String,
+    pub ba_edit: Option<Vec<(Option<crate::app::Opt>, String)>>,
+    pub ba_busy: bool,
     /// Pay Sales Tax: per agency (pay?, amount), the account to pay from and the date.
     pub tax_pay: Vec<(i64, bool, String)>,
     pub tax_from: Option<crate::app::Opt>,
@@ -111,7 +120,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
     /// Remember the Desktop view choices (One Window, icon bar pane).
@@ -228,6 +237,64 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             let name = app.desk.on_new.trim().to_string();
             if name.is_empty() { return app.toast("Enter the name", true); }
             app.be.call("contacts.create", serde_json::json!({"name": name}), |r| Message::Desk(Msg::ClassDone(r)))
+        }
+        Msg::BaItem(o) => {
+            let id = o.id;
+            app.desk.ba_item = Some(o); app.desk.ba_data = None; app.desk.ba_edit = None;
+            app.be.call("items.components", serde_json::json!({"id": id}), |r| Message::Desk(Msg::BaLoaded(r)))
+        }
+        Msg::BaLoaded(r) => match r {
+            Ok(v) => {
+                if v["components"].as_array().is_none_or(|a| a.is_empty()) && app.desk.ba_edit.is_none() { app.desk.ba_edit = Some(vec![(None, "1".into())]); }
+                app.desk.ba_data = Some(v); Task::none()
+            }
+            Err(e) => app.toast(e, true),
+        },
+        Msg::BaField(f, v) => { match f { 0 => app.desk.ba_qty = v, 1 => app.desk.ba_date = v, _ => app.desk.ba_memo = v } Task::none() }
+        Msg::BaBuild => {
+            let Some(item) = app.desk.ba_item.clone() else { return app.toast("Choose the assembly item", true) };
+            let qty = app.desk.ba_qty.trim().to_string();
+            if qty.parse::<f64>().map_or(true, |q| q <= 0.0) { return app.toast("Enter how many to build", true); }
+            let date_in = if app.desk.ba_date.is_empty() { app.d(&ui::today_iso()) } else { app.desk.ba_date.clone() };
+            let Some(date) = ui::to_iso(&date_in, app.date_style()) else { return app.toast("Check the date", true) };
+            app.desk.ba_busy = true;
+            app.be.call("items.build", serde_json::json!({"id": item.id, "quantity": qty, "date": date, "memo": app.desk.ba_memo.trim()}), |r| Message::Desk(Msg::BaBuilt(r)))
+        }
+        Msg::BaBuilt(r) => {
+            app.desk.ba_busy = false;
+            match r {
+                Ok(_) => {
+                    let id = app.desk.ba_item.as_ref().map(|i| i.id).unwrap_or(0);
+                    let qty = std::mem::take(&mut app.desk.ba_qty);
+                    app.desk.ba_memo.clear();
+                    let t1 = app.toast(format!("Built {qty}"), false);
+                    let t2 = app.be.call("items.components", serde_json::json!({"id": id}), |r| Message::Desk(Msg::BaLoaded(r)));
+                    Task::batch([t1, t2, app.load(), app.load_lookups()])
+                }
+                Err(e) => app.toast(e, true),
+            }
+        }
+        Msg::BaEdit => {
+            let comps = app.desk.ba_data.as_ref().and_then(|d| d["components"].as_array().cloned()).unwrap_or_default();
+            let mut rows: Vec<(Option<crate::app::Opt>, String)> = comps.iter().map(|c| (Some(crate::app::Opt { id: c["item_id"].as_i64().unwrap_or(0), label: format!("{} — {}", c["code"].as_str().unwrap_or(""), c["name"].as_str().unwrap_or("")) }),
+                qty_text(c["qty_e4"].as_i64().unwrap_or(0)))).collect();
+            rows.push((None, "1".into()));
+            app.desk.ba_edit = Some(rows);
+            Task::none()
+        }
+        Msg::BaComp(n, o) => { if let Some(r) = app.desk.ba_edit.as_mut().and_then(|e| e.get_mut(n)) { r.0 = Some(o); } Task::none() }
+        Msg::BaCompQty(n, v) => { if let Some(r) = app.desk.ba_edit.as_mut().and_then(|e| e.get_mut(n)) { r.1 = v; } Task::none() }
+        Msg::BaCompAdd => { if let Some(e) = app.desk.ba_edit.as_mut() { e.push((None, "1".into())); } Task::none() }
+        Msg::BaCompRemove(n) => { if let Some(e) = app.desk.ba_edit.as_mut() { if n < e.len() { e.remove(n); } } Task::none() }
+        Msg::BaCompSave => {
+            let Some(item) = app.desk.ba_item.clone() else { return Task::none() };
+            let comps: Vec<Value> = app.desk.ba_edit.clone().unwrap_or_default().into_iter().filter_map(|(o, q)| o.map(|o| serde_json::json!({"item_id": o.id, "quantity": q.trim()}))).collect();
+            if comps.is_empty() { return app.toast("Add at least one component", true); }
+            let id = item.id;
+            app.be.call("items.setComponents", serde_json::json!({"id": id, "components": comps}), move |r| match r {
+                Ok(_) => Message::Desk(Msg::BaItem(item.clone())),
+                Err(e) => Message::Failed(e),
+            })
         }
         Msg::OpenPrefs(cat) => { app.settings.cat = Some(cat); app.go(Route::Settings) }
         Msg::FavAdd(f) => { if !app.desk.favorites.contains(&f) { app.desk.favorites.push(f); app.save_desk_prefs(); } Task::none() }
@@ -711,6 +778,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::PrintForms => "Select Invoices to Print".into(),
         Route::PayrollForms => "Process Payroll Forms".into(),
         Route::CustomizeFavorites => "Customize Your Menus".into(),
+        Route::BuildAssemblies => "Build Assemblies".into(),
         Route::EnterTime => "Time/Enter Single Activity".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
@@ -774,7 +842,7 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
             e("Company Information…", "", nav(Route::Settings)), e("Set Up Users and Roles…", "", Some(Message::Desk(Msg::OpenPrefs("Users & Roles")))), e("Set Closing Date…", "", Some(Message::Desk(Msg::OpenPrefs("Accounting")))), sep(), e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)),
             e("Make General Journal Entries…", "", nav(Route::Journal)), e("Enter Vehicle Mileage…", "", nav(Route::Mileage)), e("Calendar", "", nav(Route::Calendar)), e("Documents", "", nav(Route::DocCenter))],
         "Inventory" => vec![e("Inventory Center", "", nav(Route::Products)), e("Item List", "", nav(Route::Products)), sep(), e("Create Purchase Orders", "", doc_new("PO")),
-            e("Purchase Orders List", "", nav(Route::PurchaseOrders)), e("Receive Items", "", Some(Message::ReceiveItems)), e("Enter Bills Against Inventory", "", nav(Route::PurchaseOrders)), e("Adjust Quantity/Value on Hand…", "", nav(Route::AdjustInventory))],
+            e("Purchase Orders List", "", nav(Route::PurchaseOrders)), e("Receive Items", "", Some(Message::ReceiveItems)), e("Enter Bills Against Inventory", "", nav(Route::PurchaseOrders)), e("Adjust Quantity/Value on Hand…", "", nav(Route::AdjustInventory)), sep(), e("Build Assemblies…", "", nav(Route::BuildAssemblies))],
         "Customers" => vec![e("Customer Center", "Ctrl+J", nav(Route::Customers)), sep(), e("Create Estimates", "", doc_new("QUOTE")), e("Create Sales Orders", "", doc_new("SALESORDER")),
             e("Create Invoices", "Ctrl+I", doc_new("ACCREC")), e("Enter Sales Receipts", "", doc_new("SALESRECEIPT")), e("Enter Statement Charges", "", doc_new("DELAYEDCHARGE")),
             e("Create Statements…", "", nav(Route::Statements)), e("Assess Finance Charges…", "", nav(Route::FinanceCharges)), sep(), e("Receive Payments", "", nav(Route::ReceivePayment(None))),
@@ -1017,6 +1085,98 @@ pub fn other_names(app: &App) -> Element<'_, Message> {
         ui::hspace(),
         text("Owners, partners and one-off payees. A name becomes a customer or vendor once you transact with it.").size(12).color(k.muted).into(),
     ])
+}
+
+fn qty_text(e4: i64) -> String {
+    let s = format!("{:.4}", e4 as f64 / 10_000.0);
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// Inventory ▸ Build Assemblies: pick an assembly, see what each build takes, build.
+pub fn build_assemblies(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let tracked: Vec<crate::app::Opt> = d.as_array().cloned().unwrap_or_default().iter().filter(|i| i["is_tracked"].as_i64() == Some(1) && i["status"] == "ACTIVE")
+        .map(|i| crate::app::Opt { id: i["id"].as_i64().unwrap_or(0), label: format!("{} — {}", i["code"].as_str().unwrap_or(""), i["name"].as_str().unwrap_or("")) }).collect();
+    let lbl = |s: &'static str| text(s).size(11).font(BOLD).color(k.info);
+    let head_row = row![
+        column![lbl("ASSEMBLY ITEM"), pick_list(tracked.clone(), app.desk.ba_item.clone(), |o| Message::Desk(Msg::BaItem(o))).placeholder("Choose an inventory item").padding([5, 7]).text_size(13).style(theme::pick).width(360)].spacing(3),
+    ].spacing(16);
+    let mut body = column![text("Build Assemblies").size(22).font(BOLD), head_row].spacing(14);
+    let Some(item) = &app.desk.ba_item else {
+        body = body.push(ui::muted("An assembly is an inventory item built from other inventory items (its components). Choose one to build, or to set up its components."));
+        return container(body).padding(18).max_width(1100).into();
+    };
+    let Some(bd) = &app.desk.ba_data else { return container(body.push(ui::muted("Loading…"))).padding(18).max_width(1100).into() };
+    let comps = bd["components"].as_array().cloned().unwrap_or_default();
+    let qty: f64 = app.desk.ba_qty.trim().parse().unwrap_or(0.0);
+    if let Some(edit) = &app.desk.ba_edit {
+        // Component list editor.
+        let others: Vec<crate::app::Opt> = tracked.iter().filter(|o| o.id != item.id).cloned().collect();
+        let mut rows = column![row![text("COMPONENT ITEM").size(11).font(BOLD).color(k.muted).width(Length::FillPortion(6)), text("QTY PER ASSEMBLY").size(11).font(BOLD).color(k.muted).width(Length::FillPortion(2)), Space::new().width(Length::FillPortion(1))].spacing(10)].spacing(6);
+        for (n, (o, q)) in edit.iter().enumerate() {
+            rows = rows.push(row![
+                pick_list(others.clone(), o.clone(), move |x| Message::Desk(Msg::BaComp(n, x))).placeholder("Component").padding([5, 7]).text_size(13).style(theme::pick).width(Length::FillPortion(6)),
+                text_input("1", q).on_input(move |v| Message::Desk(Msg::BaCompQty(n, v))).padding([5, 7]).size(13).style(theme::input).width(Length::FillPortion(2)),
+                container(ui::link("Remove", Message::Desk(Msg::BaCompRemove(n)))).width(Length::FillPortion(1)),
+            ].spacing(10).align_y(Alignment::Center));
+        }
+        body = body.push(container(column![
+            text(format!("Components of {}", item.label)).size(14).font(BOLD),
+            rows,
+            row![ui::btn("Add Component", Some(Message::Desk(Msg::BaCompAdd))), ui::hspace(), ui::btn_primary("Save Components", Some(Message::Desk(Msg::BaCompSave))),
+                ui::btn("Cancel", if comps.is_empty() { None } else { Some(Message::Desk(Msg::BaItem(item.clone()))) })].spacing(8),
+        ].spacing(12)).padding(16).width(Fill).style(theme::card));
+        return container(scrollable(body).style(theme::scroll)).padding(18).max_width(1100).into();
+    }
+    // Components needed for this build.
+    let cols: [(&str, u16, bool); 5] = [("Component Item", 30, false), ("Qty On Hand", 12, true), ("Qty Needed", 12, true), ("Avg Cost", 12, true), ("", 10, false)];
+    let mut list = column![container(row(cols.iter().map(|(h, w, r)| {
+        let tx = text(h.to_uppercase()).size(11).font(BOLD).color(k.muted);
+        container(if *r { tx.align_x(iced::alignment::Horizontal::Right).width(Fill) } else { tx.width(Fill) }).width(Length::FillPortion(*w)).into()
+    })).spacing(8).padding([6, 10])).style(theme::header_row).width(Fill)];
+    let mut total_cost = 0i64;
+    for c in &comps {
+        let per = c["qty_e4"].as_i64().unwrap_or(0);
+        let need = (per as f64 * qty).round() as i64;
+        let qoh = c["qty_on_hand_e4"].as_i64().unwrap_or(0);
+        let avg = c["avg_cost"].as_i64().unwrap_or(0);
+        total_cost += (avg as f64 * need as f64 / 10_000.0).round() as i64;
+        let short = need > qoh;
+        let cells: Vec<Element<Message>> = vec![
+            ui::cell(format!("{} — {}  ×{}", c["code"].as_str().unwrap_or(""), c["name"].as_str().unwrap_or(""), qty_text(per))),
+            ui::num(qty_text(qoh)), text(qty_text(need)).size(13).color(if short { k.bad } else { k.text }).align_x(iced::alignment::Horizontal::Right).width(Fill).into(),
+            ui::cell_money(avg), if short { text("Short").size(12).color(k.bad).into() } else { Space::new().into() },
+        ];
+        list = list.push(row(cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into())).spacing(8).align_y(Alignment::Center).padding([5, 10]));
+        list = list.push(ui::hr());
+    }
+    let max = bd["max_buildable"].as_i64().unwrap_or(0);
+    let date = if app.desk.ba_date.is_empty() { app.d(&ui::today_iso()) } else { app.desk.ba_date.clone() };
+    body = body.push(row![
+        text(format!("Quantity on hand: {}", d.as_array().and_then(|a| a.iter().find(|i| i["id"].as_i64() == Some(item.id))).and_then(|i| i["qty_on_hand_e4"].as_i64()).map(qty_text).unwrap_or_default())).size(13).color(k.muted),
+        text(format!("Maximum you can build from what's on hand: {}", qty_text(max))).size(13).color(k.muted),
+        ui::hspace(), ui::link("Edit Components", Message::Desk(Msg::BaEdit)),
+    ].spacing(24));
+    body = body.push(container(list).style(theme::card).width(Fill).clip(true));
+    body = body.push(row![
+        column![lbl("QUANTITY TO BUILD"), text_input("0", &app.desk.ba_qty).on_input(|v| Message::Desk(Msg::BaField(0, v))).padding([5, 7]).size(13).style(theme::input).width(130)].spacing(3),
+        column![lbl("DATE"), text_input("", &date).on_input(|v| Message::Desk(Msg::BaField(1, v))).padding([5, 7]).size(13).style(theme::input).width(130)].spacing(3),
+        column![lbl("MEMO"), text_input("", &app.desk.ba_memo).on_input(|v| Message::Desk(Msg::BaField(2, v))).padding([5, 7]).size(13).style(theme::input).width(360)].spacing(3),
+        ui::hspace(),
+        column![lbl("COST OF THIS BUILD"), text(ui::money(total_cost)).size(16).font(BOLD)].spacing(3),
+    ].spacing(16).align_y(Alignment::End));
+    body = body.push(row![ui::hspace(), ui::btn_primary("Build", if app.desk.ba_busy { None } else { Some(Message::Desk(Msg::BaBuild)) }), ui::btn("Close", Some(Message::Back))].spacing(8));
+    let builds = bd["builds"].as_array().cloned().unwrap_or_default();
+    if !builds.is_empty() {
+        let mut h = column![text("RECENT BUILDS").size(11).font(BOLD).color(k.info)].spacing(4);
+        for b in builds.iter().take(5) {
+            h = h.push(row![text(app.d(b["date"].as_str().unwrap_or(""))).size(13).width(120), text(qty_text(b["qty_e4"].as_i64().unwrap_or(0))).size(13).width(80),
+                text(ui::money(b["cost"].as_i64().unwrap_or(0))).size(13).width(120), text(b["memo"].as_str().unwrap_or("").to_string()).size(13).color(k.muted)]);
+        }
+        body = body.push(h);
+    }
+    container(scrollable(body).style(theme::scroll)).padding(18).max_width(1100).into()
 }
 
 /// Menus whose commands can be added to Favorites (not View/Window, which change with state).
