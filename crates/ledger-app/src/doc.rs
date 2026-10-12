@@ -24,6 +24,8 @@ pub struct Line {
 
 pub struct Editor {
     pub kind: String,
+    /// Form template (branding theme); None = the default.
+    pub template: Option<Opt>,
     pub id: Option<i64>,
     /// The saved document as the engine returned it (status, totals, payments…).
     pub doc: Option<Value>,
@@ -75,6 +77,7 @@ pub enum Msg {
     Date(String),
     Due(String),
     Reference(String),
+    Template(Opt),
     Number(String),
     Lat(LatOpt),
     Item(usize, Opt),
@@ -210,7 +213,7 @@ impl Editor {
         let style = app.date_style();
         let today = ui::today_iso();
         let mut e = Editor {
-            kind: kind.to_string(), id: None, doc: None, contact: None, contact_text: String::new(),
+            kind: kind.to_string(), template: None, id: None, doc: None, contact: None, contact_text: String::new(),
             contacts: combo_box::State::new(app.lk.contact_opts(sales(kind))),
             date: ui::date(&today, style), due: if matches!(kind, "ACCREC" | "ACCPAY") { ui::date(&ui::add_days_iso(&today, 14), style) } else { String::new() },
             reference: String::new(), number: String::new(),
@@ -268,6 +271,7 @@ impl Editor {
         if self.kind == "QUOTE" { doc["expiry_date"] = doc["due_date"].take(); }
         if self.kind == "PO" { doc["delivery_date"] = doc["due_date"].take(); }
         if !self.number.trim().is_empty() { doc["number"] = json!(self.number.trim()); }
+        if let Some(t) = &self.template { doc["branding_theme_id"] = json!(t.id); }
         match &self.contact { Some(c) => doc["contact_id"] = json!(c.id), None => doc["contact_name"] = json!(self.contact_text.trim()) }
         let mut p = json!({"id": self.id, "doc": doc});
         if !self.added.is_empty() { p["close_delayed"] = json!(self.added); }
@@ -336,6 +340,7 @@ fn fill_from(app: &App, e: &mut Editor, d: &Value) {
     let due = d["due_date"].as_str().or(d["expiry_date"].as_str()).or(d["delivery_date"].as_str()).unwrap_or("");
     e.due = if due.is_empty() { String::new() } else { ui::date(due, style) };
     e.reference = d["reference"].as_str().unwrap_or("").to_string();
+    e.template = d["branding_theme_id"].as_i64().and_then(|id| app.lk.template_opts().into_iter().find(|t| t.id == id));
     e.number = d["number"].as_str().unwrap_or("").to_string();
     e.lat = d["line_amount_type"].as_str().unwrap_or("EXCLUSIVE").to_string();
     e.terms = d["terms"].as_str().unwrap_or("").to_string();
@@ -506,6 +511,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         }
         Msg::Due(s) => { e.due = s; Task::none() }
         Msg::Reference(s) => { e.reference = s; Task::none() }
+        Msg::Template(t) => { e.template = Some(t); Task::none() }
         Msg::Number(s) => { e.number = s; Task::none() }
         Msg::Lat(l) => { e.lat = l.0.to_string(); Task::none() }
         Msg::Item(i, it) => {
@@ -945,7 +951,7 @@ mod tests {
         app.be.call_now("orgs.create", json!({"org_name": "Test Co", "country": "AU", "demo": false, "owner_name": "Tess"})).unwrap();
         app.session = Some(app.be.call_now("session.get", json!({})).unwrap());
         let get = |m: &str, p: Value| app.be.call_now(m, p).unwrap().as_array().cloned().unwrap();
-        app.lk = crate::app::Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})) };
+        app.lk = crate::app::Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})) };
         let mut e = Editor::new(&app, "ACCREC");
         e.contact_text = "New Customer Pty".into();
         e.lines[0].description = "Consulting".into();

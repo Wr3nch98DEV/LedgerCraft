@@ -107,8 +107,13 @@ pub struct Lookups {
     pub items: Vec<Value>,
     pub contacts: Vec<Value>,
     pub price_levels: Vec<Value>,
+    /// Form templates (branding themes), default first.
+    pub templates: Vec<Value>,
 }
 impl Lookups {
+    pub fn template_opts(&self) -> Vec<Opt> {
+        self.templates.iter().map(|t| Opt { id: t["id"].as_i64().unwrap_or(0), label: t["name"].as_str().unwrap_or("").to_string() }).collect()
+    }
     /// The price level adjustment (basis points) for a customer, if they have one.
     pub fn price_level_bp(&self, contact_id: i64) -> Option<i64> {
         let level = self.contacts.iter().find(|c| c["id"].as_i64() == Some(contact_id))?["price_level_id"].as_i64()?;
@@ -400,7 +405,7 @@ impl App {
                 tokio::task::spawn_blocking(move || {
                     if qb { let _ = be.call_now("accounts.undeposited", json!({})); }
                     let get = |m: &str, p: Value| be.call_now(m, p).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
-                    Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})) }
+                    Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})) }
                 }).await.unwrap_or_default()
             },
             |l| Message::LookupsLoaded(Box::new(l)),

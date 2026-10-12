@@ -15,7 +15,7 @@ fn demo_app(tag: &str, skin: Skin) -> (App, std::path::PathBuf) {
     let session = app.be.call_now("session.get", json!({})).unwrap();
     let _ = app.update(Message::Session(Ok(session)));
     let get = |m: &str, p: Value| app.be.call_now(m, p).unwrap().as_array().cloned().unwrap();
-    let lk = Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})) };
+    let lk = Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})) };
     let _ = app.update(Message::LookupsLoaded(Box::new(lk)));
     (app, dir)
 }
@@ -724,7 +724,7 @@ fn desktop_app(tag: &str) -> (App, std::path::PathBuf) {
     let session = app.be.call_now("session.get", json!({})).unwrap();
     let _ = app.update(Message::Session(Ok(session)));
     let get = |m: &str, p: Value| app.be.call_now(m, p).unwrap().as_array().cloned().unwrap();
-    let lk = Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})) };
+    let lk = Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})) };
     let _ = app.update(Message::LookupsLoaded(Box::new(lk)));
     (app, dir)
 }
@@ -2382,5 +2382,48 @@ fn render_build_assemblies() {
     let _g = sim_lock();
     let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
     ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join("lc-route.png")).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Snapshot many Desktop screens: LC_ROUTES="customers check calendar" LC_LIGHT=1 cargo test -p ledger-app render_routes -- --ignored
+#[test]
+#[ignore]
+fn render_routes() {
+    let keys = std::env::var("LC_ROUTES").unwrap_or_else(|_| "dashboard".into());
+    for key in keys.split_whitespace() {
+        let (mut app, dir) = desktop_app(&format!("routes-{}", key.replace(':', "-")));
+        if std::env::var("LC_LIGHT").is_ok() { app.dark = false; }
+        let t = app.update(Message::Nav(crate::app::parse_route(key).expect("route key"))); settle(&mut app, t);
+        let name = format!("lc-shot-{}", key.replace(':', "-"));
+        let _ = std::fs::remove_file(std::env::temp_dir().join(format!("{name}-wgpu.png")));
+        {
+            let _g = sim_lock();
+            let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
+            ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join(format!("{name}.png"))).unwrap();
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
+fn invoice_template_choice_is_saved() {
+    use crate::doc::Msg as D;
+    let (mut app, dir) = desktop_app("tpl-choice");
+    let blue = app.be.call_now("branding.save", json!({"theme": {"name": "Blue", "accent": "#2f6fb5", "invoice_title": "Invoice"}})).unwrap()["id"].as_i64().unwrap();
+    let t = app.load_lookups(); settle(&mut app, t);
+    assert!(app.lk.template_opts().len() >= 2);
+    let cust = app.lk.contact_opts(true)[0].clone();
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None })); settle(&mut app, t);
+    for m in [D::Contact(cust), D::Desc(0, "Work".into()), D::Price(0, "100".into()), D::Template(crate::app::Opt { id: blue, label: "Blue".into() })] { let t = app.update(Message::Doc(m)); settle(&mut app, t); }
+    let id = { let p = app.doc.as_ref().unwrap().payload(&app, "AUTHORISED").unwrap(); app.be.call_now("docs.save", p).unwrap()["id"].as_i64().unwrap() };
+    assert_eq!(app.be.call_now("docs.get", json!({"id": id})).unwrap()["branding_theme_id"], blue);
+    // Reopened, the form shows it; switching back to the default is saved too.
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: Some(id) })); settle(&mut app, t);
+    assert_eq!(app.doc.as_ref().unwrap().template.as_ref().map(|t| t.id), Some(blue));
+    let std_id = app.lk.templates.iter().find(|t| t["name"] != "Blue").unwrap()["id"].as_i64().unwrap();
+    let _ = app.update(Message::Doc(D::Template(crate::app::Opt { id: std_id, label: "Standard".into() })));
+    let p = app.doc.as_ref().unwrap().payload(&app, "AUTHORISED").unwrap();
+    app.be.call_now("docs.save", p).unwrap();
+    assert_eq!(app.be.call_now("docs.get", json!({"id": id})).unwrap()["branding_theme_id"], std_id);
     let _ = std::fs::remove_dir_all(dir);
 }

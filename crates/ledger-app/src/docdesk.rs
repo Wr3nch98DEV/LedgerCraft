@@ -12,6 +12,16 @@ use iced::widget::{Space, button, column, combo_box, container, pick_list, row, 
 use iced::{Alignment, Element, Fill, Length, Padding};
 
 /// The big form title Desktop prints on the form itself.
+/// The form template: a picker when the company has templates, else the form's name.
+fn template_pick<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
+    let opts = app.lk.template_opts();
+    if opts.is_empty() || !matches!(e.kind.as_str(), "ACCREC" | "ACCRECCREDIT" | "QUOTE" | "PO") {
+        return container(text(format!("LedgerCraft {}", form_name(e))).size(13).color(t().muted)).padding([5, 7]).style(theme::soft).into();
+    }
+    let cur = e.template.clone().or_else(|| app.lk.templates.iter().find(|t| t["is_default"].as_i64() == Some(1)).and_then(|t| opts.iter().find(|o| Some(o.id) == t["id"].as_i64()).cloned()));
+    pick_list(opts, cur, |o| Message::Doc(crate::doc::Msg::Template(o))).padding([5, 7]).text_size(13).style(theme::pick).width(Fill).into()
+}
+
 fn form_name(e: &Editor) -> &'static str {
     let receipt = e.kind == "SALESRECEIPT" || e.doc.as_ref().map(|d| d["subtype"] == "RECEIPT").unwrap_or(false);
     match e.kind.as_str() {
@@ -126,7 +136,7 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
         }
         column![
             row![column![label(who), contact].spacing(3).width(320), Space::new().width(20),
-                column![label("Template"), container(text(format!("LedgerCraft {}", form_name(e))).size(13).color(k.muted)).padding([5, 7]).style(theme::soft)].spacing(3).width(220)].align_y(Alignment::End),
+                column![label("Template"), template_pick(app, e)].spacing(3).width(220)].align_y(Alignment::End),
             row![column![title, addr_box(if e.kind == "SALESRECEIPT" { "Sold To" } else { "Bill To" })].spacing(10), ui::hspace(), right].align_y(Alignment::Start),
         ].spacing(10).into()
     } else {

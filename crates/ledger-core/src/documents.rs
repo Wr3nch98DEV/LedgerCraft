@@ -270,10 +270,10 @@ impl Ledger {
             self.conn.execute(
                 "UPDATE documents SET contact_id=?2, reference=?3, date=?4, due_date=?5, expiry_date=?6, delivery_date=?7, delivery_address=?8, attention=?9,
                    title=?10, summary=?11, terms=?12, line_amount_type=?13, currency=?14, rate_e8=?15, subtotal=?16, total_tax=?17, total=?18,
-                   base_total=?19, expected_payment_date=?20, planned_payment_date=?21, updated_at=datetime('now') WHERE id=?1",
+                   base_total=?19, expected_payment_date=?20, planned_payment_date=?21, branding_theme_id=COALESCE(?22, branding_theme_id), updated_at=datetime('now') WHERE id=?1",
                 params![doc_id, contact_id, d.reference, d.date, due, d.expiry_date.clone().filter(|s| !s.is_empty()), d.delivery_date.clone().filter(|s| !s.is_empty()),
                     d.delivery_address, d.attention, d.title, d.summary, d.terms, lat_s, currency, rate, subtotal, total_tax, total,
-                    self.to_base_amount(total, &currency, rate)?, d.expected_payment_date.clone().filter(|s| !s.is_empty()), d.planned_payment_date.clone().filter(|s| !s.is_empty())])?;
+                    self.to_base_amount(total, &currency, rate)?, d.expected_payment_date.clone().filter(|s| !s.is_empty()), d.planned_payment_date.clone().filter(|s| !s.is_empty()), d.branding_theme_id])?;
             self.write_lines("DOC", doc_id, &lines)?;
             self.flag_contact_role(contact_id, sales && kind != "QUOTE" || kind == "QUOTE", !sales)?;
             // Status

@@ -417,7 +417,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             Ok(v) => {
                 if let (Some(t), Some(id)) = (app.desk.tpl.as_mut(), v["id"].as_i64()) { t["id"] = serde_json::json!(id); }
                 let t1 = app.toast("Template saved", false);
-                Task::batch([t1, app.load()])
+                Task::batch([t1, app.load(), app.load_lookups()])
             }
             Err(e) => app.toast(e, true),
         },
