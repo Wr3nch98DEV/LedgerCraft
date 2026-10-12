@@ -252,7 +252,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }
             Err(e) => app.toast(e, true),
         },
-        Msg::BaField(f, v) => { match f { 0 => app.desk.ba_qty = v, 1 => app.desk.ba_date = v, _ => app.desk.ba_memo = v } Task::none() }
+        Msg::BaField(f, v) => { match f { 0 => app.desk.ba_qty = v, 1 => app.desk.ba_date = dkey(app, &app.desk.ba_date, v), _ => app.desk.ba_memo = v } Task::none() }
         Msg::BaBuild => {
             let Some(item) = app.desk.ba_item.clone() else { return app.toast("Choose the assembly item", true) };
             let qty = app.desk.ba_qty.trim().to_string();
@@ -424,7 +424,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }
             Err(e) => app.toast(e, true),
         },
-        Msg::FcField(f, v) => { match f { 0 => app.desk.fc_rate = v, 1 => app.desk.fc_min = v, 2 => app.desk.fc_grace = v, _ => app.desk.fc_date = v } Task::none() }
+        Msg::FcField(f, v) => { match f { 0 => app.desk.fc_rate = v, 1 => app.desk.fc_min = v, 2 => app.desk.fc_grace = v, _ => app.desk.fc_date = dkey(app, &app.desk.fc_date, v) } Task::none() }
         Msg::FcPick(id, on) => { app.desk.fc_skip.retain(|x| *x != id); if !on { app.desk.fc_skip.push(id); } Task::none() }
         Msg::FcAssess => {
             let Some(date) = ui::to_iso(&fc_date(app), app.date_style()) else { return app.toast("Check the assessment date", true) };
@@ -469,7 +469,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         },
         Msg::TimeProject(p) => { app.desk.time_project = Some(p); app.desk.time_task = None; Task::none() }
         Msg::TimeTask(t) => { app.desk.time_task = Some(t); Task::none() }
-        Msg::TimeField(f, v) => { match f { 0 => app.desk.time_date = v, 1 => app.desk.time_dur = v, _ => app.desk.time_notes = v } Task::none() }
+        Msg::TimeField(f, v) => { match f { 0 => app.desk.time_date = dkey(app, &app.desk.time_date, v), 1 => app.desk.time_dur = v, _ => app.desk.time_notes = v } Task::none() }
         Msg::TimeSave => {
             let (Some(p), Some(task)) = (app.desk.time_project.clone(), app.desk.time_task.clone()) else { return app.toast("Choose the project and task", true) };
             let Some(minutes) = parse_duration(&app.desk.time_dur) else { return app.toast("Enter the duration as h:mm (e.g. 1:30) or hours (1.5)", true) };
@@ -545,7 +545,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, |r| Message::Desk(Msg::DocAdded(r)))
         }
         Msg::AdjQty(id, v) => { match app.desk.adj.iter_mut().find(|x| x.0 == id) { Some(x) => x.1 = v, None => app.desk.adj.push((id, v)) } Task::none() }
-        Msg::AdjDate(v) => { app.desk.adj_date = v; Task::none() }
+        Msg::AdjDate(v) => { app.desk.adj_date = dkey(app, &app.desk.adj_date, v); Task::none() }
         Msg::AdjAccount(a) => { app.desk.adj_account = Some(a); Task::none() }
         Msg::AdjMemo(v) => { app.desk.adj_memo = v; Task::none() }
         Msg::AdjSave => {
@@ -584,7 +584,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::TaxPick(id, on) => { tax_row(app, id).1 = on; Task::none() }
         Msg::TaxAmt(id, v) => { let r = tax_row(app, id); r.2 = v; r.1 = true; Task::none() }
         Msg::TaxFrom(a) => { app.desk.tax_from = Some(a); Task::none() }
-        Msg::TaxDate(v) => { app.desk.tax_date = v; Task::none() }
+        Msg::TaxDate(v) => { app.desk.tax_date = dkey(app, &app.desk.tax_date, v); Task::none() }
         Msg::TaxPay => {
             let Some(liab) = app.lk.accounts.iter().find(|a| a["system_account"] == "GST").and_then(|a| a["id"].as_i64()) else { return app.toast("No sales tax liability account found", true) };
             let Some(from) = app.desk.tax_from.clone().or_else(|| crate::payments::bank_only(app).into_iter().next()) else { return app.toast("Choose the account to pay from", true) };
@@ -637,8 +637,9 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             Task::none()
         }
         Msg::Reg(f, v) => {
+            let style = app.date_style();
             let r = &mut app.desk.reg;
-            match f { RegField::Date => r.date = v, RegField::Number => r.number = v, RegField::Payee => r.payee = v, RegField::Memo => r.memo = v,
+            match f { RegField::Date => r.date = ui::date_keys(&r.date, &v, style), RegField::Number => r.number = v, RegField::Payee => r.payee = v, RegField::Memo => r.memo = v,
                 // Payment and Deposit are either/or, as in the register.
                 RegField::Payment => { r.payment = v; if !r.payment.trim().is_empty() { r.deposit.clear(); } }
                 RegField::Deposit => { r.deposit = v; if !r.deposit.trim().is_empty() { r.payment.clear(); } } }
@@ -688,7 +689,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             Err(e) => app.toast(e, true),
         },
         Msg::StmtOne(o) => { app.desk.stmt_one = o; Task::none() }
-        Msg::StmtDate(v) => { app.desk.stmt_date = v; Task::none() }
+        Msg::StmtDate(v) => { app.desk.stmt_date = dkey(app, &app.desk.stmt_date, v); Task::none() }
         Msg::StmtDone(r) => { app.desk.stmt_busy = false; match r { Ok(m) => app.toast(m, false), Err(e) => app.toast(e, true) } }
         Msg::StmtEmail => {
             let ids = statement_ids(app);
@@ -1088,6 +1089,12 @@ pub fn other_names(app: &App) -> Element<'_, Message> {
         ui::hspace(),
         text("Owners, partners and one-off payees. A name becomes a customer or vendor once you transact with it.").size(12).color(k.muted).into(),
     ])
+}
+
+/// QuickBooks date keys for a field that shows today until it's changed.
+fn dkey(app: &App, old: &str, new: String) -> String {
+    let shown = if old.is_empty() { app.d(&ui::today_iso()) } else { old.to_string() };
+    ui::date_keys(&shown, &new, app.date_style())
 }
 
 fn qty_text(e4: i64) -> String {
@@ -1660,13 +1667,18 @@ pub fn help(app: &App) -> Element<'_, Message> {
         pair("Ctrl+A", "Chart of Accounts"), pair("Ctrl+R", "Use Register"), pair("Ctrl+T", "Memorized Transaction List"), pair("Ctrl+F / F3", "Search"),
         pair("Ctrl+S", "Save the transaction you're editing"), pair("Tab / Shift+Tab", "Next / previous field"), pair("F5", "Refresh"), pair("Esc", "Close menus"),
         pair("Alt+T", "Light / dark mode"), pair("F1", "This help"),
+        text("In any date field").size(14).font(BOLD),
+        pair("+ / -", "Next / previous day"), pair("T", "Today"), pair("W / K", "First / last day of the week"),
+        pair("M / H", "First / last day of the month"), pair("Y / R", "First / last day of the year"),
     ].spacing(6);
     let places = column![
         text("Where things are").size(16).font(BOLD),
         pair("Customers menu", "Invoices, estimates, sales receipts, statements, payments, credit memos"),
         pair("Vendors menu", "Bills, pay bills, purchase orders, sales tax, 1099s"),
         pair("Banking menu", "Write checks, deposits, transfers, register, reconcile, bank feeds"),
-        pair("Lists menu", "Chart of accounts, items, memorized transactions"),
+        pair("Inventory menu", "Purchase orders, receive items, adjust quantity, build assemblies"),
+        pair("Favorites menu", "Your own shortcuts — Customize Favorites"),
+        pair("Lists menu", "Chart of accounts, items, price levels, payroll items, classes, templates, memorized transactions"),
         pair("Edit ▸ Preferences", "Layout (Desktop / Online / Xero), dark mode, company, email, users"),
         pair("Window menu", "Every open window; Close All"),
         pair("File menu", "Switch company, back up, restore a backup"),

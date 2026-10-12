@@ -55,6 +55,44 @@ pub fn to_iso(input: &str, style: DateStyle) -> Option<String> {
     let fmts: &[&str] = match style { DateStyle::Us => &["%m/%d/%Y", "%Y-%m-%d"], DateStyle::Intl => &["%d/%m/%Y", "%Y-%m-%d"], DateStyle::Long => &["%d %b %Y", "%d/%m/%Y", "%Y-%m-%d"] };
     fmts.iter().find_map(|f| chrono::NaiveDate::parse_from_str(s, f).ok()).map(|d| d.format("%Y-%m-%d").to_string())
 }
+/// QuickBooks Desktop date-field keys, applied when one character is typed into a date field:
+/// + / - next / previous day, T today, W / K first / last day of the week, M / H first / last day
+/// of the month, Y / R first / last day of the year. Letters only in the QuickBooks date styles
+/// (Xero's "12 Oct 2026" uses letters); + and - only when the field already holds a date.
+pub fn date_keys(old: &str, new: &str, style: DateStyle) -> String {
+    use chrono::{Datelike, Duration, NaiveDate};
+    if new.chars().count() != old.chars().count() + 1 { return new.to_string(); }
+    // The one character that was typed.
+    let (o, n): (Vec<char>, Vec<char>) = (old.chars().collect(), new.chars().collect());
+    let i = (0..n.len()).find(|&i| i >= o.len() || o[i] != n[i]).unwrap_or(n.len() - 1);
+    if n[..i] != o[..i] || n[i + 1..] != o[i..] { return new.to_string(); }
+    let key = n[i].to_ascii_lowercase();
+    let today = chrono::Local::now().date_naive();
+    // An empty field counts as today (date fields show today until changed).
+    let cur = if old.trim().is_empty() { Some(today) } else { to_iso(old, style).and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok()) };
+    let letters = style != DateStyle::Long;
+    let d = match key {
+        '+' | '=' => cur.map(|d| d + Duration::days(1)),
+        '-' | '_' => cur.map(|d| d - Duration::days(1)),
+        't' if letters => Some(today),
+        _ if !letters => None,
+        'w' | 'k' | 'm' | 'h' | 'y' | 'r' => {
+            let b = cur.unwrap_or(today);
+            let first_month = NaiveDate::from_ymd_opt(b.year(), b.month(), 1).unwrap();
+            Some(match key {
+                'w' => b - Duration::days(b.weekday().num_days_from_sunday() as i64),
+                'k' => b + Duration::days(6 - b.weekday().num_days_from_sunday() as i64),
+                'm' => first_month,
+                'h' => add_months_date(first_month, 1) - Duration::days(1),
+                'y' => NaiveDate::from_ymd_opt(b.year(), 1, 1).unwrap(),
+                _ => NaiveDate::from_ymd_opt(b.year(), 12, 31).unwrap(),
+            })
+        }
+        _ => None,
+    };
+    match d { Some(d) => date(&d.format("%Y-%m-%d").to_string(), style), None => new.to_string() }
+}
+
 /// The first of the month `n` months after `d` (which should be a 1st).
 pub fn add_months_date(d: chrono::NaiveDate, n: i32) -> chrono::NaiveDate {
     use chrono::Datelike;

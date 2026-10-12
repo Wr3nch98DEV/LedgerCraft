@@ -2438,3 +2438,41 @@ fn desktop_customer_center_lists_jobs() {
     assert!(matches!(msgs.first(), Some(Message::Desk(crate::desktop::Msg::Select(_)))), "{msgs:?}");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn quickbooks_date_keys() {
+    use crate::ui::{date_keys, DateStyle::*};
+    let k = |old: &str, new: &str| date_keys(old, new, Us);
+    assert_eq!(k("10/13/2026", "10/13/2026+"), "10/14/2026");
+    assert_eq!(k("10/13/2026", "10/13/2026-"), "10/12/2026");
+    assert_eq!(k("10/13/2026", "+10/13/2026"), "10/14/2026", "typed anywhere in the field");
+    assert_eq!(k("10/13/2026", "10/13/2026m"), "10/01/2026");
+    assert_eq!(k("10/13/2026", "10/13/2026H"), "10/31/2026");
+    assert_eq!(k("02/10/2028", "02/10/2028h"), "02/29/2028", "leap year");
+    assert_eq!(k("10/13/2026", "10/13/2026y"), "01/01/2026");
+    assert_eq!(k("10/13/2026", "10/13/2026r"), "12/31/2026");
+    assert_eq!(k("10/13/2026", "10/13/2026w"), "10/11/2026", "Sunday");
+    assert_eq!(k("10/13/2026", "10/13/2026k"), "10/17/2026", "Saturday");
+    assert_eq!(k("10/13/2026", "10/13/2026t"), crate::ui::date(&crate::ui::today_iso(), Us));
+    assert_eq!(date_keys("31/12/2026", "31/12/2026+", Intl), "01/01/2027");
+    // Ordinary typing is untouched.
+    assert_eq!(k("10/13/202", "10/13/2026"), "10/13/2026");
+    assert_eq!(k("2026", "2026-"), "2026-", "ISO typing still works");
+    assert_eq!(k("10/13/2026", "10/13/2026x"), "10/13/2026x");
+    // Xero's "12 Oct 2026" style keeps letters for month names.
+    assert_eq!(date_keys("12 O", "12 Oc", Long), "12 Oc");
+    assert_eq!(date_keys("12 Oct 2026", "12 Oct 2026+", Long), "13 Oct 2026");
+}
+
+#[test]
+fn date_keys_in_the_invoice_form() {
+    let (mut app, dir) = desktop_app("datekeys");
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None })); settle(&mut app, t);
+    let (d0, due0) = { let e = app.doc.as_ref().unwrap(); (e.date.clone(), e.due.clone()) };
+    let _ = app.update(Message::Doc(crate::doc::Msg::Date(format!("{d0}+"))));
+    let e = app.doc.as_ref().unwrap();
+    let iso = |s: &str| crate::ui::to_iso(s, app.date_style()).unwrap();
+    assert_eq!(iso(&e.date), crate::ui::add_days_iso(&iso(&d0), 1));
+    assert_eq!(iso(&e.due), crate::ui::add_days_iso(&iso(&due0), 1), "terms keep the due date in step");
+    let _ = std::fs::remove_dir_all(dir);
+}

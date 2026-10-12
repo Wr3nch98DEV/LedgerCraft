@@ -502,6 +502,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             Task::none()
         }
         Msg::Date(s) => {
+            let s = ui::date_keys(&e.date, &s, style);
             // Keep the due date's offset (terms) when the date changes.
             if let (Some(old), Some(new), Some(due)) = (ui::to_iso(&e.date, style), ui::to_iso(&s, style), ui::to_iso(&e.due, style)) {
                 let days = chrono::NaiveDate::parse_from_str(&due, "%Y-%m-%d").ok().zip(chrono::NaiveDate::parse_from_str(&old, "%Y-%m-%d").ok()).map(|(d, o)| (d - o).num_days());
@@ -509,7 +510,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }
             e.date = s; Task::none()
         }
-        Msg::Due(s) => { e.due = s; Task::none() }
+        Msg::Due(s) => { e.due = ui::date_keys(&e.due, &s, style); Task::none() }
         Msg::Reference(s) => { e.reference = s; Task::none() }
         Msg::Template(t) => { e.template = Some(t); Task::none() }
         Msg::Number(s) => { e.number = s; Task::none() }
@@ -643,7 +644,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }
         }
         Msg::PayAmount(s) => { e.pay_amount = s; Task::none() }
-        Msg::PayDate(s) => { e.pay_date = s; Task::none() }
+        Msg::PayDate(s) => { e.pay_date = ui::date_keys(&e.pay_date, &s, style); Task::none() }
         Msg::PayAccount(a) => { e.pay_account = Some(a); Task::none() }
         Msg::AddPayment => {
             let (Some(id), Some(acc)) = (e.id, e.pay_account.clone()) else { app.doc = Some(e); return app.toast("Choose the account the money went to", true) };

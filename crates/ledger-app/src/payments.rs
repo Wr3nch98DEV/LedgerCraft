@@ -156,7 +156,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         }
         Msg::CheckNo(n) => { s.check_no = n; Task::none() }
         Msg::NextCheck(r) => { if let Ok(v) = r { s.check_no = v["number"].as_str().unwrap_or("").to_string(); } Task::none() }
-        Msg::Date(d) => { s.date = d; Task::none() }
+        Msg::Date(d) => { s.date = ui::date_keys(&s.date, &d, app.date_style()); Task::none() }
         Msg::Reference(r) => { s.reference = r; Task::none() }
         Msg::Pick(n, on) => { let d = &mut s.docs[n]; d.pick = on; d.amount = if on { ui::plain(d.due) } else { String::new() }; Task::none() }
         Msg::Amount(n, a) => { let d = &mut s.docs[n]; d.pick = ui::parse_money(&a).unwrap_or(0) > 0; d.amount = a; Task::none() }

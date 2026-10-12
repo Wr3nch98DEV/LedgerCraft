@@ -85,7 +85,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::Service(v) => { s.service = v; Task::none() }
         Msg::Track1099(v) => { s.track_1099 = v; Task::none() }
         Msg::PriceLevel(p) => { s.price_level = Some(p); Task::none() }
-        Msg::Date(v) => { s.date = v; Task::none() }
+        Msg::Date(v) => { s.date = ui::date_keys(&s.date, &v, app.date_style()); Task::none() }
         Msg::From(v) => { s.from = Some(v); Task::none() }
         Msg::To(v) => { s.to = Some(v); Task::none() }
         Msg::Amount(v) => { s.amount = v; Task::none() }
