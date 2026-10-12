@@ -85,6 +85,7 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
     let can_apply = saved && status == "AUTHORISED" && e.doc.as_ref().and_then(|d| d["amount_due"].as_i64()).unwrap_or(0) > 0 && crate::doc::apply_other(&e.kind).is_some();
     let apply_label = match e.kind.as_str() { "ACCRECCREDIT" => "Apply to Invoice", "ACCPAYCREDIT" => "Apply to Bill", _ => "Apply Credits" };
     if crate::doc::apply_other(&e.kind).is_some() { ribbon = ribbon.push(rib("swap", apply_label, if can_apply { m(Msg::ApplyOpen) } else { None })); }
+    if e.kind.ends_with("CREDIT") { ribbon = ribbon.push(rib("check-write", if is_sales { "Give Refund" } else { "Receive Refund" }, if can_apply { m(Msg::RefundOpen) } else { None })); }
     match e.kind.as_str() {
         "ACCREC" => { ribbon = ribbon.push(rib("receive", "Receive Payments", Some(Message::Nav(Route::ReceivePayment(e.contact.as_ref().map(|c| c.id)))))); }
         "QUOTE" => { ribbon = ribbon.push(rib("sales", "Create Invoice", if saved && matches!(status, "SENT" | "ACCEPTED" | "DRAFT") { m(Msg::Action("to_invoice")) } else { None })); }
@@ -221,6 +222,7 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
         header,
         memorize_panel(e),
         apply_panel(app, e),
+        refund_panel(app, e),
         doc_extra(app, e),
         grid_area,
         add,
@@ -228,6 +230,23 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
         buttons,
     ].spacing(12).padding(Padding { top: 12.0, left: 16.0, right: 16.0, bottom: 16.0 });
     column![ribbon, row![scrollable(container(form).max_width(1250)).style(theme::scroll).height(Fill).width(Fill), history_panel(app, e)]].into()
+}
+
+/// Give Refund (credit memo) / Receive Refund (vendor credit): pay the credit out of or into a bank account.
+fn refund_panel<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
+    if !e.refund_open { return Space::new().into(); }
+    let is_sales = sales(&e.kind);
+    container(column![
+        text(if is_sales { "Issue a Refund" } else { "Receive a Refund" }).size(15).font(BOLD),
+        row![
+            column![label("Refund Amount"), text_input("", &e.pay_amount).on_input(|v| Message::Doc(Msg::PayAmount(v))).padding([5, 7]).size(13).style(theme::input).width(140)].spacing(3),
+            column![label("Date"), text_input("", &e.pay_date).on_input(|v| Message::Doc(Msg::PayDate(v))).padding([5, 7]).size(13).style(theme::input).width(130)].spacing(3),
+            column![label(if is_sales { "Issue This Refund Via / Account" } else { "Deposit To" }), pick_list(app.lk.bank_opts(), e.pay_account.clone(), |a| Message::Doc(Msg::PayAccount(a))).padding([5, 7]).text_size(13).style(theme::pick).width(260)].spacing(3),
+            ui::hspace(),
+            ui::btn("Cancel", Some(Message::Doc(Msg::RefundOpen))),
+            ui::btn_primary("OK", if e.busy { None } else { Some(Message::Doc(Msg::AddPayment)) }),
+        ].spacing(12).align_y(Alignment::End),
+    ].spacing(10)).padding(14).width(Fill).style(theme::accent_soft).into()
 }
 
 /// Apply Credits: amounts to apply against each open document on the other side.

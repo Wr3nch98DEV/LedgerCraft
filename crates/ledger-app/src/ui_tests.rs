@@ -1255,3 +1255,25 @@ fn desktop_apply_credit_to_invoice() {
     assert_eq!(app.be.call_now("docs.get", json!({"id": cm})).unwrap()["amount_due"], 0);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_give_refund() {
+    use crate::doc::Msg as D;
+    let (mut app, dir) = desktop_app("deskrefund");
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    let cm = app.be.call_now("docs.save", json!({"doc": {"type": "ACCRECCREDIT", "contact_id": cust.id, "date": crate::ui::today_iso(), "line_amount_type": "NOTAX", "status": "AUTHORISED",
+        "lines": [{"description": "Returned goods", "quantity": "1", "unit_price": "75", "account_id": app.lk.accounts.iter().find(|a| a["code"] == "200").unwrap()["id"]}]}})).unwrap()["id"].as_i64().unwrap();
+    let _ = app.update(Message::Nav(Route::Doc { kind: "ACCRECCREDIT".into(), id: Some(cm) }));
+    let d = app.be.call_now("docs.get", json!({"id": cm}));
+    let _ = app.update(Message::Doc(D::Loaded(d)));
+    let msgs = click(&app, "Give Refund");
+    assert!(matches!(msgs.as_slice(), [Message::Doc(D::RefundOpen)]), "{msgs:?}");
+    let _ = app.update(Message::Doc(D::RefundOpen));
+    assert_eq!(app.doc.as_ref().unwrap().pay_amount, "75.00", "refund defaults to the credit left");
+    let _ = app.update(Message::Doc(D::AddPayment));
+    let e = app.doc.as_ref().unwrap();
+    let r = app.be.call_now("payments.add", json!({"document_id": cm, "account_id": e.pay_account.as_ref().unwrap().id, "date": crate::ui::today_iso(), "amount": "75.00", "reference": ""}));
+    assert!(r.is_ok(), "{r:?}");
+    assert_eq!(app.be.call_now("docs.get", json!({"id": cm})).unwrap()["status"], "PAID");
+    let _ = std::fs::remove_dir_all(dir);
+}

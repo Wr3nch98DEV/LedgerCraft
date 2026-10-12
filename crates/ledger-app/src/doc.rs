@@ -63,6 +63,8 @@ pub struct Editor {
     /// Apply Credits: open documents on the other side (credits for an invoice/bill, or
     /// invoices/bills for a credit) as (document, amount to apply).
     pub apply: Option<Vec<(Value, String)>>,
+    /// Desktop: the Give Refund / pay panel is open.
+    pub refund_open: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +113,7 @@ pub enum Msg {
     /// Desktop history panel data.
     History(Result<Value, String>),
     /// Desktop Memorize panel.
+    RefundOpen,
     ApplyOpen, ApplyDocs(Result<Value, String>), ApplyAmt(usize, String), ApplySave, Applied(Result<Value, String>),
     Memorize, MemoFreq(&'static str), MemoNext(String), MemoAuto(bool), MemoSave, Memorized(Result<Value, String>),
     /// Desktop Expenses tab: an amount typed straight in (quantity 1).
@@ -188,7 +191,7 @@ impl Editor {
             lines: vec![Line { qty: "1".into(), ..Default::default() }, Line { qty: "1".into(), ..Default::default() }],
             terms: String::new(), busy: false, editing: true,
             pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false,
-            delayed: vec![], added: vec![], items_tab: false, close_after: false, history: vec![], memo_open: false, memo_freq: "Monthly", memo_next: String::new(), memo_auto: false, apply: None,
+            delayed: vec![], added: vec![], items_tab: false, close_after: false, history: vec![], memo_open: false, memo_freq: "Monthly", memo_next: String::new(), memo_auto: false, apply: None, refund_open: false,
         };
         if let Some(a) = default_account(app, kind) { for l in &mut e.lines { l.account = Some(a.clone()); l.tax = default_tax(app, Some(a.id)); } }
         e
@@ -328,6 +331,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.doc = Some(e);
             return t;
         }
+        Msg::RefundOpen => { e.refund_open = !e.refund_open; Task::none() }
         Msg::ApplyOpen => {
             if e.apply.is_some() { e.apply = None; app.doc = Some(e); return Task::none(); }
             let (Some(c), Some(other)) = (e.contact.as_ref(), apply_other(&e.kind)) else { app.doc = Some(e); return Task::none() };
@@ -552,7 +556,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             e.busy = false;
             match r {
                 Ok(v) => {
-                    let msg = match what { "void" => "Voided", "delete" => "Deleted", "approve" => "Approved", "to_invoice" => "Invoice created", "to_bill" => "Bill created", "copy" => "Copy created", "accept" => "Marked as accepted", "sent" => "Marked as sent", "pay" => "Payment recorded", _ => "Done" };
+                    let msg = match what { "void" => "Voided", "delete" => "Deleted", "approve" => "Approved", "to_invoice" => "Invoice created", "to_bill" => "Bill created", "copy" => "Copy created", "accept" => "Marked as accepted", "sent" => "Marked as sent", "pay" => if e.kind.ends_with("CREDIT") { "Refund recorded" } else { "Payment recorded" }, _ => "Done" };
                     let t1 = app.toast(msg, false);
                     let next = match (what, v["id"].as_i64()) {
                         ("to_invoice", Some(id)) => Route::Doc { kind: "ACCREC".into(), id: Some(id) },
