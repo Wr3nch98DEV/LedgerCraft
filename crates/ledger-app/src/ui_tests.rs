@@ -1696,3 +1696,15 @@ fn memorized_reports() {
     assert!(app.memorized_reports().is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_view_choices_are_remembered() {
+    use crate::desktop::{Msg as W, Pane};
+    let (mut app, dir) = desktop_app("deskprefs2");
+    let _ = app.update(Message::Desk(W::OneWindow(true)));
+    let _ = app.update(Message::Desk(W::Pane(Pane::Balances)));
+    let (again, _) = App::boot_layout(dir.clone(), None, Some(crate::theme::Layout::Desktop));
+    assert!(again.desk.one_window);
+    assert_eq!(again.desk.pane, Pane::Balances);
+    let _ = std::fs::remove_dir_all(dir);
+}

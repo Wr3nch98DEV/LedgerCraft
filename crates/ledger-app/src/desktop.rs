@@ -89,6 +89,19 @@ pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
+    /// Remember the Desktop view choices (One Window, icon bar pane).
+    pub fn save_desk_prefs(&self) {
+        let mut p = self.prefs();
+        p["one_window"] = serde_json::json!(self.desk.one_window);
+        p["pane"] = serde_json::json!(match self.desk.pane { Pane::Shortcuts => "shortcuts", Pane::Balances => "balances", Pane::Windows => "windows" });
+        self.write_prefs(&p);
+    }
+    pub fn load_desk_prefs(&mut self) {
+        let p = self.prefs();
+        self.desk.one_window = p["one_window"].as_bool().unwrap_or(false);
+        self.desk.pane = match p["pane"].as_str() { Some("balances") => Pane::Balances, Some("windows") => Pane::Windows, _ => Pane::Shortcuts };
+    }
+
     /// Keep the current screen's unsaved state with its window.
     pub fn stash_window(&mut self) {
         let i = self.desk.active;
@@ -147,7 +160,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.menu = None;
             app.load()
         }
-        Msg::Pane(p) => { app.desk.pane = p; Task::none() }
+        Msg::Pane(p) => { app.desk.pane = p; app.save_desk_prefs(); Task::none() }
         Msg::Insights(v) => { app.desk.insights = v; Task::none() }
         Msg::Exit => iced::exit(),
         Msg::Select(id) => {
@@ -334,6 +347,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::OneWindow(on) => {
             app.desk.one_window = on;
             app.menu = None;
+            app.save_desk_prefs();
             if on { let i = app.desk.active; let keep = app.desk.windows.remove(i); app.desk.windows = vec![keep]; app.desk.active = 0; }
             Task::none()
         }

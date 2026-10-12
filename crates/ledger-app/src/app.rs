@@ -298,6 +298,7 @@ impl App {
         };
         let mut app = app;
         if let Some(l) = layout { app.set_layout(l); }
+        app.load_desk_prefs();
         // Background work: repeating transactions, reminders, outgoing email and daily backups
         // (every 5 minutes, as in the web version). Not in unit tests.
         #[cfg(not(test))]
