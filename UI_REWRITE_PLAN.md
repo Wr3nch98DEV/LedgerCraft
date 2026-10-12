@@ -6,18 +6,19 @@
 
 | Plan item | State |
 |---|---|
-| Phase 0: iced 0.14 spike, engine bridge, theme tokens, icons, widgets | ✅ (PDF crate bake-off not started) |
-| Phase 1: app skeleton, QuickBooks-style shell (sidebar, top bar, + New, gear menu), Xero-style shell, layout + dark/light switching, company picker & setup wizard, `start.bat` | ✅ (sign-in for password-protected files: not yet; search box opens a filtered sales list) |
-| Phase 2: engine additions (§6) | ⬜ not started — QuickBooks-only items (sales receipt, checks, bank deposit, tick-off reconcile…) are greyed out in the + New menu |
-| Phase 3: QuickBooks core | 🟡 Business overview; Sales (all sales, invoices, estimates, customers + customer page, products & services); Expenses (expense transactions, bills, vendors, POs); invoice / estimate / credit memo / bill / vendor credit / PO editor (create, edit, approve, void, copy, convert, record payment); Receive payment across invoices; Pay bills (as one batch); Expense; Banking For review / Categorized (match, rules, categorize, undo, accept all); Chart of accounts; Journal entry; new customer / vendor / product |
-| Phase 4: reports | 🟡 Report centre with QuickBooks names & groups, every engine report viewable with period + cash/accrual; customise panel, export, saved reports not yet. Taxes, payroll, projects, mileage: placeholders pointing at the web version |
-| Phase 5–6: settings & tools, PDFs | ⬜ settings page has layout/theme/company info only; printing still via the web version |
-| Phase 7: Xero-style layout | 🟡 working on the same screens (top menu, dashboard cards, Xero terms and statuses); Xero-specific screens not yet |
-| Phase 8: cut-over | ⬜ web version kept as `start.bat web` |
+| Phase 0: iced 0.14 spike, engine bridge, theme tokens, icons, widgets | ✅ (PDFs: own small Rust PDF writer instead of a crate) |
+| Phase 1: app skeleton, QuickBooks-style shell (sidebar, top bar, + New mega-menu, gear menu), Xero-style shell, layout + dark/light switching, company picker & setup wizard, sign-in (password + 2-step code), global search, `start.bat` | ✅ |
+| Phase 2: engine additions (§6) | 🟡 done: **sales receipts**, **checks** (check numbers, next-number suggestion), **Undeposited Funds + bank deposits**, **tick-off Reconcile** (statement ending balance, finish at zero difference, history, undo last). Not yet: excluded bank lines, delayed charge/credit, account detail types, 1099s, US sales tax by agency |
+| Phase 3: QuickBooks core | ✅ Business overview; Sales (all sales, invoices, estimates, credit memos, sales receipts, customers + customer page, products & services); Expenses (expenses, checks, bills, vendors, POs); full document editor (create, edit, approve, void, copy, convert, record payment, save and send, print to PDF); Receive payment; Pay bills; Bank deposit; Transfer; Banking For review / Categorized (match, rules, categorize, undo, accept all, upload statement file); Reconcile; Chart of accounts; Journal entry |
+| Phase 4: reports | 🟡 Report centre with QuickBooks names & groups, every engine report with period + cash/accrual, **export to PDF and CSV**. Customise panel and saved reports not yet |
+| Payroll, taxes, projects, mileage | 🟡 native screens: employees, run payroll → submit, tax returns (create, file), projects (invoice from project), mileage list |
+| Phase 5–6: settings & tools, PDFs | 🟡 settings: layout, appearance, editable company details, switch company. Invoices/estimates/bills print to PDF natively. Users, branding and email settings still in the web version |
+| Phase 7: Xero-style layout | 🟡 same screens in Xero layout (top menu, dashboard cards, Xero terms/statuses, card-style bank reconcile with OK buttons). Xero-specific screens not yet |
+| Phase 8: cut-over | ⬜ web version kept as `start.bat web` — not removed without your say-so |
 
 **Deviations from the plan, for review:** the UI lives in one crate (`crates/ledger-app`, modules per area) rather than four, and talks to the engine through the existing in-process command dispatcher (`ledger_server::rpc::handle`, same as the REST API) rather than new typed calls. Both kept the prototype fast to build and can be split/typed later without changing screens. The layout preference is stored per computer (`ui-preferences.json`), not yet per user.
 
-**Tests:** 9 native-app tests (money/date parsing, invoice editor → engine round trip, bank-feed actions reconcile the demo feed to zero difference, every report runs from the viewer, form payloads) + 46 engine tests.
+**Tests:** 28 native-app tests (headless UI tests that click through real screens with iced's simulator: + New menu, editor, navigation, bank match, sign-in, payroll, search, settings, Xero reconcile, transfer, save-and-send, sales receipt, check, bank deposit, tick-off reconcile; plus PDF, CSV import and form payload tests) + 51 engine tests. Run with `start.bat test`.
 
 **Status:** draft for review. No code changes until approved.
 **Goal:** replace the web UI (Svelte/TypeScript/HTML/CSS shown in an Edge/Chrome window) with a native desktop UI written entirely in Rust using **iced**. The UI ships with two switchable layouts:
