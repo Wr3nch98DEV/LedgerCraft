@@ -39,10 +39,12 @@ pub struct State {
     pub report_cat: Option<&'static str>,
     /// Income/Bill Tracker: which summary box is selected ("all" when none).
     pub tracker: &'static str,
+    /// Employee Center: selected employee.
+    pub emp: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64) }
 
 impl App {
     /// Keep the current screen's unsaved state with its window.
@@ -120,6 +122,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, move |r| Message::Desk(Msg::Detail(id, r)))
         }
         Msg::ReportCat(c) => { app.desk.report_cat = Some(c); Task::none() }
+        Msg::Employee(id) => { app.desk.emp = Some(id); Task::none() }
         Msg::Tracker(f) => { app.desk.tracker = if app.desk.tracker == f { "all" } else { f }; Task::none() }
         Msg::Detail(id, r) => {
             if app.desk.sel == Some(id) { app.desk.detail = r.ok(); }
@@ -182,7 +185,8 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::NewContact(false) => "New Vendor".into(),
         Route::NewProduct => "New Item".into(),
         Route::NewAccount => "Add New Account".into(),
-        Route::Payroll | Route::PayRun(_) => "Payroll Center".into(),
+        Route::Payroll => "Employee Center".into(),
+        Route::PayRun(_) => "Pay Employees".into(),
         Route::Taxes | Route::TaxReturn(_) => "Manage Sales Tax".into(),
         Route::Projects => "Projects".into(),
         Route::Mileage => "Enter Vehicle Mileage".into(),
@@ -391,6 +395,66 @@ pub fn frame<'a>(app: &'a App, content: Element<'a, Message>) -> Element<'a, Mes
         layers = layers.push(container(opaque(container(list).padding(8).width(400).style(theme::menu))).padding(Padding { top: 72.0, left: 8.0, ..Padding::ZERO }));
     }
     layers.into()
+}
+
+// ---------------- Employee Center ----------------
+
+/// Employees ▸ Employee Center: employee list, Employee Information and the payroll runs.
+pub fn employee_center(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let emps = d["employees"].as_array().cloned().unwrap_or_default();
+    let sel = app.desk.emp.filter(|id| emps.iter().any(|e| e["id"].as_i64() == Some(*id))).or_else(|| emps.first().and_then(|e| e["id"].as_i64()));
+    let name = |e: &Value| format!("{} {}", e["first_name"].as_str().unwrap_or(""), e["last_name"].as_str().unwrap_or(""));
+    let busy = app.people.busy;
+    let toolbar = row![
+        ui::btn("New Employee", None),
+        ui::btn("Manage Employee Information", None),
+        ui::btn_primary("Pay Employees", if busy { None } else { Some(Message::People(crate::people::Msg::RunPayroll)) }),
+        ui::hspace(),
+        ui::btn("Payroll Summary", rep("payroll-activity")),
+    ].spacing(6).align_y(Alignment::Center);
+    let mut names = column![row![text("NAME").size(11).font(BOLD).color(k.muted).width(Fill), text("STATUS").size(11).font(BOLD).color(k.muted)].padding([6, 10])].spacing(0);
+    for e in &emps {
+        let id = e["id"].as_i64().unwrap_or(0);
+        let on = sel == Some(id);
+        names = names.push(button(row![text(name(e)).size(13).width(Fill), text(if e["status"] == "ACTIVE" { "Active" } else { "Inactive" }).size(12).color(k.muted)])
+            .padding([4, 10]).width(Fill)
+            .style(move |_, s| button::Style { background: if on { Some(iced::Background::Color(k.accent_soft)) } else if matches!(s, button::Status::Hovered) { Some(iced::Background::Color(k.hover)) } else { None },
+                text_color: k.text, border: iced::Border::default(), shadow: Default::default(), snap: true })
+            .on_press(Message::Desk(Msg::Employee(id))));
+    }
+    let left = container(column![
+        row![text("Employees").size(13).font(BOLD), ui::hspace(), text("Active Employees").size(12).color(k.muted)].padding([8, 10]),
+        scrollable(names).style(theme::scroll).height(Fill),
+    ].spacing(6)).width(300).height(Fill).style(theme::card);
+    let info: Element<Message> = match sel.and_then(|id| emps.iter().find(|e| e["id"].as_i64() == Some(id))) {
+        None => container(ui::muted("No employees yet — add them in the Payroll settings of the web version for now.")).padding(16).width(Fill).style(theme::card).into(),
+        Some(e) => {
+            let s = |key: &str| e[key].as_str().unwrap_or("").to_string();
+            let row_ = |l: &'static str, v: String| -> Element<'_, Message> { row![text(l).size(12).color(k.info).width(120), text(if v.is_empty() { "—".into() } else { v }).size(13)].spacing(6).into() };
+            let rate = if e["pay_basis"] == "HOURLY" { format!("{} per hour", ui::money(e["hourly_rate_e2"].as_i64().unwrap_or(0) / 100)) } else { format!("{} per year", ui::money(e["annual_salary"].as_i64().unwrap_or(0))) };
+            container(column![
+                text("Employee Information").size(15).font(BOLD),
+                row![
+                    column![row_("Full Name", name(e)), row_("Main Email", s("email")), row_("Address", s("address").replace('\n', ", "))].spacing(6).width(Fill),
+                    column![row_("Hire Date", app.d(&s("start_date"))), row_("Employment", match s("employment_type").as_str() { "FULLTIME" => "Full-time", "PARTTIME" => "Part-time", "CASUAL" => "Casual", "CONTRACTOR" => "Contractor", _ => "—" }.to_string()), row_("Pay Rate", rate), row_("Pay Schedule", s("calendar_name"))].spacing(6).width(Fill),
+                ].spacing(20),
+            ].spacing(10)).padding(14).width(Fill).style(theme::card).into()
+        }
+    };
+    let runs: Vec<(Vec<Element<Message>>, Option<Message>)> = d["runs"].as_array().cloned().unwrap_or_default().iter().map(|r| (vec![
+        ui::cell("Paycheck run"), ui::cell(r["number"].as_str().unwrap_or("").to_string()), ui::cell(app.d(r["payment_date"].as_str().unwrap_or(""))),
+        ui::cell_muted(format!("{} – {}", app.d(r["period_start"].as_str().unwrap_or("")), app.d(r["period_end"].as_str().unwrap_or("")))),
+        ui::cell_money(r["wages"].as_i64().unwrap_or(0)), ui::cell_money(r["net_pay"].as_i64().unwrap_or(0)), ui::cell_muted(if r["status"] == "POSTED" { "Paid" } else { "Draft" }),
+    ], r["id"].as_i64().map(|id| Message::Nav(Route::PayRun(id))))).collect();
+    let right = column![
+        info,
+        text("Transactions").size(14).font(BOLD),
+        ui::table(&[ui::col("Type", 12), ui::col("Num", 8), ui::col("Date", 11), ui::col("Pay Period", 20), ui::coln("Gross", 12), ui::coln("Net", 12), ui::col("Status", 8)], runs, "No paychecks yet."),
+        text(d["settings"]["disclaimer"].as_str().unwrap_or("Payroll tax tables are approximations — verify before paying anyone.").to_string()).size(12).color(k.muted),
+    ].spacing(10).width(Fill);
+    column![toolbar, row![left, scrollable(right).style(theme::scroll).height(Fill)].spacing(10).height(Fill)].spacing(10).padding(12).height(Fill).into()
 }
 
 // ---------------- Income / Bill Tracker ----------------

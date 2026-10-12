@@ -99,6 +99,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::Doc { .. } => doc::view(app),
         Route::ReceivePayment(_) | Route::PayBills | Route::Spend(_) | Route::Check(_) | Route::Deposit => payments::view(app),
         Route::NewContact(_) | Route::NewProduct | Route::NewAccount | Route::Journal | Route::Transfer => forms::view(app),
+        Route::Payroll if app.desktop() => crate::desktop::employee_center(app),
         Route::Payroll => people::payroll(app),
         Route::PayRun(_) => people::pay_run(app),
         Route::Taxes => people::taxes(app),

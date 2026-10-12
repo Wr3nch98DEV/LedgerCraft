@@ -1037,3 +1037,24 @@ fn desktop_small_forms() {
     assert_eq!(app.desk.windows.len(), windows);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_employee_center() {
+    let (mut app, dir) = desktop_app("deskemp");
+    let _ = app.update(Message::Nav(Route::Payroll));
+    let emps = app.be.call_now("payroll.employees", json!({})).unwrap();
+    let runs = app.be.call_now("payroll.payRuns", json!({})).unwrap();
+    app.data = Some(json!({"employees": emps, "runs": runs, "settings": {}}));
+    assert_eq!(crate::desktop::title(&app, &Route::Payroll), "Employee Center");
+    let second = &emps[1];
+    let name = format!("{} {}", second["first_name"].as_str().unwrap(), second["last_name"].as_str().unwrap());
+    let msgs = click(&app, &name);
+    let id = second["id"].as_i64().unwrap();
+    assert!(matches!(msgs.as_slice(), [Message::Desk(crate::desktop::Msg::Employee(x))] if *x == id), "{msgs:?}");
+    let _ = app.update(Message::Desk(crate::desktop::Msg::Employee(id)));
+    let _g = sim_lock();
+    let mut ui = simulator(app.view());
+    for t in ["Employee Information", "Hire Date", "Pay Employees", "Transactions"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    drop(ui);
+    let _ = std::fs::remove_dir_all(dir);
+}
