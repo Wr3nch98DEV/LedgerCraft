@@ -122,6 +122,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::InventoryCenter => crate::desktop::inventory_center(app),
         Route::BatchInvoices => crate::desktop::batch_invoices(app),
         Route::Reminders => crate::desktop::reminders(app),
+        Route::Find => crate::desktop::find(app),
         Route::EnterTime => crate::desktop::enter_time(app),
         Route::Doc { .. } => doc::view(app),
         Route::ReceivePayment(_) | Route::PayBills | Route::Spend(_) | Route::Check(_) | Route::BankTx(_) | Route::Deposit => payments::view(app),

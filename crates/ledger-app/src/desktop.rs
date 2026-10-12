@@ -74,6 +74,13 @@ pub struct State {
     pub job_new: Option<String>,
     /// Reminders: sections expanded to show their items.
     pub rem_open: Vec<&'static str>,
+    /// Find: transaction type, name/number/memo text, amount, date range.
+    pub find_type: &'static str,
+    pub find_text: String,
+    pub find_amount: String,
+    pub find_from: String,
+    pub find_to: String,
+    pub find_busy: bool,
     /// New/Edit Employee: the employee being edited (None = new) and the form's fields, as typed.
     pub emp_form: Option<(Option<i64>, std::collections::BTreeMap<&'static str, String>, Value)>,
     /// Build Assemblies: the assembly, its components/builds (from items.components), quantity, date, memo,
@@ -140,7 +147,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), ShowInactive(bool), EmpNew, EmpEdit(i64), EmpLoaded(crate::backend::Reply), EmpField(&'static str, String), EmpSave, EmpSaved(crate::backend::Reply), EmpCancel, RemToggle(&'static str), JobNew(Option<String>), JobSave(i64), JobSaved(crate::backend::Reply), BiCust(i64, bool), BiAll(bool), BiItem(usize, crate::app::Opt), BiField(usize, u8, String), BiAddLine, BiDate(String), BiCreate, BiDone(crate::backend::Reply), InvSelect(i64), InvDetail(crate::backend::Reply), JobsLoaded(crate::backend::Reply), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), ShowInactive(bool), FindType(&'static str), FindField(u8, String), FindRun, FindDone(crate::backend::Reply), FindReset, EmpNew, EmpEdit(i64), EmpLoaded(crate::backend::Reply), EmpField(&'static str, String), EmpSave, EmpSaved(crate::backend::Reply), EmpCancel, RemToggle(&'static str), JobNew(Option<String>), JobSave(i64), JobSaved(crate::backend::Reply), BiCust(i64, bool), BiAll(bool), BiItem(usize, crate::app::Opt), BiField(usize, u8, String), BiAddLine, BiDate(String), BiCreate, BiDone(crate::backend::Reply), InvSelect(i64), InvDetail(crate::backend::Reply), JobsLoaded(crate::backend::Reply), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
     /// Remember the Desktop view choices (One Window, icon bar pane).
@@ -446,6 +453,40 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }
             Err(e) => app.toast(e, true),
         },
+        Msg::FindType(t) => { app.desk.find_type = t; Task::none() }
+        Msg::FindField(f, v) => {
+            match f { 0 => app.desk.find_text = v, 1 => app.desk.find_amount = v, 2 => app.desk.find_from = dkey_blank(app, &app.desk.find_from, v), _ => app.desk.find_to = dkey_blank(app, &app.desk.find_to, v) }
+            Task::none()
+        }
+        Msg::FindReset => { app.desk.find_text.clear(); app.desk.find_amount.clear(); app.desk.find_from.clear(); app.desk.find_to.clear(); app.data = Some(serde_json::json!({"rows": null})); Task::none() }
+        Msg::FindRun => {
+            let style = app.date_style();
+            let from = if app.desk.find_from.trim().is_empty() { None } else { match ui::to_iso(&app.desk.find_from, style) { Some(d) => Some(d), None => return app.toast("Check the From date", true) } };
+            let to = if app.desk.find_to.trim().is_empty() { None } else { match ui::to_iso(&app.desk.find_to, style) { Some(d) => Some(d), None => return app.toast("Check the To date", true) } };
+            let amount = if app.desk.find_amount.trim().is_empty() { None } else { ui::parse_money(&app.desk.find_amount) };
+            if !app.desk.find_amount.trim().is_empty() && amount.is_none() { return app.toast("Check the amount", true); }
+            let q = app.desk.find_text.trim().to_string();
+            let kinds: Vec<&str> = FIND_TYPES.iter().find(|t| t.0 == app.desk.find_type).map(|t| t.1.to_vec()).unwrap_or_default();
+            let be = app.be.clone();
+            app.desk.find_busy = true;
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                    let mut out = vec![];
+                    for k in kinds {
+                        for r in be.call_now("docs.list", serde_json::json!({"type": k, "q": q, "limit": 2000}))?["rows"].as_array().cloned().unwrap_or_default() {
+                            let d = r["date"].as_str().unwrap_or("").to_string();
+                            if from.as_ref().is_some_and(|f| d.as_str() < f.as_str()) || to.as_ref().is_some_and(|t| d.as_str() > t.as_str()) { continue; }
+                            if amount.is_some_and(|a| r["total"].as_i64() != Some(a)) { continue; }
+                            if r["status"] == "DELETED" { continue; }
+                            out.push(r);
+                        }
+                    }
+                    out.sort_by(|a, b| b["date"].as_str().cmp(&a["date"].as_str()));
+                    Ok(serde_json::json!({"rows": out}))
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Desk(Msg::FindDone(r)))
+        }
+        Msg::FindDone(r) => { app.desk.find_busy = false; match r { Ok(v) => { app.data = Some(v); Task::none() } Err(e) => app.toast(e, true) } }
         Msg::ShowInactive(v) => { app.desk.show_inactive = v; Task::none() }
         Msg::OpenPrefs(cat) => { app.settings.cat = Some(cat); app.go(Route::Settings) }
         Msg::FavAdd(f) => { if !app.desk.favorites.contains(&f) { app.desk.favorites.push(f); app.save_desk_prefs(); } Task::none() }
@@ -943,6 +984,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::EditAccount(_) => "Edit Account".into(),
         Route::BatchInvoices => "Batch Invoice".into(),
         Route::Reminders => "Reminders".into(),
+        Route::Find => "Find".into(),
         Route::BankTx(_) => if app.pay.as_ref().is_some_and(|s| !s.check) { "Enter Credit Card Charges".into() } else { "Write Checks".into() },
         Route::EditContact(id) => if app.lk.contacts.iter().find(|c| c["id"].as_i64() == Some(*id)).is_some_and(|c| c["is_supplier"].as_i64() == Some(1) && c["is_customer"].as_i64() != Some(1)) { "Edit Vendor".into() } else { "Edit Customer".into() },
         Route::EnterTime => "Time/Enter Single Activity".into(),
@@ -990,7 +1032,7 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
     match name {
         "File" => vec![e("New Company…", "", nav(Route::Setup)), e("Open or Restore Company…", "", nav(Route::Setup)), e("Restore a Backup Copy…", "", Some(Message::Setup(crate::setup::Msg::Restore))), e("Open Previous Company", "", nav(Route::Setup)), sep(),
             e("Back Up Company…", "", Some(Message::BackupCompany)), e("Print Forms", "", nav(Route::PrintForms)), sep(), e("Exit", "Alt+F4", Some(Message::Desk(Msg::Exit)))],
-        "Edit" => vec![e("Undo", "Ctrl+Z", None), sep(), e("Find…", "Ctrl+F", Some(Message::FocusSearch)), e("Search…", "F3", Some(Message::FocusSearch)), sep(), e("Preferences…", "", nav(Route::Settings))],
+        "Edit" => vec![e("Undo", "Ctrl+Z", None), sep(), e("Find…", "Ctrl+F", nav(Route::Find)), e("Search…", "F3", Some(Message::FocusSearch)), sep(), e("Preferences…", "", nav(Route::Settings))],
         "View" => vec![e(if app.desk.one_window { "✓ One Window" } else { "   One Window" }, "", Some(Message::Desk(Msg::OneWindow(true)))),
             e(if app.desk.one_window { "   Multiple Windows" } else { "✓ Multiple Windows" }, "", Some(Message::Desk(Msg::OneWindow(false)))), sep(),
             e("Open Window List", "", Some(Message::Desk(Msg::Pane(Pane::Windows)))), e("View Balances", "", Some(Message::Desk(Msg::Pane(Pane::Balances)))),
@@ -1292,6 +1334,58 @@ pub fn other_names(app: &App) -> Element<'_, Message> {
 fn dkey(app: &App, old: &str, new: String) -> String {
     let shown = if old.is_empty() { app.d(&ui::today_iso()) } else { old.to_string() };
     ui::date_keys(&shown, &new, app.date_style())
+}
+
+/// Find: what each transaction type searches.
+const FIND_TYPES: [(&str, &[&str]); 8] = [("All", &["ACCREC", "ACCRECCREDIT", "QUOTE", "SALESRECEIPT", "ACCPAY", "ACCPAYCREDIT", "PO"]), ("Invoice", &["ACCREC"]), ("Credit Memo", &["ACCRECCREDIT"]),
+    ("Estimate", &["QUOTE"]), ("Sales Receipt", &["SALESRECEIPT"]), ("Bill", &["ACCPAY"]), ("Vendor Credit", &["ACCPAYCREDIT"]), ("Purchase Order", &["PO"])];
+
+/// Date keys for a field that starts blank (blank stays blank until typed in).
+fn dkey_blank(app: &App, old: &str, new: String) -> String { ui::date_keys(old, &new, app.date_style()) }
+
+/// Edit ▸ Find (Ctrl+F): transactions by type, name/number/memo, exact amount and date range.
+pub fn find(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let lbl = |s: &'static str| text(s).size(11).font(BOLD).color(k.info);
+    let ty = if app.desk.find_type.is_empty() { "All" } else { app.desk.find_type };
+    let filters = container(column![
+        row![
+            column![lbl("TRANSACTION TYPE"), pick_list(FIND_TYPES.iter().map(|t| t.0).collect::<Vec<_>>(), Some(ty), |v| Message::Desk(Msg::FindType(v))).padding([5, 7]).text_size(13).style(theme::pick).width(180)].spacing(3),
+            column![lbl("NAME, NUMBER OR MEMO"), text_input("", &app.desk.find_text).on_input(|v| Message::Desk(Msg::FindField(0, v))).on_submit(Message::Desk(Msg::FindRun)).padding([5, 7]).size(13).style(theme::input).width(300)].spacing(3),
+            column![lbl("AMOUNT"), text_input("", &app.desk.find_amount).on_input(|v| Message::Desk(Msg::FindField(1, v))).on_submit(Message::Desk(Msg::FindRun)).padding([5, 7]).size(13).style(theme::input).width(130)].spacing(3),
+            column![lbl("FROM"), text_input("", &app.desk.find_from).on_input(|v| Message::Desk(Msg::FindField(2, v))).padding([5, 7]).size(13).style(theme::input).width(130)].spacing(3),
+            column![lbl("TO"), text_input("", &app.desk.find_to).on_input(|v| Message::Desk(Msg::FindField(3, v))).padding([5, 7]).size(13).style(theme::input).width(130)].spacing(3),
+        ].spacing(14).align_y(Alignment::End),
+        row![ui::hspace(), ui::btn_primary("Find", if app.desk.find_busy { None } else { Some(Message::Desk(Msg::FindRun)) }), ui::btn("Reset", Some(Message::Desk(Msg::FindReset)))].spacing(8),
+    ].spacing(10)).padding(14).width(Fill).style(theme::card);
+    let results = app.data.as_ref().and_then(|d| d["rows"].as_array().cloned());
+    let cols: [(&str, u16, bool); 6] = [("Type", 14, false), ("Date", 12, false), ("Num", 12, false), ("Name", 30, false), ("Status", 12, false), ("Amount", 14, true)];
+    let head = container(row(cols.iter().map(|(h, w, r)| {
+        let tx = text(h.to_uppercase()).size(11).font(BOLD).color(k.muted);
+        container(if *r { tx.align_x(iced::alignment::Horizontal::Right).width(Fill) } else { tx.width(Fill) }).width(Length::FillPortion(*w)).into()
+    })).spacing(8).padding([6, 10])).style(theme::header_row).width(Fill);
+    let mut list = column![].spacing(0);
+    match &results {
+        None => { list = list.push(container(ui::muted("Choose what to look for, then Find.")).padding(14)); }
+        Some(rows) if rows.is_empty() => { list = list.push(container(ui::muted("Nothing matches.")).padding(14)); }
+        Some(rows) => for r in rows {
+            let kind = r["type"].as_str().unwrap_or("").to_string();
+            let sub = r["subtype"].as_str().unwrap_or("");
+            let route_kind = if crate::doc::quote_variant(sub) { sub.to_string() } else { kind.clone() };
+            let cells: Vec<Element<Message>> = vec![ui::cell(type_name(&kind, sub)), ui::cell_muted(app.d(r["date"].as_str().unwrap_or(""))), ui::cell_muted(r["number"].as_str().unwrap_or("").to_string()),
+                ui::cell(r["contact_name"].as_str().unwrap_or("").to_string()), ui::cell_muted(crate::vocab::status(app.skin, &kind, r["status"].as_str().unwrap_or(""), r["overdue"].as_i64() == Some(1))),
+                ui::cell_money(r["total"].as_i64().unwrap_or(0))];
+            let rr = row(cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into())).spacing(8).align_y(Alignment::Center).padding([5, 10]);
+            list = list.push(button(rr).padding(0).width(Fill).style(theme::row_btn).on_press(Message::Nav(Route::Doc { kind: route_kind, id: r["id"].as_i64() })));
+            list = list.push(ui::hr());
+        },
+    }
+    let count = results.as_ref().map(|r| format!("{} found", r.len())).unwrap_or_default();
+    container(column![
+        row![text("Find").size(22).font(BOLD), ui::hspace(), text(count).size(13).color(k.muted)].align_y(Alignment::Center),
+        filters,
+        container(column![head, scrollable(list).style(theme::scroll).height(Fill)]).style(theme::card).width(Fill).height(Fill).clip(true),
+    ].spacing(12)).padding(18).height(Fill).into()
 }
 
 /// Everything Reminders shows, gathered in one go.
@@ -2037,7 +2131,7 @@ pub fn help(app: &App) -> Element<'_, Message> {
     let shortcuts = column![
         text("Keyboard shortcuts").size(16).font(BOLD),
         pair("Ctrl+I", "Create Invoices"), pair("Ctrl+W", "Write Checks"), pair("Ctrl+E", "Enter Bills"), pair("Ctrl+J", "Customer Center"),
-        pair("Ctrl+A", "Chart of Accounts"), pair("Ctrl+R", "Use Register"), pair("Ctrl+T", "Memorized Transaction List"), pair("Ctrl+F / F3", "Search"),
+        pair("Ctrl+A", "Chart of Accounts"), pair("Ctrl+R", "Use Register"), pair("Ctrl+T", "Memorized Transaction List"), pair("Ctrl+F", "Find transactions"), pair("F3", "Search"),
         pair("Ctrl+S", "Save the transaction you're editing"), pair("Alt+A / Alt+S", "Save & Close / Save & New"), pair("Ctrl+P / Ctrl+M", "Print / Memorize the transaction"), pair("Ctrl+N", "New transaction of the same kind"), pair("Tab / Shift+Tab", "Next / previous field"), pair("F5", "Refresh"), pair("Esc", "Close menus"),
         pair("Alt+letter", "Open a menu: F File, E Edit, V View, L Lists, A Favorites, C Company, I Inventory, U Customers, N Vendors, M Employees, B Banking, R Reports, W Window, H Help"),
         pair("Alt+T", "Light / dark mode"), pair("F1", "This help"),

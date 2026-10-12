@@ -1767,7 +1767,7 @@ fn every_screen_in_every_layout_loads() {
         Route::ReceivePayment(None), Route::PayBills, Route::Spend(None), Route::Check(None), Route::Deposit, Route::Transfer, Route::Journal,
         Route::NewContact(true), Route::NewProduct, Route::NewAccount, Route::Payroll, Route::Taxes, Route::Projects, Route::Mileage, Route::Reconcile,
         Route::Register(None), Route::Calendar, Route::Statements, Route::Memorized, Route::PaySalesTax, Route::AdjustInventory, Route::Help, Route::DocCenter,
-        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates, Route::PriceLevels, Route::PrintForms, Route::PayrollForms, Route::CustomizeFavorites, Route::BuildAssemblies, Route::InventoryCenter, Route::BatchInvoices, Route::Reminders];
+        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates, Route::PriceLevels, Route::PrintForms, Route::PayrollForms, Route::CustomizeFavorites, Route::BuildAssemblies, Route::InventoryCenter, Route::BatchInvoices, Route::Reminders, Route::Find];
     for layout in Layout::ALL {
         let (mut app, dir) = desktop_app(&format!("all-{}", layout.key()));
         let t = app.update(Message::SetLayout(layout));
@@ -2945,5 +2945,35 @@ fn render_employee_form() {
     let _g = sim_lock();
     let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
     ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join("lc-route.png")).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn desktop_find_window() {
+    use crate::desktop::Msg as W;
+    use iced::keyboard::{key::Code, Modifiers};
+    let (mut app, dir) = desktop_app("find");
+    // Ctrl+F opens Find.
+    let ev = iced::keyboard::Event::KeyPressed { key: iced::keyboard::Key::Character("f".into()), modified_key: iced::keyboard::Key::Character("f".into()),
+        physical_key: iced::keyboard::key::Physical::Code(Code::KeyF), location: iced::keyboard::Location::Standard, modifiers: Modifiers::CTRL, text: None, repeat: false };
+    let t = app.update(Message::Key(ev)); settle(&mut app, t);
+    assert_eq!(app.route, Route::Find);
+    // By exact amount: a known invoice.
+    let inv = app.be.call_now("docs.list", json!({"type": "ACCREC", "limit": 1})).unwrap()["rows"][0].clone();
+    let _ = app.update(Message::Desk(W::FindType("Invoice")));
+    let _ = app.update(Message::Desk(W::FindField(1, crate::ui::plain(inv["total"].as_i64().unwrap()))));
+    let t = app.update(Message::Desk(W::FindRun)); settle(&mut app, t);
+    let rows = app.data.as_ref().unwrap()["rows"].as_array().unwrap().clone();
+    assert!(rows.iter().any(|r| r["id"] == inv["id"]), "found by amount");
+    assert!(rows.iter().all(|r| r["total"] == inv["total"] && r["type"] == "ACCREC"));
+    // By name across all types, limited by date.
+    let _ = app.update(Message::Desk(W::FindReset));
+    let _ = app.update(Message::Desk(W::FindType("All")));
+    let _ = app.update(Message::Desk(W::FindField(0, inv["contact_name"].as_str().unwrap().into())));
+    let _ = app.update(Message::Desk(W::FindField(2, app.d(inv["date"].as_str().unwrap()))));
+    let _ = app.update(Message::Desk(W::FindField(3, app.d(inv["date"].as_str().unwrap()))));
+    let t = app.update(Message::Desk(W::FindRun)); settle(&mut app, t);
+    let rows = app.data.as_ref().unwrap()["rows"].as_array().unwrap().clone();
+    assert!(!rows.is_empty() && rows.iter().all(|r| r["date"] == inv["date"]), "{:?} {:?} {:?} {:?}", inv["date"], app.desk.find_from, app.desk.find_text, rows.iter().map(|r| r["date"].clone()).collect::<Vec<_>>());
     let _ = std::fs::remove_dir_all(dir);
 }
