@@ -804,3 +804,34 @@ fn desktop_customer_center() {
     assert_eq!((app.route.clone(), app.desk.sel), (Route::Customers, Some(first)));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_create_invoices_save_and_close() {
+    use crate::doc::Msg as D;
+    let (mut app, dir) = desktop_app("deskinv");
+    let _ = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None }));
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["CUSTOMER:JOB", "BILL TO", "INVOICE #", "Save & Close", "Save & New", "CUSTOMER MESSAGE", "Receive Payments"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    let _ = app.update(Message::Doc(D::Contact(cust)));
+    let _ = app.update(Message::Doc(D::Desc(0, "Design work".into())));
+    let _ = app.update(Message::Doc(D::Price(0, "250".into())));
+    let windows = app.desk.windows.len();
+    let msgs = click(&app, "Save & Close");
+    assert!(matches!(msgs.as_slice(), [Message::Doc(D::SaveClose)]), "{msgs:?}");
+    let _ = app.update(Message::Doc(D::SaveClose));
+    let p = app.doc.as_ref().unwrap().payload(&app, "AUTHORISED").unwrap();
+    let saved = app.be.call_now("docs.save", p);
+    let _ = app.update(Message::Doc(D::Saved(saved, false)));
+    assert_eq!(app.desk.windows.len(), windows - 1, "the window closes once saved");
+    // Bills: the Expenses tab takes an amount directly.
+    let _ = app.update(Message::Nav(Route::Doc { kind: "ACCPAY".into(), id: None }));
+    let _ = app.update(Message::Doc(D::Amount(0, "99.50".into())));
+    assert_eq!(app.doc.as_ref().unwrap().totals(&app).0, 9950);
+    let _ = app.update(Message::Doc(D::BillTab(true)));
+    assert!(app.doc.as_ref().unwrap().lines.iter().any(|l| l.on_items), "Items tab gets its own line");
+    let _ = std::fs::remove_dir_all(dir);
+}

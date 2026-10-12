@@ -18,6 +18,8 @@ pub struct Line {
     pub price: String,
     pub account: Option<Opt>,
     pub tax: Option<Opt>,
+    /// Desktop bills: line belongs to the Items tab (else the Expenses tab).
+    pub on_items: bool,
 }
 
 pub struct Editor {
@@ -47,6 +49,10 @@ pub struct Editor {
     /// QuickBooks invoices: the customer's open delayed charges/credits, and those added.
     pub delayed: Vec<Value>,
     pub added: Vec<i64>,
+    /// Desktop bills: Items tab showing (else Expenses).
+    pub items_tab: bool,
+    /// Desktop "Save & Close": close the window once saved.
+    pub close_after: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +94,12 @@ pub enum Msg {
     Sent(Result<Value, String>),
     Delayed(Result<Value, String>),
     AddDelayed(i64),
+    /// Desktop bills: switch between the Expenses and Items tabs.
+    BillTab(bool),
+    /// Desktop: save, then close the window.
+    SaveClose,
+    /// Desktop Expenses tab: an amount typed straight in (quantity 1).
+    Amount(usize, String),
 }
 
 /// How line amounts relate to tax.
@@ -101,13 +113,13 @@ impl std::fmt::Display for LatOpt {
 const LATS: [LatOpt; 3] = [LatOpt("EXCLUSIVE"), LatOpt("INCLUSIVE"), LatOpt("NOTAX")];
 
 /// Integer division rounding half away from zero (the engine's rounding rule).
-fn div_round(n: i128, d: i128) -> i64 { let q = (n.abs() + d.abs() / 2) / d.abs(); (if (n < 0) != (d < 0) { -q } else { q }) as i64 }
+pub(crate) fn div_round(n: i128, d: i128) -> i64 { let q = (n.abs() + d.abs() / 2) / d.abs(); (if (n < 0) != (d < 0) { -q } else { q }) as i64 }
 /// Line amount in cents from e4 quantity × e4 price.
-fn line_cents(q: i64, p: i64) -> i64 { div_round(q as i128 * p as i128, 1_000_000) }
+pub(crate) fn line_cents(q: i64, p: i64) -> i64 { div_round(q as i128 * p as i128, 1_000_000) }
 
-fn sales(kind: &str) -> bool { matches!(kind, "ACCREC" | "QUOTE" | "ACCRECCREDIT" | "SALESRECEIPT" | "DELAYEDCHARGE" | "DELAYEDCREDIT") }
-fn delayed(kind: &str) -> bool { matches!(kind, "DELAYEDCHARGE" | "DELAYEDCREDIT") }
-fn ledger_doc(kind: &str) -> bool { matches!(kind, "ACCREC" | "ACCPAY" | "ACCRECCREDIT" | "ACCPAYCREDIT") }
+pub(crate) fn sales(kind: &str) -> bool { matches!(kind, "ACCREC" | "QUOTE" | "ACCRECCREDIT" | "SALESRECEIPT" | "DELAYEDCHARGE" | "DELAYEDCREDIT") }
+pub(crate) fn delayed(kind: &str) -> bool { matches!(kind, "DELAYEDCHARGE" | "DELAYEDCREDIT") }
+pub(crate) fn ledger_doc(kind: &str) -> bool { matches!(kind, "ACCREC" | "ACCPAY" | "ACCRECCREDIT" | "ACCPAYCREDIT") }
 
 pub fn title_for(app: &App, kind: &str) -> &'static str {
     match kind { "SALESRECEIPT" => "Sales receipt", "DELAYEDCHARGE" => "Delayed charge", "DELAYEDCREDIT" => "Delayed credit", "ACCREC" => app.term("invoice"), "QUOTE" => app.term("quote"), "ACCRECCREDIT" => app.term("credit_note"), "ACCPAY" => app.term("bill"), "ACCPAYCREDIT" => app.term("supplier_credit"), "PO" => app.term("po"), _ => "Document" }
@@ -126,7 +138,7 @@ fn fmt_e4(v: i64) -> String {
 fn fmt_price(v: i64) -> String { let s = fmt_e4(v); if s.contains('.') { s } else { format!("{s}.00") } }
 
 /// Parse a quantity or price with up to 4 decimals into an e4 integer.
-fn parse_e4(s: &str) -> Option<i64> {
+pub(crate) fn parse_e4(s: &str) -> Option<i64> {
     let s = s.trim().replace(',', "");
     if s.is_empty() { return Some(0); }
     let neg = s.starts_with('-');
@@ -150,13 +162,13 @@ impl Editor {
             lines: vec![Line { qty: "1".into(), ..Default::default() }, Line { qty: "1".into(), ..Default::default() }],
             terms: String::new(), busy: false, editing: true,
             pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false,
-            delayed: vec![], added: vec![],
+            delayed: vec![], added: vec![], items_tab: false, close_after: false,
         };
         if let Some(a) = default_account(app, kind) { for l in &mut e.lines { l.account = Some(a.clone()); l.tax = default_tax(app, Some(a.id)); } }
         e
     }
 
-    fn editable(&self) -> bool {
+    pub fn editable(&self) -> bool {
         if delayed(&self.kind) { return self.doc.as_ref().map(|d| d["status"] == "SENT" && self.editing).unwrap_or(true); }
         match self.doc.as_ref().and_then(|d| d["status"].as_str()) { None | Some("DRAFT") | Some("SUBMITTED") => true, Some("AUTHORISED") | Some("SENT") => self.editing, _ => false }
     }
@@ -208,7 +220,7 @@ impl Editor {
     }
 }
 
-fn hint(s: DateStyle) -> &'static str { match s { DateStyle::Us => "MM/DD/YYYY", DateStyle::Intl => "DD/MM/YYYY", DateStyle::Long => "12 Oct 2026" } }
+pub(crate) fn hint(s: DateStyle) -> &'static str { match s { DateStyle::Us => "MM/DD/YYYY", DateStyle::Intl => "DD/MM/YYYY", DateStyle::Long => "12 Oct 2026" } }
 
 fn default_account(app: &App, kind: &str) -> Option<Opt> {
     let want = if sales(kind) { "REVENUE" } else { "EXPENSE" };
@@ -248,6 +260,7 @@ fn line_from(app: &App, taxes: &[Opt], l: &Value, negate: bool) -> Line {
         price: fmt_price(l["unit_e2"].as_i64().unwrap_or(0)),
         account: l["account_id"].as_i64().map(|id| Opt { id, label: format!("{} {}", l["account_code"].as_str().unwrap_or(""), l["account_name"].as_str().unwrap_or("")) }),
         tax: l["tax_rate_id"].as_i64().and_then(|id| taxes.iter().find(|t| t.id == id).cloned()),
+        on_items: l["item_id"].as_i64().is_some(),
     }
 }
 
@@ -330,23 +343,31 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                 if let Some(tx) = tax.and_then(|id| app.lk.tax_opts().into_iter().find(|o| o.id == id)) { l.tax = Some(tx); }
             }
             e.lines[i].item = Some(it);
-            if i + 1 == e.lines.len() { e.lines.push(Line { qty: "1".into(), account: default_account(app, &e.kind), tax: default_tax(app, default_account(app, &e.kind).map(|a| a.id)), ..Default::default() }); }
+            if i + 1 == e.lines.len() { let on_items = e.lines[i].on_items; e.lines.push(Line { qty: "1".into(), account: default_account(app, &e.kind), tax: default_tax(app, default_account(app, &e.kind).map(|a| a.id)), on_items, ..Default::default() }); }
             Task::none()
         }
         Msg::Desc(i, s) => { e.lines[i].description = s; Task::none() }
         Msg::Qty(i, s) => { e.lines[i].qty = s; Task::none() }
         Msg::Price(i, s) => {
             e.lines[i].price = s;
-            if i + 1 == e.lines.len() { e.lines.push(Line { qty: "1".into(), account: default_account(app, &e.kind), tax: default_tax(app, default_account(app, &e.kind).map(|a| a.id)), ..Default::default() }); }
+            if i + 1 == e.lines.len() { let on_items = e.lines[i].on_items; e.lines.push(Line { qty: "1".into(), account: default_account(app, &e.kind), tax: default_tax(app, default_account(app, &e.kind).map(|a| a.id)), on_items, ..Default::default() }); }
             Task::none()
         }
         Msg::Account(i, a) => { e.lines[i].tax = default_tax(app, Some(a.id)).or(e.lines[i].tax.take()); e.lines[i].account = Some(a); Task::none() }
         Msg::Tax(i, t) => { e.lines[i].tax = Some(t); Task::none() }
-        Msg::AddLine => { e.lines.push(Line { qty: "1".into(), account: default_account(app, &e.kind), tax: default_tax(app, default_account(app, &e.kind).map(|a| a.id)), ..Default::default() }); Task::none() }
+        Msg::AddLine => { let on_items = e.items_tab; e.lines.push(Line { qty: "1".into(), account: default_account(app, &e.kind), tax: default_tax(app, default_account(app, &e.kind).map(|a| a.id)), on_items, ..Default::default() }); Task::none() }
+        Msg::BillTab(items) => {
+            e.items_tab = items;
+            // Each tab starts with a blank line to type into.
+            if !e.lines.iter().any(|l| l.on_items == items) { e.lines.push(Line { qty: "1".into(), account: default_account(app, &e.kind), tax: default_tax(app, default_account(app, &e.kind).map(|a| a.id)), on_items: items, ..Default::default() }); }
+            Task::none()
+        }
+        Msg::Amount(i, s) => { e.lines[i].qty = "1".into(); e.lines[i].price = s; if i + 1 == e.lines.len() { e.lines.push(Line { qty: "1".into(), account: default_account(app, &e.kind), tax: default_tax(app, default_account(app, &e.kind).map(|a| a.id)), on_items: e.lines[i].on_items, ..Default::default() }); } Task::none() }
         Msg::RemoveLine(i) => { if e.lines.len() > 1 { e.lines.remove(i); } Task::none() }
         Msg::Terms(s) => { e.terms = s; Task::none() }
         Msg::Save(approve) => save(app, &mut e, approve, false),
         Msg::SaveAndNew => save(app, &mut e, true, true),
+        Msg::SaveClose => { e.close_after = true; save(app, &mut e, true, false) }
         Msg::SaveAndSend => { e.send_after = true; save(app, &mut e, true, false) }
         Msg::Send => {
             let Some(id) = e.id else { app.doc = Some(e); return Task::none() };
@@ -380,6 +401,12 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                     }
                     let label = title_for(app, &e.kind);
                     let t1 = app.toast(format!("{label} saved"), false);
+                    if e.close_after && app.desktop() {
+                        let t2 = app.load_lookups();
+                        let i = app.desk.active;
+                        let t3 = app.close_window(i);
+                        return Task::batch([t1, t2, t3]);
+                    }
                     let t2 = app.load_lookups();
                     let saved_kind = if e.kind == "SALESRECEIPT" { "ACCREC".to_string() } else { e.kind.clone() };
                     let next = if new_after { Route::Doc { kind: e.kind.clone(), id: None } } else { Route::Doc { kind: saved_kind, id } };
@@ -387,7 +414,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                     let t3 = app.go(next);
                     return Task::batch([t1, t2, t3]);
                 }
-                Err(err) => { e.error = Some(err.clone()); app.toast(err, true) }
+                Err(err) => { e.close_after = false; e.error = Some(err.clone()); app.toast(err, true) }
             }
         }
         Msg::Edit => { e.editing = true; Task::none() }
@@ -491,6 +518,7 @@ fn save(app: &mut App, e: &mut Editor, approve: bool, new_after: bool) -> Task<M
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let Some(e) = &app.doc else { return ui::muted("…") };
+    if app.desktop() && (e.id.is_none() || e.doc.is_some()) { return crate::docdesk::view(app, e); }
     if let (Some(err), None) = (&app.error, &e.doc) {
         if e.id.is_some() { return ui::page(ui::h1(title_for(app, &e.kind)), vec![], ui::card(column![ui::h2("Couldn't open"), ui::muted(err.clone())].spacing(6))); }
     }
@@ -688,7 +716,7 @@ fn add_delayed<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
 }
 
 /// The heading printed on the document.
-fn printed_title(app: &App, kind: &str) -> String {
+pub(crate) fn printed_title(app: &App, kind: &str) -> String {
     let registered = matches!(app.setting("tax_registered").as_str(), "1" | "true");
     match kind {
         "ACCREC" if registered && matches!(app.country().as_str(), "AU" | "NZ") => "Tax Invoice".into(),
