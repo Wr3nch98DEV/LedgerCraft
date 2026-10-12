@@ -2779,3 +2779,20 @@ fn end_to_end_batch_invoices() {
     assert!(app.desk.bi_custs.is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_add_job() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("addjob");
+    let t = app.update(Message::Nav(Route::Customers)); settle(&mut app, t);
+    let id = app.desk.sel.expect("a customer is selected");
+    let jobs_before = app.desk.jobs.len();
+    press(&mut app, "Add Job");
+    let _ = app.update(Message::Desk(W::JobNew(Some("Kitchen fit-out".into()))));
+    let t = app.update(Message::Desk(W::JobSave(id))); settle(&mut app, t);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert_eq!(app.desk.jobs.len(), jobs_before + 1);
+    assert!(app.desk.jobs.iter().any(|j| j["name"] == "Kitchen fit-out" && j["contact_id"].as_i64() == Some(id)));
+    assert!(app.desk.job_new.is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -70,6 +70,8 @@ pub struct State {
     pub inv_detail: Option<Value>,
     /// Customer Center: jobs (projects) shown under their customers.
     pub jobs: Vec<Value>,
+    /// Customer Center ▸ Add Job: the job name being typed.
+    pub job_new: Option<String>,
     /// Build Assemblies: the assembly, its components/builds (from items.components), quantity, date, memo,
     /// and the component list being edited (item, quantity per assembly).
     pub ba_item: Option<crate::app::Opt>,
@@ -134,7 +136,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), ShowInactive(bool), BiCust(i64, bool), BiAll(bool), BiItem(usize, crate::app::Opt), BiField(usize, u8, String), BiAddLine, BiDate(String), BiCreate, BiDone(crate::backend::Reply), InvSelect(i64), InvDetail(crate::backend::Reply), JobsLoaded(crate::backend::Reply), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), ShowInactive(bool), JobNew(Option<String>), JobSave(i64), JobSaved(crate::backend::Reply), BiCust(i64, bool), BiAll(bool), BiItem(usize, crate::app::Opt), BiField(usize, u8, String), BiAddLine, BiDate(String), BiCreate, BiDone(crate::backend::Reply), InvSelect(i64), InvDetail(crate::backend::Reply), JobsLoaded(crate::backend::Reply), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
     /// Remember the Desktop view choices (One Window, icon bar pane).
@@ -365,6 +367,21 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                 Err(e) => app.toast(e, true),
             }
         }
+        Msg::JobNew(v) => { app.desk.job_new = v; Task::none() }
+        Msg::JobSave(cid) => {
+            let name = app.desk.job_new.clone().unwrap_or_default().trim().to_string();
+            if name.is_empty() { return app.toast("Enter the job name", true); }
+            app.be.call("projects.save", serde_json::json!({"project": {"name": name, "contact_id": cid}}), |r| Message::Desk(Msg::JobSaved(r)))
+        }
+        Msg::JobSaved(r) => match r {
+            Ok(_) => {
+                app.desk.job_new = None;
+                let t1 = app.toast("Job added", false);
+                let t2 = app.be.call("projects.list", serde_json::json!({"status": "ALL"}), |r| Message::Desk(Msg::JobsLoaded(r)));
+                Task::batch([t1, t2])
+            }
+            Err(e) => app.toast(e, true),
+        },
         Msg::ShowInactive(v) => { app.desk.show_inactive = v; Task::none() }
         Msg::OpenPrefs(cat) => { app.settings.cat = Some(cat); app.go(Route::Settings) }
         Msg::FavAdd(f) => { if !app.desk.favorites.contains(&f) { app.desk.favorites.push(f); app.save_desk_prefs(); } Task::none() }
@@ -2731,12 +2748,21 @@ pub fn center(app: &App, customers: bool) -> Element<'_, Message> {
             let info = container(column![
                 row![text(if customers { "Customer Information" } else { "Vendor Information" }).size(15).font(BOLD), ui::hspace(),
                     ui::link(if customers { "Edit Customer" } else { "Edit Vendor" }, Message::Nav(Route::EditContact(id))),
+                    if customers { ui::link("Add Job", Message::Desk(Msg::JobNew(Some(String::new())))) } else { Space::new().into() },
                     ui::link("QuickReport", Message::Nav(Route::Report("contact-transactions".into()))),
                     ui::link("Open Balance", Message::Nav(Route::Report(if customers { "aged-receivables" } else { "aged-payables" }.into())))].spacing(14).align_y(Alignment::Center),
                 row![
                     column![info_row("Company Name", s("name")), info_row("Full Name", full), info_row(if customers { "Bill To" } else { "Billed From" }, s("postal_address").replace('\n', ", "))].spacing(6).width(Fill),
                     column![info_row("Main Phone", s("phone")), info_row("Main Email", s("email")), info_row("Account No.", s("account_number"))].spacing(6).width(Fill),
                 ].spacing(20),
+                match (&app.desk.job_new, customers) {
+                    (Some(j), true) => Element::from(row![
+                        text("New job for this customer").size(13).font(BOLD),
+                        text_input("Job name", j).on_input(|v| Message::Desk(Msg::JobNew(Some(v)))).on_submit(Message::Desk(Msg::JobSave(id))).padding([5, 7]).size(13).style(theme::input).width(300),
+                        ui::btn_primary("OK", Some(Message::Desk(Msg::JobSave(id)))), ui::btn("Cancel", Some(Message::Desk(Msg::JobNew(None)))),
+                    ].spacing(10).align_y(Alignment::Center)),
+                    _ => Space::new().into(),
+                },
             ].spacing(10)).padding(14).width(Fill).style(theme::card);
             let rows: Vec<(Vec<Element<Message>>, Option<Message>)> = d["rows"].as_array().cloned().unwrap_or_default().iter().map(|r| {
                 let kind = r["type"].as_str().unwrap_or("");
