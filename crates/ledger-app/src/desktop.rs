@@ -377,6 +377,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::Memorized => "Memorized Transaction List".into(),
         Route::PaySalesTax => "Pay Sales Tax".into(),
         Route::AdjustInventory => "Adjust Quantity/Value on Hand".into(),
+        Route::Help => "LedgerCraft Help".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
             "ACCREC" => "Create Invoices", "QUOTE" => "Create Estimates", "ACCRECCREDIT" => "Create Credit Memos/Refunds", "SALESRECEIPT" => "Enter Sales Receipts",
@@ -421,13 +422,13 @@ fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Messag
     match name {
         "File" => vec![e("New Company…", "", nav(Route::Setup)), e("Open or Restore Company…", "", nav(Route::Setup)), e("Restore a Backup Copy…", "", Some(Message::Setup(crate::setup::Msg::Restore))), e("Open Previous Company", "", nav(Route::Setup)), sep(),
             e("Back Up Company…", "", Some(Message::BackupCompany)), e("Print Forms", "", None), sep(), e("Exit", "Alt+F4", Some(Message::Desk(Msg::Exit)))],
-        "Edit" => vec![e("Undo", "Ctrl+Z", None), sep(), e("Find…", "Ctrl+F", Some(Message::FocusSearch)), e("Search…", "F3", None), sep(), e("Preferences…", "", nav(Route::Settings))],
+        "Edit" => vec![e("Undo", "Ctrl+Z", None), sep(), e("Find…", "Ctrl+F", Some(Message::FocusSearch)), e("Search…", "F3", Some(Message::FocusSearch)), sep(), e("Preferences…", "", nav(Route::Settings))],
         "View" => vec![e(if app.desk.one_window { "✓ One Window" } else { "   One Window" }, "", Some(Message::Desk(Msg::OneWindow(true)))),
             e(if app.desk.one_window { "   Multiple Windows" } else { "✓ Multiple Windows" }, "", Some(Message::Desk(Msg::OneWindow(false)))), sep(),
             e("Open Window List", "", Some(Message::Desk(Msg::Pane(Pane::Windows)))), e("View Balances", "", Some(Message::Desk(Msg::Pane(Pane::Balances)))),
             e("My Shortcuts", "", Some(Message::Desk(Msg::Pane(Pane::Shortcuts)))), sep(), e(if app.dark { "Light Mode" } else { "Dark Mode" }, "Alt+T", Some(Message::ToggleTheme)), sep(),
             e("Switch to QuickBooks Online-style layout", "", Some(Message::SetLayout(theme::Layout::Online))), e("Switch to Xero-style layout", "", Some(Message::SetLayout(theme::Layout::Xero)))],
-        "Lists" => vec![e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)), e("Item List", "", nav(Route::Products)), e("Fixed Asset Item List", "", None), e("Price Level List", "", None),
+        "Lists" => vec![e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)), e("Item List", "", nav(Route::Products)), e("Fixed Asset Item List", "", rep("fixed-asset-register")), e("Price Level List", "", None),
             e("Sales Tax Code List", "", nav(Route::Taxes)), e("Payroll Item List", "", None), e("Class List", "", None), e("Other Names List", "", None), e("Templates", "", None), e("Memorized Transaction List", "Ctrl+T", nav(Route::Memorized))],
         "Favorites" => vec![e("Customize Favorites…", "", None)],
         "Company" => vec![e("Home Page", "", nav(Route::Dashboard)), e("Company Snapshot", "", Some(Message::Desk(Msg::Insights(true)))), sep(), e("My Company", "", nav(Route::Settings)),
@@ -459,7 +460,7 @@ fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Messag
             for (n, w) in app.desk.windows.iter().enumerate() { v.push((format!("{}{}", if n == app.desk.active { "✓ " } else { "   " }, title(app, &w.route)), "", Some(Message::Desk(Msg::Activate(n))))); }
             v
         }
-        _ => vec![e("LedgerCraft Help", "F1", None), e("About LedgerCraft", "", None)],
+        _ => vec![e("LedgerCraft Help", "F1", nav(Route::Help)), e("Keyboard Shortcuts", "", nav(Route::Help)), sep(), e("About LedgerCraft", "", nav(Route::Help))],
     }
 }
 
@@ -608,6 +609,43 @@ pub fn frame<'a>(app: &'a App, content: Element<'a, Message>) -> Element<'a, Mes
         layers = layers.push(container(opaque(container(list).padding(8).width(400).style(theme::menu))).padding(Padding { top: 72.0, left: 8.0, ..Padding::ZERO }));
     }
     layers.into()
+}
+
+// ---------------- Help ----------------
+
+/// Help ▸ LedgerCraft Help: shortcuts, where things are, and about.
+pub fn help(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let pair = |a: &'static str, b: &'static str| -> Element<'_, Message> { row![text(a).size(13).font(BOLD).width(160), text(b).size(13)].spacing(10).into() };
+    let shortcuts = column![
+        text("Keyboard shortcuts").size(16).font(BOLD),
+        pair("Ctrl+I", "Create Invoices"), pair("Ctrl+W", "Write Checks"), pair("Ctrl+E", "Enter Bills"), pair("Ctrl+J", "Customer Center"),
+        pair("Ctrl+A", "Chart of Accounts"), pair("Ctrl+R", "Use Register"), pair("Ctrl+T", "Memorized Transaction List"), pair("Ctrl+F / F3", "Search"),
+        pair("Ctrl+S", "Save the transaction you're editing"), pair("Tab / Shift+Tab", "Next / previous field"), pair("F5", "Refresh"), pair("Esc", "Close menus"),
+        pair("Alt+T", "Light / dark mode"), pair("F1", "This help"),
+    ].spacing(6);
+    let places = column![
+        text("Where things are").size(16).font(BOLD),
+        pair("Customers menu", "Invoices, estimates, sales receipts, statements, payments, credit memos"),
+        pair("Vendors menu", "Bills, pay bills, purchase orders, sales tax, 1099s"),
+        pair("Banking menu", "Write checks, deposits, transfers, register, reconcile, bank feeds"),
+        pair("Lists menu", "Chart of accounts, items, memorized transactions"),
+        pair("Edit ▸ Preferences", "Layout (Desktop / Online / Xero), dark mode, company, email, users"),
+        pair("Window menu", "Every open window; Close All"),
+        pair("File menu", "Switch company, back up, restore a backup"),
+    ].spacing(6);
+    let about = column![
+        text("About LedgerCraft").size(16).font(BOLD),
+        text(format!("Version {} — open-source accounting, 100% Rust.", env!("CARGO_PKG_VERSION"))).size(13),
+        text("QuickBooks Desktop-style, QuickBooks Online-style and Xero-style layouts over the same books. Not affiliated with Intuit or Xero.").size(13).color(k.muted),
+        text("Your company files live in %APPDATA%\\LedgerCraft; automatic daily backups in its backups folder.").size(13).color(k.muted),
+    ].spacing(6);
+    let _ = app;
+    scrollable(column![
+        text("LedgerCraft Help").size(22).font(BOLD),
+        row![container(shortcuts).padding(16).width(Fill).style(theme::card), container(places).padding(16).width(Fill).style(theme::card)].spacing(14),
+        container(about).padding(16).width(Fill).style(theme::card),
+    ].spacing(14).padding(18).max_width(1150)).style(theme::scroll).height(Fill).into()
 }
 
 // ---------------- Adjust Quantity/Value on Hand ----------------

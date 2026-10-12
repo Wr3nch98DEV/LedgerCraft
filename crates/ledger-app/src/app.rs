@@ -58,6 +58,8 @@ pub enum Route {
     PaySalesTax,
     /// QuickBooks Desktop Adjust Quantity/Value on Hand.
     AdjustInventory,
+    /// Help: keyboard shortcuts and where things are.
+    Help,
     NewProduct,
     NewAccount,
     Journal,
@@ -207,7 +209,7 @@ pub fn parse_route(s: &str) -> Option<Route> {
         "customers" => Route::Customers, "products" => Route::Products, "expenses" => Route::Expenses, "bills" => Route::Bills, "vendors" => Route::Vendors,
         "pos" => Route::PurchaseOrders, "contacts" => Route::Contacts, "contact" => Route::Contact(id(1)?), "banking" => Route::Banking(id(1)), "chart" => Route::Chart,
         "reports" => Route::Reports, "report" => Route::Report(parts.get(1)?.to_string()), "settings" => Route::Settings, "setup" => Route::Setup,
-        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "adjustinventory" => Route::AdjustInventory, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
+        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "adjustinventory" => Route::AdjustInventory, "help" => Route::Help, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
         _ => return None,
     })
 }
@@ -443,6 +445,7 @@ impl App {
             Route::Deposit => payments::open_deposit(self),
             Route::Reconcile => crate::reconcile::load(self),
             Route::Calendar => crate::desktop::load_calendar(self),
+            Route::Help => { self.data = Some(json!({})); Task::none() }
             Route::AdjustInventory => call("items.list", json!({})),
             Route::PaySalesTax => call("agencies.list", json!({})),
             Route::Memorized => call("repeating.list", json!({"kind": "ALL"})),
@@ -612,6 +615,9 @@ impl App {
             match key.as_ref() {
                 keyboard::Key::Named(Named::Escape) => return self.update(Message::CloseMenus),
                 keyboard::Key::Named(Named::F5) => return self.update(Message::Refresh),
+                keyboard::Key::Named(Named::F3) if self.desktop() => return self.update(Message::FocusSearch),
+                keyboard::Key::Character("t") if modifiers.alt() && !modifiers.command() => return self.update(Message::ToggleTheme),
+                keyboard::Key::Named(Named::F1) if self.session.is_some() => return self.go(Route::Help),
                 // Tab / Shift+Tab move between fields, as in QuickBooks Desktop forms.
                 keyboard::Key::Named(Named::Tab) => return if modifiers.shift() { iced::widget::operation::focus_previous() } else { iced::widget::operation::focus_next() },
                 keyboard::Key::Character("s") if modifiers.command() => {

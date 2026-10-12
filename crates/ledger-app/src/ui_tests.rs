@@ -1483,3 +1483,22 @@ fn restore_backup_as_new_company() {
     assert!(app.be.st.restore_backup(&junk).is_err());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn help_window_and_alt_t() {
+    let (mut app, dir) = desktop_app("help");
+    let key = |c: &str, m: iced::keyboard::Modifiers, code: iced::keyboard::key::Code, named: Option<iced::keyboard::key::Named>| iced::keyboard::Event::KeyPressed {
+        key: named.map(iced::keyboard::Key::Named).unwrap_or(iced::keyboard::Key::Character(c.into())), modified_key: iced::keyboard::Key::Character(c.into()),
+        physical_key: iced::keyboard::key::Physical::Code(code), location: iced::keyboard::Location::Standard, modifiers: m, text: None, repeat: false };
+    let _ = app.update(Message::Key(key("", iced::keyboard::Modifiers::empty(), iced::keyboard::key::Code::F1, Some(iced::keyboard::key::Named::F1))));
+    assert_eq!(app.route, Route::Help);
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["Keyboard shortcuts", "Where things are", "About LedgerCraft"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    let dark = app.dark;
+    let _ = app.update(Message::Key(key("t", iced::keyboard::Modifiers::ALT, iced::keyboard::key::Code::KeyT, None)));
+    assert_ne!(app.dark, dark, "Alt+T toggles light/dark");
+    let _ = std::fs::remove_dir_all(dir);
+}
