@@ -1446,3 +1446,19 @@ fn desktop_adjust_inventory_and_receive_items() {
     assert!(app.doc.as_ref().unwrap().items_tab);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn back_up_company_to_file() {
+    let (app, dir) = desktop_app("backup");
+    let target = dir.join("my backup.lcdb");
+    ledger_server::jobs::backup_to(&app.be.st, &target).unwrap();
+    assert!(target.exists());
+    // The copy is a complete company file.
+    let copy = ledger_core::Ledger::open(&target).unwrap();
+    let n: i64 = copy.conn.query_row("SELECT COUNT(*) FROM documents", [], |r| r.get(0)).unwrap();
+    assert!(n > 10);
+    // Backing up again over the same file replaces it.
+    drop(copy);
+    ledger_server::jobs::backup_to(&app.be.st, &target).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}

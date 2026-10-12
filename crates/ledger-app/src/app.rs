@@ -149,6 +149,9 @@ pub enum Message {
     Failed(String),
     /// Desktop Receive Items: Enter Bills opened on the Items tab.
     ReceiveItems,
+    /// File ▸ Back Up Company: choose where, then write a backup copy.
+    BackupCompany,
+    BackedUp(Result<Option<String>, String>),
     /// Put the cursor in the search box (Desktop Ctrl+F / Edit ▸ Find).
     FocusSearch,
     Noop,
@@ -579,6 +582,21 @@ impl App {
             Message::Settings(m) => crate::settings::update(self, m),
             Message::NewDocFor(kind, cid) => { self.prefill_contact = Some(cid); self.go(Route::Doc { kind, id: None }) }
             Message::Failed(e) => self.toast(e, true),
+            Message::BackupCompany => {
+                self.menu = None;
+                let st = self.be.st.clone();
+                let name = format!("{} {}.lcdb", self.org_name().replace(|c: char| !c.is_alphanumeric() && c != ' ', "-"), crate::ui::today_iso());
+                Task::perform(async move {
+                    let Some(file) = rfd::AsyncFileDialog::new().set_title("Back Up Company").set_file_name(&name).add_filter("LedgerCraft company file", &["lcdb"]).save_file().await else { return Ok(None) };
+                    let path = file.path().to_path_buf();
+                    tokio::task::spawn_blocking(move || ledger_server::jobs::backup_to(&st, &path).map(|_| Some(path.display().to_string()))).await.unwrap_or_else(|e| Err(e.to_string()))
+                }, Message::BackedUp)
+            }
+            Message::BackedUp(r) => match r {
+                Ok(Some(p)) => self.toast(format!("Backup saved to {p}"), false),
+                Ok(None) => Task::none(),
+                Err(e) => self.toast(format!("Backup failed: {e}"), true),
+            },
             Message::ReceiveItems => { let t = self.go(Route::Doc { kind: "ACCPAY".into(), id: None }); let t2 = doc::update(self, doc::Msg::BillTab(true)); Task::batch([t, t2]) }
             Message::FocusSearch => { self.menu = None; iced::widget::operation::focus(crate::desktop::SEARCH_ID) }
             Message::Set1099(cid, on) => {

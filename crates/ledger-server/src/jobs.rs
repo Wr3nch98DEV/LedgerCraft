@@ -102,6 +102,15 @@ pub fn auto_backup(st: &AppState) -> Option<String> {
     Some(target.display().to_string())
 }
 
+/// Back up the open organisation to a file of the user's choosing (a consistent copy via VACUUM INTO).
+pub fn backup_to(st: &AppState, target: &std::path::Path) -> Result<(), String> {
+    let guard = st.org.lock().unwrap();
+    let org = guard.as_ref().ok_or("no organisation open")?;
+    if target.exists() { std::fs::remove_file(target).map_err(|e| format!("Couldn't replace {}: {e}", target.display()))?; }
+    org.ledger.conn.execute("VACUUM INTO ?1", [target.display().to_string()]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Automatic backups for the open organisation, newest first.
 pub fn list_backups(st: &AppState) -> Value {
     let guard = st.org.lock().unwrap();
