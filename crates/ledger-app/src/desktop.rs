@@ -1602,9 +1602,10 @@ pub fn register(app: &App) -> Element<'_, Message> {
         inp(&r.payment, "", RegField::Payment, true),
         Space::new().into(),
         inp(&r.deposit, "", RegField::Deposit, true),
-        ui::btn_primary("Record", if r.busy { None } else { Some(Message::Desk(Msg::RegRecord)) }),
     ];
-    let entry = container(row(entry_cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into())).spacing(6).align_y(Alignment::Center).padding([6, 10]))
+    let record = ui::btn_primary("Record", if r.busy { None } else { Some(Message::Desk(Msg::RegRecord)) });
+    // The entry cells line up with the columns above; Record sits at the end, in place of a balance.
+    let entry = container(row(entry_cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into()).collect::<Vec<_>>()).push(record).spacing(6).align_y(Alignment::Center).padding([6, 10]))
         .style(theme::accent_soft).width(Fill);
     column![
         top,

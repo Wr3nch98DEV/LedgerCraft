@@ -70,7 +70,10 @@ fn with_toasts<'a>(app: &'a App, base: Element<'a, Message>) -> Element<'a, Mess
             button(icon("x", 14.0, k.muted)).style(theme::ghost).padding(4).on_press(Message::DropToast(*id)),
         ].spacing(10).align_y(Alignment::Center)).padding([10, 12]).style(theme::toast).into()
     })).spacing(8);
-    stack![base, container(opaque(list)).width(Fill).height(Fill).align_x(iced::alignment::Horizontal::Right).align_y(iced::alignment::Vertical::Bottom).padding(20)].into()
+    // Toasts don't block clicks (only their × does). Desktop forms keep their buttons bottom-right,
+    // so there the toasts show top-right, under the window tabs.
+    let (v, pad) = if app.desktop() { (iced::alignment::Vertical::Top, Padding { top: 72.0, right: 20.0, bottom: 0.0, left: 0.0 }) } else { (iced::alignment::Vertical::Bottom, Padding::from(20)) };
+    stack![base, container(list).width(Fill).height(Fill).align_x(iced::alignment::Horizontal::Right).align_y(v).padding(pad)].into()
 }
 
 /// Routes to the screen for the current route.

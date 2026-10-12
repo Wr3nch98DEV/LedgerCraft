@@ -1719,9 +1719,13 @@ fn settle(app: &mut App, task: iced::Task<Message>) {
         rounds += 1;
         if rounds > 200 { break; }
         let Some(stream) = iced_runtime::task::into_stream(t) else { continue };
+        // Keep every result that arrives; stop waiting once nothing more comes within 1.5 s (timers).
         let actions: Vec<iced_runtime::Action<Message>> = rt.block_on(async {
             use iced::futures::StreamExt;
-            tokio::time::timeout(std::time::Duration::from_millis(1500), stream.collect::<Vec<_>>()).await.unwrap_or_default()
+            let mut stream = stream;
+            let mut out = vec![];
+            while let Ok(Some(a)) = tokio::time::timeout(std::time::Duration::from_millis(1500), stream.next()).await { out.push(a); }
+            out
         });
         for a in actions {
             if let iced_runtime::Action::Output(m) = a { pending.push(app.update(m)); }
@@ -1778,4 +1782,116 @@ fn every_screen_in_every_layout_loads() {
         }
         let _ = std::fs::remove_dir_all(dir);
     }
+}
+
+/// Click a widget and run everything it triggers (engine calls included).
+fn press(app: &mut App, label: &str) {
+    let msgs = click(app, label);
+    assert!(!msgs.is_empty(), "{label} did nothing");
+    for m in msgs { let t = app.update(m); settle(app, t); }
+}
+
+fn count(app: &App, kind: &str) -> usize { app.be.call_now("docs.list", json!({"type": kind, "limit": 5000})).unwrap()["rows"].as_array().unwrap().len() }
+
+#[test]
+fn end_to_end_desktop_daily_work() {
+    use crate::doc::Msg as D;
+    use crate::payments::Msg as P;
+    let (mut app, dir) = desktop_app("e2e");
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    // 1. Create Invoices → Save & Close: invoice saved, window closed.
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None })); settle(&mut app, t);
+    let windows = app.desk.windows.len();
+    let invoices = count(&app, "ACCREC");
+    for m in [D::Contact(cust.clone()), D::Desc(0, "Website redesign".into()), D::Price(0, "1200".into())] { let t = app.update(Message::Doc(m)); settle(&mut app, t); }
+    press(&mut app, "Save & Close");
+    assert_eq!(count(&app, "ACCREC"), invoices + 1, "invoice saved");
+    assert_eq!(app.desk.windows.len(), windows - 1, "window closed");
+    let inv = app.be.call_now("docs.list", json!({"type": "ACCREC", "contact_id": cust.id, "limit": 1})).unwrap()["rows"][0].clone();
+    let due = inv["amount_due"].as_i64().unwrap();
+    assert!(due > 0);
+    // 2. Receive Payments for that invoice only → Save & Close.
+    let t = app.update(Message::Nav(Route::ReceivePayment(Some(cust.id)))); settle(&mut app, t);
+    let docs = app.pay.as_ref().unwrap().docs.clone();
+    for (n, d) in docs.iter().enumerate() { let t = app.update(Message::Pay(P::Pick(n, d.id == inv["id"].as_i64().unwrap()))); settle(&mut app, t); }
+    press(&mut app, "Save & Close");
+    assert_eq!(app.be.call_now("docs.get", json!({"id": inv["id"]})).unwrap()["status"], "PAID", "payment applied");
+    // 3. Write Checks → Save & Close: a check appears in the register.
+    let t = app.update(Message::Nav(Route::Check(None))); settle(&mut app, t);
+    let acct = app.lk.account_opts(|a| a["code"] == "429").into_iter().next().unwrap();
+    for m in [P::ContactText("Corner Hardware".into()), P::LineAccount(0, acct), P::LineAmount(0, "86.40".into())] { let t = app.update(Message::Pay(m)); settle(&mut app, t); }
+    let no = app.pay.as_ref().unwrap().check_no.clone();
+    press(&mut app, "Save & Close");
+    let bank = crate::payments::bank_only(&app)[0].id;
+    let reg = app.be.call_now("bank.transactions", json!({"id": bank})).unwrap();
+    assert!(reg.as_array().unwrap().iter().any(|r| r["description"] == format!("Check {no}")), "check {no} in the register");
+    // 4. Make General Journal Entries → Save & Close.
+    let t = app.update(Message::Nav(Route::Journal)); settle(&mut app, t);
+    let a1 = app.lk.account_opts(|a| a["code"] == "429").into_iter().next().unwrap();
+    let a2 = app.lk.account_opts(|a| a["code"] == "200").into_iter().next().unwrap();
+    use crate::forms::Msg as F;
+    for m in [F::JAccount(0, a1), F::JDebit(0, "50".into()), F::JAccount(1, a2), F::JCredit(1, "50".into())] { let t = app.update(Message::Form(m)); settle(&mut app, t); }
+    let before = app.be.call_now("reports.run", json!({"name": "journal-report", "params": {"from": "2000-01-01", "to": "2100-01-01"}})).unwrap().to_string().len();
+    press(&mut app, "Save & Close");
+    let after = app.be.call_now("reports.run", json!({"name": "journal-report", "params": {"from": "2000-01-01", "to": "2100-01-01"}})).unwrap().to_string().len();
+    assert!(after > before, "journal posted");
+    assert!(app.toasts.iter().all(|t| !t.2), "no errors: {:?}", app.toasts);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn end_to_end_desktop_bills_orders_register_reconcile() {
+    use crate::doc::Msg as D;
+    use crate::payments::Msg as P;
+    let (mut app, dir) = desktop_app("e2e2");
+    // Enter Bills (Expenses tab) → Save & Close.
+    let vendor = app.lk.contact_opts(false).into_iter().next().unwrap();
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCPAY".into(), id: None })); settle(&mut app, t);
+    let acct = app.lk.account_opts(|a| a["code"] == "429").into_iter().next().unwrap();
+    for m in [D::Contact(vendor.clone()), D::Account(0, acct), D::Amount(0, "310.00".into())] { let t = app.update(Message::Doc(m)); settle(&mut app, t); }
+    let bills = count(&app, "ACCPAY");
+    press(&mut app, "Save & Close");
+    assert_eq!(count(&app, "ACCPAY"), bills + 1);
+    let bill = app.be.call_now("docs.list", json!({"type": "ACCPAY", "contact_id": vendor.id, "limit": 1})).unwrap()["rows"][0].clone();
+    // Pay Bills: only that bill → Pay Selected Bills.
+    let t = app.update(Message::Nav(Route::PayBills)); settle(&mut app, t);
+    let docs = app.pay.as_ref().unwrap().docs.clone();
+    for (n, d) in docs.iter().enumerate() { let t = app.update(Message::Pay(P::Pick(n, d.id == bill["id"].as_i64().unwrap()))); settle(&mut app, t); }
+    press(&mut app, "Pay Selected Bills");
+    assert_eq!(app.be.call_now("docs.get", json!({"id": bill["id"]})).unwrap()["status"], "PAID");
+    // Sales order → Save & Close → reopen → Create Invoice.
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    let t = app.update(Message::Nav(Route::Doc { kind: "SALESORDER".into(), id: None })); settle(&mut app, t);
+    for m in [D::Contact(cust), D::Desc(0, "12 chairs".into()), D::Price(0, "95".into())] { let t = app.update(Message::Doc(m)); settle(&mut app, t); }
+    press(&mut app, "Save & Close");
+    let so = app.be.call_now("docs.list", json!({"type": "SALESORDER", "limit": 1})).unwrap()["rows"][0]["id"].as_i64().unwrap();
+    let t = app.update(Message::Nav(Route::Doc { kind: "SALESORDER".into(), id: Some(so) })); settle(&mut app, t);
+    let invoices = count(&app, "ACCREC");
+    press(&mut app, "Create Invoice");
+    assert_eq!(count(&app, "ACCREC"), invoices + 1, "invoice created from the order");
+    assert_eq!(app.be.call_now("docs.get", json!({"id": so})).unwrap()["status"], "INVOICED");
+    // Register entry row: a deposit typed straight in.
+    let t = app.update(Message::Nav(Route::Register(None))); settle(&mut app, t);
+    let income = app.lk.account_opts(|a| a["code"] == "260").into_iter().next().unwrap();
+    use crate::desktop::{Msg as W, RegField};
+    for m in [W::RegAccount(income), W::Reg(RegField::Payee, "Cash sale".into()), W::Reg(RegField::Deposit, "42.00".into())] { let t = app.update(Message::Desk(m)); settle(&mut app, t); }
+    press(&mut app, "Record");
+    let bank = app.data.as_ref().unwrap()["account"].as_i64().unwrap();
+    assert!(app.be.call_now("bank.transactions", json!({"id": bank})).unwrap().as_array().unwrap().iter().any(|r| r["contact"] == "Cash sale"));
+    // Reconcile: statement balance = cleared items → Mark All → Reconcile Now.
+    let t = app.update(Message::Nav(Route::Reconcile)); settle(&mut app, t);
+    let acc = app.rec.account.as_ref().unwrap().id;
+    let probe = app.be.call_now("tickoff.start", json!({"account_id": acc, "statement_date": crate::ui::today_iso(), "ending_balance": 0})).unwrap();
+    let all: i64 = probe["items"].as_array().unwrap().iter().map(|i| i["amount"].as_i64().unwrap()).sum();
+    let ending = probe["beginning_balance"].as_i64().unwrap() + all;
+    let _ = app.update(Message::Rec(crate::reconcile::Msg::Ending(crate::ui::plain(ending))));
+    press(&mut app, "Continue");
+    press(&mut app, "Mark All");
+    assert_eq!(app.rec.session.as_ref().unwrap()["difference"], 0);
+    press(&mut app, "Reconcile Now");
+    assert!(app.rec.session.is_none(), "reconciliation finished");
+    let hist = app.be.call_now("tickoff.history", json!({"account_id": acc})).unwrap();
+    assert_eq!(hist[0]["status"], "FINISHED");
+    assert!(app.toasts.iter().all(|t| !t.2), "no errors: {:?}", app.toasts);
+    let _ = std::fs::remove_dir_all(dir);
 }
