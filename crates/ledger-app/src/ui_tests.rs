@@ -1895,3 +1895,78 @@ fn end_to_end_desktop_bills_orders_register_reconcile() {
     assert!(app.toasts.iter().all(|t| !t.2), "no errors: {:?}", app.toasts);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn end_to_end_desktop_money_screens() {
+    use crate::desktop::Msg as W;
+    use crate::doc::Msg as D;
+    use crate::payments::Msg as P;
+    let (mut app, dir) = desktop_app("e2e3");
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    let sales = app.lk.accounts.iter().find(|a| a["code"] == "200").unwrap()["id"].clone();
+    let mk = |app: &App, kind: &str, price: &str| app.be.call_now("docs.save", json!({"doc": {"type": kind, "contact_id": cust.id, "date": crate::ui::today_iso(), "line_amount_type": "NOTAX", "status": "AUTHORISED",
+        "lines": [{"description": "x", "quantity": "1", "unit_price": price, "account_id": sales}]}})).unwrap()["id"].as_i64().unwrap();
+    // Receive a payment into Undeposited Funds, then Make Deposits.
+    let inv = mk(&app, "ACCREC", "200");
+    let uf = app.be.call_now("accounts.undeposited", json!({})).unwrap()["id"].as_i64().unwrap();
+    app.be.call_now("payments.add", json!({"document_id": inv, "account_id": uf, "date": crate::ui::today_iso(), "amount": "200", "reference": ""})).unwrap();
+    let t = app.update(Message::Nav(Route::Deposit)); settle(&mut app, t);
+    assert!(!app.pay.as_ref().unwrap().docs.is_empty(), "waiting payments listed");
+    press(&mut app, "Save & Close");
+    assert!(app.be.call_now("deposits.undeposited", json!({})).unwrap()["payments"].as_array().unwrap().is_empty(), "deposited");
+    // Apply a credit memo to an invoice from the credit memo.
+    let inv2 = mk(&app, "ACCREC", "300");
+    let cm = mk(&app, "ACCRECCREDIT", "100");
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCRECCREDIT".into(), id: Some(cm) })); settle(&mut app, t);
+    press(&mut app, "Apply to Invoice");
+    let list = app.doc.as_ref().unwrap().apply.clone().unwrap();
+    for (n, (d, _)) in list.iter().enumerate() { let v = if d["id"].as_i64() == Some(inv2) { "100.00" } else { "" }; let _ = app.update(Message::Doc(D::ApplyAmt(n, v.into()))); }
+    press(&mut app, "Done");
+    assert_eq!(app.be.call_now("docs.get", json!({"id": inv2})).unwrap()["amount_due"], 20000);
+    // Give Refund on another credit memo.
+    let cm2 = mk(&app, "ACCRECCREDIT", "40");
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCRECCREDIT".into(), id: Some(cm2) })); settle(&mut app, t);
+    press(&mut app, "Give Refund");
+    press(&mut app, "OK");
+    assert_eq!(app.be.call_now("docs.get", json!({"id": cm2})).unwrap()["status"], "PAID", "refunded");
+    // Transfer Funds.
+    let t = app.update(Message::Nav(Route::Transfer)); settle(&mut app, t);
+    let _ = app.update(Message::Form(crate::forms::Msg::Amount("25".into())));
+    press(&mut app, "Save & Close");
+    // Pay Sales Tax (needs an agency with tax).
+    let rate = app.be.call_now("taxRates.createSales", json!({"name": "State 5%", "parts": [{"agency": "State Dept", "name": "State", "rate_bp": 500}]})).unwrap()["id"].as_i64().unwrap();
+    app.be.call_now("docs.save", json!({"doc": {"type": "ACCREC", "contact_id": cust.id, "date": crate::ui::today_iso(), "line_amount_type": "EXCLUSIVE", "status": "AUTHORISED",
+        "lines": [{"description": "x", "quantity": "1", "unit_price": "100", "account_id": sales, "tax_rate_id": rate}]}})).unwrap();
+    let t = app.update(Message::Nav(Route::PaySalesTax)); settle(&mut app, t);
+    let agency = app.data.as_ref().unwrap().as_array().unwrap().iter().find(|a| a["name"] == "State Dept").unwrap()["id"].as_i64().unwrap();
+    let _ = app.update(Message::Desk(W::TaxPick(agency, true)));
+    let spends_before = app.be.call_now("bank.transactions", json!({"id": crate::payments::bank_only(&app)[0].id})).unwrap().as_array().unwrap().len();
+    press(&mut app, "OK");
+    let spends_after = app.be.call_now("bank.transactions", json!({"id": crate::payments::bank_only(&app)[0].id})).unwrap().as_array().unwrap().len();
+    assert_eq!(spends_after, spends_before + 1, "sales tax paid");
+    // Adjust inventory down by one.
+    let t = app.update(Message::Nav(Route::AdjustInventory)); settle(&mut app, t);
+    let item = app.data.as_ref().unwrap().as_array().unwrap().iter().find(|x| x["is_tracked"].as_i64() == Some(1)).unwrap().clone();
+    let id = item["id"].as_i64().unwrap();
+    let cur = item["qty_on_hand_e4"].as_i64().unwrap();
+    let _ = app.update(Message::Desk(W::AdjQty(id, format!("{}", (cur - 10000) as f64 / 10000.0))));
+    press(&mut app, "Save & Close");
+    let now = app.be.call_now("items.list", json!({})).unwrap().as_array().unwrap().iter().find(|x| x["id"].as_i64() == Some(id)).unwrap()["qty_on_hand_e4"].as_i64().unwrap();
+    assert_eq!(now, cur - 10000);
+    // Enter Time.
+    let t = app.update(Message::Nav(Route::EnterTime)); settle(&mut app, t);
+    let p = app.data.as_ref().unwrap()["projects"][0].clone();
+    let _ = app.update(Message::Desk(W::TimeProject(crate::app::Opt { id: p["id"].as_i64().unwrap(), label: "p".into() })));
+    let _ = app.update(Message::Desk(W::TimeTask(crate::app::Opt { id: p["tasks"][0]["id"].as_i64().unwrap(), label: "t".into() })));
+    let _ = app.update(Message::Desk(W::TimeField(1, "1:15".into())));
+    press(&mut app, "Save & New");
+    // New Class.
+    let t = app.update(Message::Nav(Route::ClassList)); settle(&mut app, t);
+    let _ = app.update(Message::Desk(W::ClassNew("Retail".into())));
+    press(&mut app, "New Class");
+    assert!(app.be.call_now("tracking.list", json!({})).unwrap().to_string().contains("Retail"));
+    let errors: Vec<_> = app.toasts.iter().filter(|t| t.2).collect();
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let _ = (P::Save, D::Save(true));
+    let _ = std::fs::remove_dir_all(dir);
+}
