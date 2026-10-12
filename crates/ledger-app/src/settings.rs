@@ -5,7 +5,7 @@ use crate::backend::Reply;
 use crate::icons::icon;
 use crate::theme::{self, Skin, t};
 use crate::ui::{self, BOLD};
-use iced::widget::{button, column, container, pick_list, row, text};
+use iced::widget::{button, column, container, pick_list, row, scrollable, text};
 use iced::{Alignment, Element, Fill, Length, Task};
 use serde_json::{Value, json};
 
@@ -51,6 +51,8 @@ impl std::fmt::Display for RoleOpt { fn fmt(&self, f: &mut std::fmt::Formatter<'
 
 #[derive(Default)]
 pub struct State {
+    /// Desktop Preferences: selected category.
+    pub cat: Option<&'static str>,
     pub values: Vec<String>,
     pub editing: bool,
     pub busy: bool,
@@ -68,7 +70,7 @@ pub struct State {
 
 #[derive(Debug, Clone)]
 pub enum Msg {
-    Edit, Field(usize, String), Save, Saved(Result<Value, String>), Cancel,
+    Cat(&'static str), Edit, Field(usize, String), Save, Saved(Result<Value, String>), Cancel,
     Users(Reply), AddUser, UName(String), UEmail(String), URole(RoleOpt), SaveUser, UserSaved(Reply), SetActive(i64, bool),
     EditSmtp, Smtp(usize, String), SmtpTls(Security), SaveSmtp, SmtpSaved(Reply), TestTo(String), SendTest, TestSent(Reply),
 }
@@ -81,6 +83,7 @@ pub fn load(app: &mut App) -> Task<Message> {
 
 pub fn update(app: &mut App, m: Msg) -> Task<Message> {
     match m {
+        Msg::Cat(c) => { app.settings.cat = Some(c); Task::none() }
         Msg::Edit => { app.settings.values = FIELDS.iter().map(|(k, _)| app.setting(k)).collect(); app.settings.editing = true; Task::none() }
         Msg::Field(n, v) => { if let Some(x) = app.settings.values.get_mut(n) { *x = v; } Task::none() }
         Msg::Cancel => { app.settings.editing = false; app.settings.adding = false; app.settings.smtp_editing = false; Task::none() }
@@ -251,53 +254,96 @@ fn email_card(app: &App) -> Element<'_, Message> {
     ui::card(col)
 }
 
-pub fn view(app: &App) -> Element<'_, Message> {
+fn layout_section(app: &App) -> Element<'_, Message> {
+    ui::card(column![
+        ui::h2("Layout"),
+        ui::muted("Choose the layout you're used to. All three work on the same books: switching never changes your data, and each person on the team can use their own."),
+        row![
+            layout_card(app, crate::theme::Layout::Desktop, "Menu bar (File, Edit, Lists, Company, Customers, Vendors, Banking, Reports…), left icon bar, Home page workflow, Customer and Vendor Centers, several windows open at once, Ctrl+I / Ctrl+W shortcuts."),
+            layout_card(app, crate::theme::Layout::Online, "Left-hand menu, + New with Customers / Vendors / Employees / Other, Business overview, Banking For review, US-style terms (Estimates, Vendors, Credit memos)."),
+            layout_card(app, crate::theme::Layout::Xero, "Top menu bar (Business, Accounting, Contacts), dashboard with bank account cards, Reconcile, Xero terms (Quotes, Suppliers, Credit notes)."),
+        ].spacing(14),
+    ].spacing(12))
+}
+
+fn appearance_section(app: &App) -> Element<'_, Message> {
+    ui::card(column![
+        ui::h2("Appearance"),
+        row![ui::muted(if app.dark { "Dark mode is on." } else { "Light mode is on." }), ui::hspace(), ui::btn(if app.dark { "Use light mode" } else { "Use dark mode" }, Some(Message::ToggleTheme))].align_y(Alignment::Center),
+    ].spacing(12))
+}
+
+fn company_section(app: &App) -> Element<'_, Message> {
     let k = t();
     let s = |key: &str| app.setting(key);
     let info = |label: &str, value: String| -> Element<'_, Message> { row![text(label.to_string()).size(14).color(k.muted).width(220), text(if value.is_empty() { "—".into() } else { value }).size(14)].into() };
     let months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     let fy = s("fy_end_month").parse::<usize>().ok().filter(|m| (1..=12).contains(m)).map(|m| format!("{} {}", s("fy_end_day"), months[m - 1])).unwrap_or_default();
-    let body = column![
-        ui::card(column![
-            ui::h2("Layout"),
-            ui::muted("Choose the layout you're used to. All three work on the same books: switching never changes your data, and each person on the team can use their own."),
-            row![
-                layout_card(app, crate::theme::Layout::Desktop, "Menu bar (File, Edit, Lists, Company, Customers, Vendors, Banking, Reports…), left icon bar, Home page workflow, Customer and Vendor Centers, several windows open at once, Ctrl+I / Ctrl+W shortcuts."),
-                layout_card(app, crate::theme::Layout::Online, "Left-hand menu, + New with Customers / Vendors / Employees / Other, Business overview, Banking For review, US-style terms (Estimates, Vendors, Credit memos)."),
-                layout_card(app, crate::theme::Layout::Xero, "Top menu bar (Business, Accounting, Contacts), dashboard with bank account cards, Reconcile, Xero terms (Quotes, Suppliers, Credit notes)."),
-            ].spacing(14),
-        ].spacing(12)),
-        ui::card(column![
-            ui::h2("Appearance"),
-            row![ui::muted(if app.dark { "Dark mode is on." } else { "Light mode is on." }), ui::hspace(), ui::btn(if app.dark { "Use light mode" } else { "Use dark mode" }, Some(Message::ToggleTheme))].align_y(Alignment::Center),
-        ].spacing(12)),
-        if app.settings.editing {
-            let mut col = column![ui::h2("Company")].spacing(12);
-            for (n, (_, label)) in FIELDS.iter().enumerate() {
-                col = col.push(ui::field(label, app.settings.values.get(n).map(|s| s.as_str()).unwrap_or(""), move |v| Message::Settings(Msg::Field(n, v))));
-            }
-            col = col.push(row![ui::btn("Cancel", Some(Message::Settings(Msg::Cancel))), ui::hspace(), ui::btn_primary("Save", if app.settings.busy { None } else { Some(Message::Settings(Msg::Save)) })]);
-            ui::card(col)
-        } else { ui::card(column![
-            row![ui::h2("Company"), ui::hspace(), ui::btn("Edit", Some(Message::Settings(Msg::Edit)))].align_y(Alignment::Center),
-            info("Company name", s("org_name")),
-            info("Legal name", s("legal_name")),
-            info("Country", s("country")),
-            info("Home currency", s("base_currency")),
-            info(&format!("{} registered", if s("tax_label").is_empty() { "Tax".into() } else { s("tax_label") }), if s("tax_registered") == "1" || s("tax_registered") == "true" { "Yes".into() } else { "No".into() }),
-            info("Tax number", s("tax_number")),
-            info("Financial year ends", fy),
-            info("Address", s("address").replace('\n', ", ")),
-            info("Email", s("email")),
-        ].spacing(10)) },
-        users_card(app),
-        email_card(app),
-        ui::card(column![
-            ui::h2("Company file"),
-            row![ui::muted("Open a different company or create a new one."), ui::hspace(), ui::btn("Switch company", Some(Message::Nav(Route::Setup)))].align_y(Alignment::Center),
-            ui::muted("Invoice branding, bank feeds, currencies and other advanced settings are still in the web version (start.bat web) during the native rewrite."),
-        ].spacing(10)),
-    ].spacing(16);
+    if app.settings.editing {
+        let mut col = column![ui::h2("Company")].spacing(12);
+        for (n, (_, label)) in FIELDS.iter().enumerate() {
+            col = col.push(ui::field(label, app.settings.values.get(n).map(|s| s.as_str()).unwrap_or(""), move |v| Message::Settings(Msg::Field(n, v))));
+        }
+        col = col.push(row![ui::btn("Cancel", Some(Message::Settings(Msg::Cancel))), ui::hspace(), ui::btn_primary("Save", if app.settings.busy { None } else { Some(Message::Settings(Msg::Save)) })]);
+        return ui::card(col);
+    }
+    ui::card(column![
+        row![ui::h2("Company"), ui::hspace(), ui::btn("Edit", Some(Message::Settings(Msg::Edit)))].align_y(Alignment::Center),
+        info("Company name", s("org_name")),
+        info("Legal name", s("legal_name")),
+        info("Country", s("country")),
+        info("Home currency", s("base_currency")),
+        info(&format!("{} registered", if s("tax_label").is_empty() { "Tax".into() } else { s("tax_label") }), if s("tax_registered") == "1" || s("tax_registered") == "true" { "Yes".into() } else { "No".into() }),
+        info("Tax number", s("tax_number")),
+        info("Financial year ends", fy),
+        info("Address", s("address").replace('\n', ", ")),
+        info("Email", s("email")),
+    ].spacing(10))
+}
+
+fn file_section(_app: &App) -> Element<'_, Message> {
+    ui::card(column![
+        ui::h2("Company file"),
+        row![ui::muted("Open a different company or create a new one."), ui::hspace(), ui::btn("Switch company", Some(Message::Nav(Route::Setup)))].align_y(Alignment::Center),
+        ui::muted("Invoice branding, bank feeds, currencies and other advanced settings are still in the web version (start.bat web) during the native rewrite."),
+    ].spacing(10))
+}
+
+/// QuickBooks Desktop Preferences categories (those LedgerCraft has settings for are enabled).
+pub const DESK_CATS: [&str; 12] = ["Accounting", "Bills", "Checking", "Desktop View", "General", "Payments", "Reports & Graphs", "Sales & Customers", "Sales Tax", "Send Forms", "Tax: 1099", "Users & Roles"];
+
+fn desk_view(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let cat = app.settings.cat.unwrap_or("Desktop View");
+    let mut list = column![].spacing(1);
+    for c in DESK_CATS {
+        let on = c == cat;
+        list = list.push(button(text(c).size(13).font(if on { BOLD } else { iced::Font::DEFAULT })).style(theme::nav_item(on)).padding([5, 10]).width(Fill).on_press(Message::Settings(Msg::Cat(c))));
+    }
+    let note = |t_: &'static str| -> Element<'_, Message> { ui::card(ui::muted(t_)) };
+    let body: Element<Message> = match cat {
+        "Desktop View" => column![layout_section(app), appearance_section(app)].spacing(14).into(),
+        "General" | "Accounting" => column![company_section(app), file_section(app)].spacing(14).into(),
+        "Send Forms" => email_card(app),
+        "Users & Roles" => users_card(app),
+        "Sales Tax" => ui::card(column![ui::muted("Sales tax rates and agencies are managed in Manage Sales Tax."), row![ui::btn("Manage Sales Tax…", Some(Message::Nav(Route::Taxes)))]].spacing(10)),
+        "Tax: 1099" => ui::card(column![ui::muted("Mark vendors as eligible for 1099 in the Vendor Center or New Vendor window; payments to them are totalled on the 1099 Summary."),
+            row![ui::btn("1099 Summary", Some(Message::Nav(Route::Report("contractor-1099".into()))))]].spacing(10)),
+        _ => note("These preferences use LedgerCraft's defaults for now."),
+    };
+    let tabs = row![text("My Preferences").size(13).font(BOLD), text("Company Preferences").size(13).color(k.muted)].spacing(20);
+    column![
+        text("Preferences").size(22).font(BOLD),
+        row![
+            container(scrollable(list).style(theme::scroll)).width(210).height(Fill).padding(6).style(theme::card),
+            scrollable(column![tabs, body].spacing(12).width(Fill)).style(theme::scroll).height(Fill),
+        ].spacing(14).height(Fill),
+    ].spacing(10).padding(14).height(Fill).into()
+}
+
+pub fn view(app: &App) -> Element<'_, Message> {
+    if app.desktop() { return desk_view(app); }
+    let body = column![layout_section(app), appearance_section(app), company_section(app), users_card(app), email_card(app), file_section(app)].spacing(16);
     let title = app.term("settings");
     ui::page(ui::h1(title), vec![], container(body).max_width(980).into())
 }

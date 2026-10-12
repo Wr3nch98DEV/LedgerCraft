@@ -1058,3 +1058,32 @@ fn desktop_employee_center() {
     drop(ui);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_preferences() {
+    use crate::settings::Msg as S;
+    let (mut app, dir) = desktop_app("deskprefs");
+    let _ = app.update(Message::Nav(Route::Settings));
+    assert_eq!(crate::desktop::title(&app, &Route::Settings), "Preferences");
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["My Preferences", "Company Preferences", "Desktop View", "QuickBooks Desktop-style", "Send Forms"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    let msgs = click(&app, "Send Forms");
+    assert!(matches!(msgs.as_slice(), [Message::Settings(S::Cat("Send Forms"))]), "{msgs:?}");
+    let _ = app.update(Message::Settings(S::Cat("Send Forms")));
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        assert!(ui.find("Email (outgoing mail)").is_ok());
+    }
+    // Switching layout from Preferences works and the window list goes away with Desktop.
+    let msgs = click(&app, "Desktop View");
+    for m in msgs { let _ = app.update(m); }
+    let msgs = click(&app, "Xero-style");
+    assert!(matches!(msgs.as_slice(), [Message::SetLayout(crate::theme::Layout::Xero)]), "{msgs:?}");
+    let _ = app.update(Message::SetLayout(crate::theme::Layout::Xero));
+    assert!(!app.desktop() && app.desk.windows.is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}

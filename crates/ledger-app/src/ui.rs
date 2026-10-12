@@ -89,7 +89,7 @@ pub fn gap<'a, M: 'a>(h: f32) -> Element<'a, M> { Space::new().height(h).into() 
 pub fn hr<'a, M: 'a>() -> Element<'a, M> { container(Space::new()).width(Fill).height(1).style(theme::rule).into() }
 
 pub fn chip<'a, M: 'a>(label: &str, color: Color) -> Element<'a, M> {
-    container(text(label.to_string()).size(12).font(BOLD)).padding([2, 9]).style(theme::chip(color)).into()
+    container(text(label.to_string()).size(12).font(BOLD).wrapping(iced::widget::text::Wrapping::None)).padding([2, 9]).style(theme::chip(color)).into()
 }
 
 /// A labelled text field.
