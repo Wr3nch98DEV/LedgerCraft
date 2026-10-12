@@ -228,6 +228,7 @@ fn agencies<'a>(app: &'a App, d: &Value) -> Element<'a, Message> {
     let st = &app.people;
     let mut col_ = column![row![ui::h2("Sales tax agencies"), ui::hspace(),
         ui::btn("Agency report", Some(Message::Nav(Route::Report("sales-tax-by-agency".into())))),
+        ui::btn("Pay Sales Tax", Some(Message::Nav(Route::PaySalesTax))),
         if st.adding_rate { Space::new().into() } else { ui::btn_primary("Add sales tax rate", Some(Message::People(Msg::AddRate))) }].spacing(8).align_y(Alignment::Center)].spacing(10);
     if st.adding_rate {
         let mut form = column![ui::field_ph("Rate name", "e.g. Los Angeles 9.5% (optional)", &st.rate_name, |v| Message::People(Msg::RateName(v)))].spacing(10);

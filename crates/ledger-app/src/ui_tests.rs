@@ -1379,3 +1379,40 @@ fn desktop_one_window_view() {
     assert_eq!(app.desk.windows.len(), 2, "multiple windows again");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_pay_sales_tax() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("paytax");
+    // A rate with one agency, and an invoice that charges it today.
+    let rate = app.be.call_now("taxRates.createSales", json!({"name": "State 6%", "parts": [{"agency": "State Tax Dept", "name": "State", "rate_bp": 600}]})).unwrap()["id"].as_i64().unwrap();
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    let sales = app.lk.accounts.iter().find(|a| a["code"] == "200").unwrap()["id"].clone();
+    app.be.call_now("docs.save", json!({"doc": {"type": "ACCREC", "contact_id": cust.id, "date": crate::ui::today_iso(), "line_amount_type": "EXCLUSIVE", "status": "AUTHORISED",
+        "lines": [{"description": "x", "quantity": "1", "unit_price": "1000", "account_id": sales, "tax_rate_id": rate}]}})).unwrap();
+    let _ = app.update(Message::Nav(Route::PaySalesTax));
+    let ag = app.be.call_now("agencies.list", json!({})).unwrap();
+    app.data = Some(ag.clone());
+    let agency = ag.as_array().unwrap().iter().find(|a| a["name"] == "State Tax Dept").unwrap().clone();
+    assert!(agency["tax"].as_i64().unwrap() >= 6000);
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["PAY FROM ACCOUNT", "CHECK DATE", "State Tax Dept", "OK"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    let id = agency["id"].as_i64().unwrap();
+    let _ = app.update(Message::Desk(W::TaxPick(id, true)));
+    assert_eq!(app.desk.tax_pay[0].2, crate::ui::plain(agency["tax"].as_i64().unwrap()), "defaults to what was collected");
+    let _ = app.update(Message::Desk(W::TaxAmt(id, "60.00".into())));
+    let liab = app.lk.accounts.iter().find(|a| a["system_account"] == "GST").unwrap()["id"].as_i64().unwrap();
+    let bal = |app: &App| app.be.call_now("accounts.list", json!({})).unwrap().as_array().unwrap().iter().find(|a| a["id"].as_i64() == Some(liab)).unwrap()["ytd_balance"].as_i64().unwrap();
+    let before = bal(&app);
+    let _ = app.update(Message::Desk(W::TaxPay));
+    assert!(app.desk.tax_busy);
+    // The payment the window records:
+    let bank = crate::payments::bank_only(&app)[0].id;
+    app.be.call_now("banktx.save", json!({"tx": {"type": "SPEND", "account_id": bank, "date": crate::ui::today_iso(), "reference": "Sales tax payment", "contact_name": "State Tax Dept",
+        "line_amount_type": "NOTAX", "lines": [{"account_id": liab, "description": "Sales tax payment — State Tax Dept", "amount": "60.00"}]}})).unwrap();
+    assert_eq!(bal(&app) - before, 6000, "liability (a credit balance) reduced by 60.00");
+    let _ = std::fs::remove_dir_all(dir);
+}
