@@ -569,6 +569,8 @@ impl App {
             match key.as_ref() {
                 keyboard::Key::Named(Named::Escape) => return self.update(Message::CloseMenus),
                 keyboard::Key::Named(Named::F5) => return self.update(Message::Refresh),
+                // Tab / Shift+Tab move between fields, as in QuickBooks Desktop forms.
+                keyboard::Key::Named(Named::Tab) => return if modifiers.shift() { iced::widget::operation::focus_previous() } else { iced::widget::operation::focus_next() },
                 keyboard::Key::Character("s") if modifiers.command() => {
                     if matches!(self.route, Route::Doc { .. }) { return doc::update(self, doc::Msg::Save(false)); }
                 }
