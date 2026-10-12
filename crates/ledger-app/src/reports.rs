@@ -1,17 +1,17 @@
 //! Report centre (grouped and named per layout) and a generic report viewer for every engine report.
 
-use crate::app::{App, Message, Route};
+use crate::app::{App, Message, Opt, Route};
 use crate::icons::icon;
 use crate::theme::{self, Skin, t};
 use crate::ui::{self, BOLD};
-use iced::widget::{Space, button, column, container, pick_list, row, text};
+use iced::widget::{Space, button, checkbox, column, container, pick_list, row, text};
 use iced::{Alignment, Element, Fill, Length, Task};
 use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Period { #[default] ThisMonth, LastMonth, ThisQuarter, ThisYearToDate, LastYear, Last12Months }
+pub enum Period { #[default] ThisMonth, LastMonth, ThisQuarter, ThisYearToDate, LastYear, Last12Months, Custom }
 impl Period {
-    const ALL: [Period; 6] = [Period::ThisMonth, Period::LastMonth, Period::ThisQuarter, Period::ThisYearToDate, Period::LastYear, Period::Last12Months];
+    const ALL: [Period; 7] = [Period::ThisMonth, Period::LastMonth, Period::ThisQuarter, Period::ThisYearToDate, Period::LastYear, Period::Last12Months, Period::Custom];
     /// (from, to) as ISO dates. Financial year follows the calendar here; the engine applies the org's year for balance sheets.
     fn range(self) -> (String, String) {
         use chrono::Datelike;
@@ -20,7 +20,7 @@ impl Period {
         let last = |y: i32, m: u32| { let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) }; first(ny, nm) - chrono::Duration::days(1) };
         let (y, m) = (today.year(), today.month());
         let (f, t) = match self {
-            Period::ThisMonth => (first(y, m), last(y, m)),
+            Period::ThisMonth | Period::Custom => (first(y, m), last(y, m)),
             Period::LastMonth => { let (py, pm) = if m == 1 { (y - 1, 12) } else { (y, m - 1) }; (first(py, pm), last(py, pm)) }
             Period::ThisQuarter => { let qm = (m - 1) / 3 * 3 + 1; (first(y, qm), last(y, qm + 2)) }
             Period::ThisYearToDate => (first(y, 1), today),
@@ -32,27 +32,116 @@ impl Period {
 }
 impl std::fmt::Display for Period {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self { Period::ThisMonth => "This month", Period::LastMonth => "Last month", Period::ThisQuarter => "This quarter", Period::ThisYearToDate => "This year to date", Period::LastYear => "Last year", Period::Last12Months => "Last 12 months" })
+        f.write_str(match self { Period::ThisMonth => "This month", Period::LastMonth => "Last month", Period::ThisQuarter => "This quarter", Period::ThisYearToDate => "This year to date", Period::LastYear => "Last year", Period::Last12Months => "Last 12 months", Period::Custom => "Custom dates" })
     }
 }
 
+/// How amounts are spread across columns ("Display columns by" / comparisons).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Columns { #[default] Total, Months, PreviousPeriod, PreviousYear }
+impl Columns {
+    const ALL: [Columns; 4] = [Columns::Total, Columns::Months, Columns::PreviousPeriod, Columns::PreviousYear];
+}
+impl std::fmt::Display for Columns {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self { Columns::Total => "Total only", Columns::Months => "Months", Columns::PreviousPeriod => "Compare: previous period", Columns::PreviousYear => "Compare: previous year" })
+    }
+}
+
+/// Negative number style.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Negative { #[default] Minus, Parentheses }
+impl std::fmt::Display for Negative {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(match self { Negative::Minus => "-100", Negative::Parentheses => "(100)" }) }
+}
+
 #[derive(Default)]
-pub struct State { pub period: Period, pub cash: bool }
+pub struct State {
+    pub period: Period,
+    pub cash: bool,
+    /// Customize panel open.
+    pub customize: bool,
+    pub from: String,
+    pub to: String,
+    pub columns: Columns,
+    pub negative: Negative,
+    pub show_zero: bool,
+    pub contact: Option<Opt>,
+}
 
 #[derive(Debug, Clone)]
-pub enum Msg { Period(Period), Basis(bool), Export(bool), Exported(Result<String, String>) }
+pub enum Msg {
+    Period(Period), Basis(bool), Export(bool), Exported(Result<String, String>),
+    Customize, From(String), To(String), Columns(Columns), Negative(Negative), ShowZero(bool), Contact(Option<Opt>), Run,
+}
+
+/// The report's dates: the chosen period, or the custom dates when they parse.
+fn dates(app: &App) -> (String, String) {
+    let (f, t) = app.report.period.range();
+    if app.report.period != Period::Custom { return (f, t); }
+    let st = app.date_style();
+    (ui::to_iso(&app.report.from, st).unwrap_or(f), ui::to_iso(&app.report.to, st).unwrap_or(t))
+}
+
+/// Engine parameters for the current settings.
+pub fn params(app: &App) -> Value {
+    let (from, to) = dates(app);
+    let r = &app.report;
+    let mut p = json!({"from": from, "to": to, "date": to, "basis": if r.cash { "CASH" } else { "ACCRUAL" }, "show_zero": r.show_zero});
+    match r.columns {
+        Columns::Total => {}
+        Columns::Months => p["monthly"] = json!(true),
+        Columns::PreviousYear => { p["compare"] = json!(1); p["period"] = json!("YEAR"); }
+        Columns::PreviousPeriod => {
+            // Step back by the length of the range in whole months (a quarter -> previous quarter).
+            let months = |s: &str| s.get(..4).and_then(|y| y.parse::<i64>().ok()).unwrap_or(0) * 12 + s.get(5..7).and_then(|m| m.parse::<i64>().ok()).unwrap_or(0);
+            let span = months(&to) - months(&from) + 1;
+            p["compare"] = json!(1);
+            p["period"] = json!(match span { 3 => "QUARTER", 12 => "YEAR", _ => "MONTH" });
+        }
+    }
+    if let Some(c) = &r.contact { p["contact_id"] = json!(c.id); }
+    p
+}
 
 pub fn load(app: &mut App, key: &str) -> Task<Message> {
-    let (from, to) = app.report.period.range();
+    if app.report.from.is_empty() {
+        let (f, t) = app.report.period.range();
+        app.report.from = app.d(&f);
+        app.report.to = app.d(&t);
+    }
     let g = app.page_gen;
-    let params = json!({"from": from, "to": to, "date": to, "basis": if app.report.cash { "CASH" } else { "ACCRUAL" }});
+    let params = params(app);
     app.be.call("reports.run", json!({"name": key, "params": params}), move |r| Message::Loaded(g, r))
 }
 
 pub fn update(app: &mut App, m: Msg) -> Task<Message> {
     match m {
-        Msg::Period(p) => app.report.period = p,
+        Msg::Period(p) => {
+            app.report.period = p;
+            if p == Period::Custom { app.report.customize = true; return Task::none(); }
+            let (f, t) = p.range();
+            app.report.from = app.d(&f);
+            app.report.to = app.d(&t);
+        }
         Msg::Basis(c) => app.report.cash = c,
+        Msg::Customize => { app.report.customize = !app.report.customize; return Task::none(); }
+        Msg::From(v) => { app.report.from = v; app.report.period = Period::Custom; return Task::none(); }
+        Msg::To(v) => { app.report.to = v; app.report.period = Period::Custom; return Task::none(); }
+        Msg::Columns(c) => app.report.columns = c,
+        Msg::Negative(n) => { app.report.negative = n; return Task::none(); }
+        Msg::ShowZero(v) => app.report.show_zero = v,
+        Msg::Contact(c) => app.report.contact = c,
+        Msg::Run => {
+            if app.report.period == Period::Custom {
+                let st = app.date_style();
+                match (ui::to_iso(&app.report.from, st), ui::to_iso(&app.report.to, st)) {
+                    (Some(f), Some(t)) if f <= t => {}
+                    (Some(_), Some(_)) => return app.toast("The start date is after the end date", true),
+                    _ => return app.toast("Check the report dates", true),
+                }
+            }
+        }
         Msg::Export(pdf) => {
             let (Some(rep), Route::Report(key)) = (app.data.clone(), app.route.clone()) else { return Task::none() };
             let skin = app.skin;
@@ -152,8 +241,13 @@ pub fn qb_label(skin: Skin, s: &str) -> String {
     }
 }
 
-fn cell_value(v: &Value, qty: bool) -> String {
-    match v.as_i64() { None => String::new(), Some(x) if qty => { let s = format!("{:.2}", x as f64 / 10000.0); s.trim_end_matches('0').trim_end_matches('.').to_string() } Some(x) => ui::money(x) }
+fn cell_value(v: &Value, qty: bool, neg: Negative) -> String {
+    match v.as_i64() {
+        None => String::new(),
+        Some(x) if qty => { let s = format!("{:.2}", x as f64 / 10000.0); s.trim_end_matches('0').trim_end_matches('.').to_string() }
+        Some(x) if x < 0 && neg == Negative::Parentheses => format!("({})", ui::money(-x)),
+        Some(x) => ui::money(x),
+    }
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -167,24 +261,27 @@ pub fn view(app: &App) -> Element<'_, Message> {
         ].spacing(4)].spacing(5),
         ui::hspace(),
         column![Space::new().height(18), row![
+            ui::btn(if app.skin == Skin::QuickBooks { "Customize" } else { "Report settings" }, Some(Message::Report(Msg::Customize))),
             ui::btn("Export to PDF", app.data.as_ref().map(|_| Message::Report(Msg::Export(true)))),
             ui::btn(if app.skin == Skin::QuickBooks { "Export to Excel (CSV)" } else { "Export CSV" }, app.data.as_ref().map(|_| Message::Report(Msg::Export(false)))),
             ui::btn("Back to report list", Some(Message::Nav(Route::Reports))),
         ].spacing(6)],
     ].spacing(14).align_y(Alignment::End);
+    let controls: Element<Message> = if app.report.customize { column![controls, customize(app, key)].spacing(12).into() } else { controls.into() };
     let Some(d) = &app.data else {
         let body: Element<Message> = match &app.error { Some(e) => ui::card(column![ui::h2("Couldn't run this report"), ui::muted(e.clone())].spacing(6)), None => ui::muted("Running report…") };
         return ui::page(ui::h1(name(app.skin, key, "Report")), vec![], column![controls, body].spacing(16).into());
     };
     let title = name(app.skin, key, d["title"].as_str().unwrap_or("Report"));
     let columns: Vec<String> = d["columns"].as_array().cloned().unwrap_or_default().iter().map(|c| c.as_str().unwrap_or("").to_string()).collect();
+    let neg = app.report.negative;
     let qty_cols: Vec<usize> = d["qty_cols"].as_array().cloned().unwrap_or_default().iter().filter_map(|x| x.as_u64().map(|x| x as usize)).collect();
     let ncol = columns.len().max(1);
     let label_w: u16 = if ncol > 4 { 30 } else { 40 };
     let val_row = |label: Element<'static, Message>, values: &Value, bold: bool, msg: Option<Message>| -> Element<'static, Message> {
         let mut r = row![container(label).width(Length::FillPortion(label_w))].spacing(10).align_y(Alignment::Center);
         for c in 0..ncol {
-            let s = cell_value(&values[c], qty_cols.contains(&c));
+            let s = cell_value(&values[c], qty_cols.contains(&c), neg);
             r = r.push(container(text(s).size(14).font(if bold { BOLD } else { iced::Font::DEFAULT }).width(Fill).align_x(iced::alignment::Horizontal::Right)).width(Length::FillPortion(12)));
         }
         button(r.padding([6, 14])).style(theme::row_btn).padding(0).width(Fill).on_press_maybe(msg).into()
@@ -227,6 +324,43 @@ pub fn view(app: &App) -> Element<'_, Message> {
     ui::page(ui::h1(title), vec![], column![controls, report].spacing(16).into())
 }
 
+/// Reports that can be filtered to one customer or vendor.
+fn by_contact(key: &str) -> bool {
+    matches!(key, "aged-receivables" | "aged-payables" | "contact-transactions" | "general-ledger-detail" | "account-transactions")
+}
+/// Reports that can show months or comparison columns.
+fn by_period(key: &str) -> bool { matches!(key, "profit-and-loss" | "balance-sheet" | "budget-variance") }
+
+/// The Customize panel (QuickBooks) / report settings (Xero).
+fn customize<'a>(app: &'a App, key: &str) -> Element<'a, Message> {
+    let qb = app.skin == Skin::QuickBooks;
+    let mut general = row![
+        ui::field("From", &app.report.from, |v| Message::Report(Msg::From(v))),
+        ui::field("To", &app.report.to, |v| Message::Report(Msg::To(v))),
+        column![ui::label("Negative numbers"), pick_list(&[Negative::Minus, Negative::Parentheses][..], Some(app.report.negative), |n| Message::Report(Msg::Negative(n))).padding([7, 10]).text_size(14).style(theme::pick).width(Fill)].spacing(5).width(Fill),
+    ].spacing(14);
+    if by_period(key) {
+        general = general.push(column![ui::label(if qb { "Display columns by" } else { "Columns" }), pick_list(&Columns::ALL[..], Some(app.report.columns), |c| Message::Report(Msg::Columns(c))).padding([7, 10]).text_size(14).style(theme::pick).width(Fill)].spacing(5).width(Fill));
+    }
+    let mut extra = row![checkbox(app.report.show_zero).label(if qb { "Show rows with zero amounts" } else { "Show accounts with no transactions" }).on_toggle(|v| Message::Report(Msg::ShowZero(v))).text_size(14)].spacing(14).align_y(Alignment::Center);
+    if by_contact(key) {
+        let payables = key.contains("payable");
+        let all = if payables { if qb { "All vendors" } else { "All suppliers" } } else if qb { "All customers" } else { "All contacts" };
+        let mut opts = vec![Opt { id: 0, label: all.into() }];
+        opts.extend(app.lk.contact_opts(!payables));
+        let sel = app.report.contact.clone().unwrap_or_else(|| opts[0].clone());
+        let who = if payables { if qb { "Vendor" } else { "Supplier" } } else if qb { "Customer" } else { "Contact" };
+        extra = extra.push(Space::new().width(20)).push(text(who).size(13).color(t().muted))
+            .push(pick_list(opts, Some(sel), |o: Opt| Message::Report(Msg::Contact(if o.id == 0 { None } else { Some(o) }))).padding([7, 10]).text_size(14).style(theme::pick).width(260));
+    }
+    ui::card(column![
+        text(if qb { "Customize report" } else { "Report settings" }).size(15).font(BOLD),
+        general,
+        extra,
+        row![ui::hspace(), ui::btn("Close", Some(Message::Report(Msg::Customize))), ui::btn_primary(if qb { "Run report" } else { "Update" }, Some(Message::Report(Msg::Run)))].spacing(8),
+    ].spacing(12))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,6 +375,7 @@ mod tests {
         for p in Period::ALL {
             let (from, to) = p.range();
             assert!(from <= to, "{p}: {from} > {to}");
+            if p == Period::Custom { continue; }
             for r in cat.as_array().unwrap() {
                 let key = r["key"].as_str().unwrap();
                 if key == "bank-reconciliation" { continue; } // needs an account

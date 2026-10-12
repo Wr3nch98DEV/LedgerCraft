@@ -439,3 +439,61 @@ fn layout_is_remembered_per_user() {
     assert_eq!(again.skin, Skin::Xero, "after sign-in: this user's layout");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn customize_report_columns_and_filter() {
+    use crate::reports::{Columns, Msg as Rp, Negative};
+    let (mut app, dir) = demo_app("customize", Skin::QuickBooks);
+    let _ = app.update(Message::Nav(Route::Report("profit-and-loss".into())));
+    let msgs = click(&app, "Customize");
+    assert!(matches!(msgs.as_slice(), [Message::Report(Rp::Customize)]), "{msgs:?}");
+    let _ = app.update(Message::Report(Rp::Customize));
+    assert!(app.report.customize);
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["Customize report", "Display columns by", "Negative numbers", "Run report"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    // Custom dates over a year, by month, negatives in parentheses.
+    let _ = app.update(Message::Report(Rp::From("01/01/2026".into())));
+    let _ = app.update(Message::Report(Rp::To("12/31/2026".into())));
+    let _ = app.update(Message::Report(Rp::Columns(Columns::Months)));
+    let _ = app.update(Message::Report(Rp::Negative(Negative::Parentheses)));
+    let p = crate::reports::params(&app);
+    assert_eq!((p["from"].as_str(), p["to"].as_str(), p["monthly"].as_bool()), (Some("2026-01-01"), Some("2026-12-31"), Some(true)));
+    let rep = app.be.call_now("reports.run", json!({"name": "profit-and-loss", "params": p})).unwrap();
+    assert_eq!(rep["columns"].as_array().unwrap().len(), 12, "one column per month");
+    // Previous year comparison.
+    let _ = app.update(Message::Report(Rp::Columns(Columns::PreviousYear)));
+    let rep = app.be.call_now("reports.run", json!({"name": "profit-and-loss", "params": crate::reports::params(&app)})).unwrap();
+    assert_eq!(rep["columns"].as_array().unwrap().len(), 2);
+    // Bad custom dates are caught before running.
+    let _ = app.update(Message::Report(Rp::To("2025-01-01".into())));
+    let _ = app.update(Message::Report(Rp::Run));
+    assert!(app.toasts.iter().any(|t| t.2), "start after end is flagged");
+    // A/R aging filtered to one customer.
+    let _ = app.update(Message::Nav(Route::Report("aged-receivables".into())));
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    let _ = app.update(Message::Report(Rp::Contact(Some(cust.clone()))));
+    assert_eq!(crate::reports::params(&app)["contact_id"], cust.id);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Renders the P&L with the Customize panel to `%TEMP%\lc-customize-wgpu.png` (run with --ignored).
+#[test]
+#[ignore]
+fn render_customize_panel() {
+    use crate::reports::{Columns, Msg as Rp, Negative};
+    let (mut app, dir) = demo_app("customize-shot", Skin::QuickBooks);
+    let _ = app.update(Message::Nav(Route::Report("profit-and-loss".into())));
+    let _ = app.update(Message::Report(Rp::Customize));
+    let _ = app.update(Message::Report(Rp::Columns(Columns::PreviousYear)));
+    let _ = app.update(Message::Report(Rp::Negative(Negative::Parentheses)));
+    app.data = Some(app.be.call_now("reports.run", json!({"name": "profit-and-loss", "params": crate::reports::params(&app)})).unwrap());
+    let out = std::env::temp_dir().join("lc-customize.png");
+    let _ = std::fs::remove_file(std::env::temp_dir().join("lc-customize-wgpu.png"));
+    let _g = sim_lock();
+    let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
+    ui.snapshot(&app.theme()).unwrap().matches_image(&out).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
