@@ -164,6 +164,8 @@ pub struct App {
     /// Screen to open once the company is loaded (`--route`, used for testing).
     pub start_route: Option<Route>,
     pub pending_nav: Option<Route>,
+    /// Layout chosen on the command line (`--skin`), which wins over saved preferences.
+    pub skin_locked: bool,
 }
 
 /// Parse a `--route` argument such as `invoices`, `doc:ACCREC:117`, `doc:ACCPAY:new`, `contact:3`, `report:balance-sheet`.
@@ -218,6 +220,7 @@ impl App {
             setup: setup::State::default(),
             start_route: start,
             pending_nav: None,
+            skin_locked: skin.is_some(),
         };
         let mut app = app;
         if let Some(s) = skin { app.skin = s; }
@@ -242,8 +245,33 @@ impl App {
     pub fn org_name(&self) -> String { self.session.as_ref().and_then(|s| s["org"]["name"].as_str()).unwrap_or("").to_string() }
     pub fn user_name(&self) -> String { self.session.as_ref().and_then(|s| s["user"]["name"].as_str()).unwrap_or("").to_string() }
 
+    /// Saves layout and theme for the signed-in user (and as the default for this computer,
+    /// used before anyone has signed in).
     pub fn save_prefs(&self) {
-        let _ = std::fs::write(prefs_path(&self.be), json!({"layout": self.skin.key(), "dark": self.dark}).to_string());
+        let path = prefs_path(&self.be);
+        let mut prefs: Value = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str(&s).ok()).filter(Value::is_object).unwrap_or(json!({}));
+        prefs["layout"] = json!(self.skin.key());
+        prefs["dark"] = json!(self.dark);
+        if let Some(u) = self.user_key() {
+            if !prefs["users"].is_object() { prefs["users"] = json!({}); }
+            prefs["users"][u] = json!({"layout": self.skin.key(), "dark": self.dark});
+        }
+        let _ = std::fs::write(path, prefs.to_string());
+    }
+
+    /// Who the preferences belong to: the signed-in user's email (or name).
+    fn user_key(&self) -> Option<String> {
+        let u = &self.session.as_ref()?["user"];
+        [&u["email"], &u["name"]].into_iter().filter_map(|v| v.as_str()).map(|s| s.trim().to_lowercase()).find(|s| !s.is_empty())
+    }
+
+    /// Applies the signed-in user's saved layout and theme.
+    fn apply_user_prefs(&mut self) {
+        let Some(u) = self.user_key() else { return };
+        let prefs: Value = std::fs::read_to_string(prefs_path(&self.be)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}));
+        let mine = &prefs["users"][u.as_str()];
+        if let Some(l) = mine["layout"].as_str() { if !self.skin_locked { self.skin = Skin::from_key(l); } }
+        if let Some(d) = mine["dark"].as_bool() { self.dark = d; }
     }
 
     pub fn toast(&mut self, text: impl Into<String>, error: bool) -> Task<Message> {
@@ -347,6 +375,7 @@ impl App {
                 }
                 Ok(v) if !v["org"]["name"].is_null() => {
                     self.session = Some(v);
+                    self.apply_user_prefs();
                     // Open the first screen once reference data (accounts, contacts…) is loaded.
                     let next = self.start_route.take().unwrap_or(if self.route == Route::Setup { Route::Dashboard } else { self.route.clone() });
                     self.pending_nav = Some(next);

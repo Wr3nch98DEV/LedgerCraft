@@ -416,3 +416,26 @@ fn exclude_bank_line_and_restore() {
     assert_eq!(app.be.call_now("statements.lines", json!({"account_id": acc})).unwrap().as_array().unwrap().len(), n);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn layout_is_remembered_per_user() {
+    let dir = std::env::temp_dir().join(format!("lc-ui-peruser-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (mut app, _) = App::boot(dir.clone(), None, None);
+    app.be.call_now("orgs.create", json!({"org_name": "Demo Co", "country": "US", "demo": false, "owner_name": "Alex Morgan"})).unwrap();
+    let session = app.be.call_now("session.get", json!({})).unwrap();
+    let _ = app.update(Message::Session(Ok(session.clone())));
+    assert_eq!(app.skin, Skin::QuickBooks);
+    let _ = app.update(Message::SetSkin(Skin::Xero));
+    // Someone else used this computer in QuickBooks layout since then (the computer default changes)…
+    let prefs = dir.join("ui-preferences.json");
+    let mut p: Value = serde_json::from_str(&std::fs::read_to_string(&prefs).unwrap()).unwrap();
+    p["layout"] = json!("quickbooks");
+    std::fs::write(&prefs, p.to_string()).unwrap();
+    // …but when this user opens the company again, they get their own layout back.
+    let (mut again, _) = App::boot(dir.clone(), None, None);
+    assert_eq!(again.skin, Skin::QuickBooks, "before sign-in: the computer's default");
+    let _ = again.update(Message::Session(Ok(session)));
+    assert_eq!(again.skin, Skin::Xero, "after sign-in: this user's layout");
+    let _ = std::fs::remove_dir_all(dir);
+}
