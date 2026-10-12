@@ -419,7 +419,7 @@ fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Messag
     let e = |l: &str, k: &'static str, m: Option<Message>| (l.to_string(), k, m);
     let sep = || ("-".to_string(), "", None);
     match name {
-        "File" => vec![e("New Company…", "", nav(Route::Setup)), e("Open or Restore Company…", "", nav(Route::Setup)), e("Open Previous Company", "", nav(Route::Setup)), sep(),
+        "File" => vec![e("New Company…", "", nav(Route::Setup)), e("Open or Restore Company…", "", nav(Route::Setup)), e("Restore a Backup Copy…", "", Some(Message::Setup(crate::setup::Msg::Restore))), e("Open Previous Company", "", nav(Route::Setup)), sep(),
             e("Back Up Company…", "", Some(Message::BackupCompany)), e("Print Forms", "", None), sep(), e("Exit", "Alt+F4", Some(Message::Desk(Msg::Exit)))],
         "Edit" => vec![e("Undo", "Ctrl+Z", None), sep(), e("Find…", "Ctrl+F", Some(Message::FocusSearch)), e("Search…", "F3", None), sep(), e("Preferences…", "", nav(Route::Settings))],
         "View" => vec![e(if app.desk.one_window { "✓ One Window" } else { "   One Window" }, "", Some(Message::Desk(Msg::OneWindow(true)))),

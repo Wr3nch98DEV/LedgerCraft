@@ -51,6 +51,26 @@ impl AppState {
         Ok(())
     }
 
+    /// Restore a backup copy: check it's a LedgerCraft company, copy it in as a new company file
+    /// (never over an existing one) and open it. Returns the new file name.
+    pub fn restore_backup(&self, src: &std::path::Path) -> Result<String, String> {
+        rusqlite_name(src).ok_or("That file isn't a LedgerCraft company backup")?;
+        std::fs::create_dir_all(self.orgs_dir()).map_err(|e| e.to_string())?;
+        let stem: String = src.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "company".into())
+            .chars().map(|c| if c.is_alphanumeric() || c == '-' || c == ' ' { c } else { '-' }).collect();
+        let today = ledger_core::util::today();
+        let mut n = 1;
+        let target = loop {
+            let file = if n == 1 { format!("{stem} (restored {today}).lcdb") } else { format!("{stem} (restored {today}) {n}.lcdb") };
+            let p = self.orgs_dir().join(&file);
+            if !p.exists() { break p; }
+            n += 1;
+        };
+        std::fs::copy(src, &target).map_err(|e| format!("Couldn't copy the backup: {e}"))?;
+        self.open_org(&target)?;
+        Ok(target.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default())
+    }
+
     pub fn list_orgs(&self) -> Vec<serde_json::Value> {
         let mut out = Vec::new();
         let current = self.org.lock().unwrap().as_ref().map(|o| o.path.clone());

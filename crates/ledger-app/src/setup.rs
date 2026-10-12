@@ -35,6 +35,8 @@ pub enum Msg {
     Orgs(Result<Value, String>),
     Open(String),
     Opened(Result<Value, String>),
+    /// Restore a backup copy (File ▸ Open or Restore Company).
+    Restore,
     Name(String),
     Owner(String),
     Country(Country),
@@ -60,6 +62,14 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::Orgs(Ok(v)) => { app.setup.orgs = v.as_array().cloned().unwrap_or_default(); Task::none() }
         Msg::Orgs(Err(e)) => app.toast(e, true),
         Msg::Open(file) => { app.setup.busy = true; app.be.call("orgs.open", json!({"file": file}), |r| Message::Setup(Msg::Opened(r))) }
+        Msg::Restore => {
+            let st = app.be.st.clone();
+            Task::perform(async move {
+                let Some(file) = rfd::AsyncFileDialog::new().set_title("Restore a backup copy").add_filter("LedgerCraft company file", &["lcdb"]).pick_file().await else { return Err("cancelled".to_string()) };
+                let path = file.path().to_path_buf();
+                tokio::task::spawn_blocking(move || st.restore_backup(&path).map(|f| json!({"file": f}))).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| match r { Err(e) if e == "cancelled" => Message::Noop, r => Message::Setup(Msg::Opened(r)) })
+        }
         Msg::Opened(r) => {
             app.setup.busy = false;
             match r {
@@ -117,7 +127,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         column![text("LedgerCraft").size(22).font(BOLD), ui::muted("Open-source accounting for small business")].spacing(2),
     ].spacing(12).align_y(Alignment::Center);
 
-    let mut existing = column![ui::h2("Your companies")].spacing(8);
+    let mut existing = column![row![ui::h2("Your companies"), ui::hspace(), ui::btn("Restore a backup…", if s.busy { None } else { Some(Message::Setup(Msg::Restore)) })].align_y(Alignment::Center)].spacing(8);
     if s.orgs.is_empty() { existing = existing.push(ui::muted("No companies yet — create one below, or try the sample company.")); }
     for o in &s.orgs {
         let file = o["file"].as_str().unwrap_or("").to_string();

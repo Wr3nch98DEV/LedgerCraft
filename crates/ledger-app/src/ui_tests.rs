@@ -1462,3 +1462,24 @@ fn back_up_company_to_file() {
     ledger_server::jobs::backup_to(&app.be.st, &target).unwrap();
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn restore_backup_as_new_company() {
+    let (app, dir) = desktop_app("restore");
+    let backup = dir.join("demo backup.lcdb");
+    ledger_server::jobs::backup_to(&app.be.st, &backup).unwrap();
+    let before = app.be.st.list_orgs().len();
+    let file = app.be.st.restore_backup(&backup).unwrap();
+    assert!(file.contains("restored"), "{file}");
+    assert_eq!(app.be.st.list_orgs().len(), before + 1, "added alongside, nothing replaced");
+    let s = app.be.call_now("session.get", json!({})).unwrap();
+    assert_eq!(s["org"]["name"], "Demo Co", "the restored company is open");
+    // Restoring the same file again makes another copy rather than overwriting.
+    let again = app.be.st.restore_backup(&backup).unwrap();
+    assert_ne!(again, file);
+    // Not a company file → refused.
+    let junk = dir.join("junk.lcdb");
+    std::fs::write(&junk, b"not a database").unwrap();
+    assert!(app.be.st.restore_backup(&junk).is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
