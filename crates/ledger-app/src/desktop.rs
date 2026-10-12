@@ -89,6 +89,9 @@ pub struct State {
     pub pl_pct: String,
     pub pl_cust: Option<crate::app::Opt>,
     pub pl_level: Option<crate::app::Opt>,
+    /// Print Forms: invoices left out of the batch, and busy.
+    pub pf_skip: Vec<i64>,
+    pub pf_busy: bool,
     /// Enter Time: project, task, date, duration (h:mm) and notes.
     pub time_project: Option<crate::app::Opt>,
     pub time_task: Option<crate::app::Opt>,
@@ -106,7 +109,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
     /// Remember the Desktop view choices (One Window, icon bar pane).
@@ -221,6 +224,40 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             let name = app.desk.on_new.trim().to_string();
             if name.is_empty() { return app.toast("Enter the name", true); }
             app.be.call("contacts.create", serde_json::json!({"name": name}), |r| Message::Desk(Msg::ClassDone(r)))
+        }
+        Msg::PfPick(id, on) => { app.desk.pf_skip.retain(|x| *x != id); if !on { app.desk.pf_skip.push(id); } Task::none() }
+        Msg::PfAll(on) => { app.desk.pf_skip = if on { vec![] } else { to_print(app).iter().filter_map(|d| d["id"].as_i64()).collect() }; Task::none() }
+        Msg::PfPrint => {
+            let ids: Vec<i64> = to_print(app).iter().filter_map(|d| d["id"].as_i64()).filter(|id| !app.desk.pf_skip.contains(id)).collect();
+            if ids.is_empty() { return app.toast("Select the invoices to print", true); }
+            let be = app.be.clone();
+            let style = app.date_style();
+            let title = crate::doc::printed_title(app, "ACCREC");
+            let accent = (0.16, 0.6, 0.27);
+            let open = !cfg!(test);
+            app.desk.pf_busy = true;
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<(String, usize), String> {
+                    let st = be.call_now("settings.get", serde_json::json!({}))?;
+                    let mut docs = vec![];
+                    for id in &ids { docs.push((be.call_now("docs.get", serde_json::json!({"id": id}))?, title.clone())); }
+                    let bytes = crate::pdf::documents(&docs, &st, &|x| ui::date(x, style), accent);
+                    let stamp = chrono::Local::now().format("%Y-%m-%d %H%M%S").to_string();
+                    let path = crate::pdf::output_dir().join(["Invoices ", &stamp, ".pdf"].concat());
+                    std::fs::write(&path, bytes).map_err(|e| ["Couldn't save the PDF: ", &e.to_string()].concat())?;
+                    // Printed forms drop off the list, as in QuickBooks.
+                    for id in &ids { be.call_now("docs.markSent", serde_json::json!({"id": id}))?; }
+                    if open { crate::pdf::open_file(&path); }
+                    Ok((path.display().to_string(), ids.len()))
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Desk(Msg::PfDone(r)))
+        }
+        Msg::PfDone(r) => {
+            app.desk.pf_busy = false;
+            match r {
+                Ok((p, n)) => { app.desk.pf_skip.clear(); let t1 = app.toast(format!("Printed {n} invoice(s) to {p}"), false); Task::batch([t1, app.load()]) }
+                Err(e) => app.toast(e, true),
+            }
         }
         Msg::PlField(f, v) => { if f == 0 { app.desk.pl_name = v } else { app.desk.pl_pct = v } Task::none() }
         Msg::PlAdd => {
@@ -641,6 +678,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::FinanceCharges => "Assess Finance Charges".into(),
         Route::Templates => "Templates".into(),
         Route::PriceLevels => "Price Level List".into(),
+        Route::PrintForms => "Select Invoices to Print".into(),
         Route::EnterTime => "Time/Enter Single Activity".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
@@ -685,7 +723,7 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
     let sep = || ("-".to_string(), "", None);
     match name {
         "File" => vec![e("New Company…", "", nav(Route::Setup)), e("Open or Restore Company…", "", nav(Route::Setup)), e("Restore a Backup Copy…", "", Some(Message::Setup(crate::setup::Msg::Restore))), e("Open Previous Company", "", nav(Route::Setup)), sep(),
-            e("Back Up Company…", "", Some(Message::BackupCompany)), e("Print Forms", "", None), sep(), e("Exit", "Alt+F4", Some(Message::Desk(Msg::Exit)))],
+            e("Back Up Company…", "", Some(Message::BackupCompany)), e("Print Forms", "", nav(Route::PrintForms)), sep(), e("Exit", "Alt+F4", Some(Message::Desk(Msg::Exit)))],
         "Edit" => vec![e("Undo", "Ctrl+Z", None), sep(), e("Find…", "Ctrl+F", Some(Message::FocusSearch)), e("Search…", "F3", Some(Message::FocusSearch)), sep(), e("Preferences…", "", nav(Route::Settings))],
         "View" => vec![e(if app.desk.one_window { "✓ One Window" } else { "   One Window" }, "", Some(Message::Desk(Msg::OneWindow(true)))),
             e(if app.desk.one_window { "   Multiple Windows" } else { "✓ Multiple Windows" }, "", Some(Message::Desk(Msg::OneWindow(false)))), sep(),
@@ -941,6 +979,37 @@ pub fn other_names(app: &App) -> Element<'_, Message> {
         ui::btn_primary("New Name", Some(Message::Desk(Msg::OnAdd))),
         ui::hspace(),
         text("Owners, partners and one-off payees. A name becomes a customer or vendor once you transact with it.").size(12).color(k.muted).into(),
+    ])
+}
+
+/// Approved invoices not yet printed or sent.
+fn to_print(app: &App) -> Vec<Value> {
+    app.data.as_ref().and_then(|d| d["rows"].as_array().cloned()).unwrap_or_default().into_iter()
+        .filter(|d| matches!(d["status"].as_str(), Some("AUTHORISED" | "PAID")) && d["sent"].as_i64().unwrap_or(0) == 0).collect()
+}
+
+/// File ▸ Print Forms ▸ Invoices.
+pub fn print_forms(app: &App) -> Element<'_, Message> {
+    let k = t();
+    if app.data.is_none() { return container(ui::muted("Loading…")).padding(20).into() }
+    let docs = to_print(app);
+    let cols: Vec<(&str, u16, bool)> = vec![("✓", 4, false), ("Date", 12, false), ("Type", 8, false), ("No.", 10, false), ("Customer", 32, false), ("Amount", 14, true)];
+    let rows = docs.iter().map(|d| {
+        let id = d["id"].as_i64().unwrap_or(0);
+        let on = !app.desk.pf_skip.contains(&id);
+        (vec![iced::widget::checkbox(on).on_toggle(move |v| Message::Desk(Msg::PfPick(id, v))).into(),
+            ui::cell_muted(app.d(d["date"].as_str().unwrap_or(""))), ui::cell_muted("INV".to_string()), ui::cell(d["number"].as_str().unwrap_or("").to_string()),
+            ui::cell(d["contact_name"].as_str().unwrap_or("").to_string()), ui::cell_money(d["total"].as_i64().unwrap_or(0))],
+         Some(Message::Desk(Msg::PfPick(id, !on))))
+    }).collect();
+    let n = docs.iter().filter(|d| !app.desk.pf_skip.contains(&d["id"].as_i64().unwrap_or(0))).count();
+    list_window(&cols, rows, vec![
+        ui::btn("Select All", Some(Message::Desk(Msg::PfAll(true)))), ui::btn("Select None", Some(Message::Desk(Msg::PfAll(false)))),
+        text(format!("{n} of {} selected", docs.len())).size(12).color(k.muted).into(),
+        ui::hspace(),
+        text("Invoices you've approved but not printed or emailed.").size(12).color(k.muted).into(),
+        ui::btn_primary("Print", if app.desk.pf_busy || n == 0 { None } else { Some(Message::Desk(Msg::PfPrint)) }),
+        ui::btn("Cancel", Some(Message::Back)),
     ])
 }
 

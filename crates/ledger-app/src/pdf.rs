@@ -116,8 +116,21 @@ const BAND: (f32, f32, f32) = (0.95, 0.96, 0.97);
 /// Render an invoice, bill, quote/estimate, credit note or purchase order.
 /// `title` is the printed heading; `fmt_date` formats ISO dates in the company's style.
 pub fn document(doc: &Value, settings: &Value, title: &str, fmt_date: &dyn Fn(&str) -> String, accent: (f32, f32, f32)) -> Vec<u8> {
+    documents(&[(doc.clone(), title.to_string())], settings, fmt_date, accent)
+}
+
+/// Several forms in one PDF, each starting on a new page (File ▸ Print Forms).
+pub fn documents(docs: &[(Value, String)], settings: &Value, fmt_date: &dyn Fn(&str) -> String, accent: (f32, f32, f32)) -> Vec<u8> {
     let letter = settings["country"] == "US" || settings["country"] == "CA";
     let mut p = Pdf::new(letter);
+    for (doc, title) in docs {
+        p.new_page();
+        draw_document(&mut p, doc, settings, title, fmt_date, accent);
+    }
+    p.finish()
+}
+
+fn draw_document(p: &mut Pdf, doc: &Value, settings: &Value, title: &str, fmt_date: &dyn Fn(&str) -> String, accent: (f32, f32, f32)) {
     let (l, r) = (48.0, p.w - 48.0);
     let mut y = 64.0;
     // Company block (left) and title block (right).
@@ -158,14 +171,14 @@ pub fn document(doc: &Value, settings: &Value, title: &str, fmt_date: &dyn Fn(&s
         p.rect(l, y - 12.0, r - l, 20.0, BAND);
         for (x, h, right) in cols { if right { p.text_right(x, y + 2.0, 8.0, true, MUTED, h); } else { p.text(x, y + 2.0, 8.0, true, MUTED, h); } }
     };
-    header(&mut p, y);
+    header(p, y);
     y += 22.0;
     let bottom = p.h - 72.0;
     for line in doc["lines"].as_array().cloned().unwrap_or_default() {
         let desc = { let d = st(&line, "description"); if d.is_empty() { st(&line, "item_code").to_string() } else { d.to_string() } };
         let wrapped = wrap(&desc, 9.5, r - 230.0 - 50.0 - (l + 8.0));
         let need = 13.0 * wrapped.len() as f32 + 8.0;
-        if y + need > bottom { p.new_page(); y = 64.0; header(&mut p, y); y += 22.0; }
+        if y + need > bottom { p.new_page(); y = 64.0; header(p, y); y += 22.0; }
         for (n, w) in wrapped.iter().enumerate() { p.text(l + 8.0, y + n as f32 * 13.0, 9.5, false, INK, w); }
         let qty = { let q = i(&line["qty_e4"]); let s = format!("{:.4}", q as f64 / 10000.0); s.trim_end_matches('0').trim_end_matches('.').to_string() };
         let rate = { let u = i(&line["unit_e2"]); if u % 100 == 0 { money(u / 100) } else { format!("{:.4}", u as f64 / 10000.0) } };
@@ -185,20 +198,20 @@ pub fn document(doc: &Value, settings: &Value, title: &str, fmt_date: &dyn Fn(&s
         p.text_right(r - 8.0, *y, size, bold, INK, &money(v));
         *y += size + 7.0;
     };
-    total_row(&mut p, &mut y, "Subtotal", i(&doc["subtotal"]), false, 9.5);
+    total_row(p, &mut y, "Subtotal", i(&doc["subtotal"]), false, 9.5);
     for t in doc["tax_summary"].as_array().cloned().unwrap_or_default() {
         let lbl = format!("{} {}", if doc["line_amount_type"] == "INCLUSIVE" { "Includes" } else { "Total" }, st(&t, "name"));
-        total_row(&mut p, &mut y, &lbl, i(&t["tax"]), false, 9.5);
+        total_row(p, &mut y, &lbl, i(&t["tax"]), false, 9.5);
     }
     p.line(lx, y - 7.0, r, 1.0, INK);
     y += 4.0;
-    total_row(&mut p, &mut y, &format!("TOTAL {}", st(doc, "currency")), i(&doc["total"]), true, 11.5);
+    total_row(p, &mut y, &format!("TOTAL {}", st(doc, "currency")), i(&doc["total"]), true, 11.5);
     let ledger = matches!(kind, "ACCREC" | "ACCPAY" | "ACCRECCREDIT" | "ACCPAYCREDIT");
     if ledger {
-        for pmt in doc["payments"].as_array().cloned().unwrap_or_default() { total_row(&mut p, &mut y, &format!("Payment {}", fmt_date(st(&pmt, "date"))), -i(&pmt["amount"]), false, 9.5); }
-        for a in doc["allocations"].as_array().cloned().unwrap_or_default() { total_row(&mut p, &mut y, &format!("Credit {}", st(&a, "credit_number")), -i(&a["amount"]), false, 9.5); }
+        for pmt in doc["payments"].as_array().cloned().unwrap_or_default() { total_row(p, &mut y, &format!("Payment {}", fmt_date(st(&pmt, "date"))), -i(&pmt["amount"]), false, 9.5); }
+        for a in doc["allocations"].as_array().cloned().unwrap_or_default() { total_row(p, &mut y, &format!("Credit {}", st(&a, "credit_number")), -i(&a["amount"]), false, 9.5); }
         p.rect(lx - 8.0, y - 13.0, r - lx + 8.0, 22.0, BAND);
-        total_row(&mut p, &mut y, &format!("{} {}", if matches!(kind, "ACCRECCREDIT" | "ACCPAYCREDIT") { "CREDIT REMAINING" } else { "AMOUNT DUE" }, st(doc, "currency")), i(&doc["amount_due"]), true, 12.0);
+        total_row(p, &mut y, &format!("{} {}", if matches!(kind, "ACCRECCREDIT" | "ACCPAYCREDIT") { "CREDIT REMAINING" } else { "AMOUNT DUE" }, st(doc, "currency")), i(&doc["amount_due"]), true, 12.0);
     }
     // Notes / terms.
     if !st(doc, "terms").is_empty() {
@@ -208,7 +221,6 @@ pub fn document(doc: &Value, settings: &Value, title: &str, fmt_date: &dyn Fn(&s
         for w in wrap(st(doc, "terms"), 9.5, r - l) { if y > bottom { p.new_page(); y = 64.0; } p.text(l, y, 9.5, false, INK, &w); y += 12.5; }
     }
     p.text(l, p.h - 36.0, 7.5, false, MUTED, "Generated by LedgerCraft");
-    p.finish()
 }
 
 /// Flatten a report into rows of (label, values, level) where level 0 = row, 1 = child, 2 = section title, 3 = total.
@@ -284,6 +296,8 @@ pub fn report_csv(rep: &Value, relabel: &dyn Fn(&str) -> String) -> String {
 
 /// Where printed documents are saved: Documents\LedgerCraft (falls back to the temp folder).
 pub fn output_dir() -> std::path::PathBuf {
+    // Tests never write into the user's Documents folder.
+    if cfg!(test) { let d = std::env::temp_dir().join("lc-test-output"); let _ = std::fs::create_dir_all(&d); return d; }
     let base = std::env::var("USERPROFILE").map(|h| std::path::PathBuf::from(h).join("Documents")).ok().filter(|p| p.exists()).unwrap_or_else(std::env::temp_dir);
     let dir = base.join("LedgerCraft");
     let _ = std::fs::create_dir_all(&dir);

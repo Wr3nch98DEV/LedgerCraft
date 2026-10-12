@@ -1767,7 +1767,7 @@ fn every_screen_in_every_layout_loads() {
         Route::ReceivePayment(None), Route::PayBills, Route::Spend(None), Route::Check(None), Route::Deposit, Route::Transfer, Route::Journal,
         Route::NewContact(true), Route::NewProduct, Route::NewAccount, Route::Payroll, Route::Taxes, Route::Projects, Route::Mileage, Route::Reconcile,
         Route::Register(None), Route::Calendar, Route::Statements, Route::Memorized, Route::PaySalesTax, Route::AdjustInventory, Route::Help, Route::DocCenter,
-        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates, Route::PriceLevels];
+        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates, Route::PriceLevels, Route::PrintForms];
     for layout in Layout::ALL {
         let (mut app, dir) = desktop_app(&format!("all-{}", layout.key()));
         let t = app.update(Message::SetLayout(layout));
@@ -2177,5 +2177,29 @@ fn end_to_end_price_levels() {
     let t = app.update(Message::Nav(Route::PriceLevels)); settle(&mut app, t);
     let t = app.update(Message::Desk(W::PlDelete(levels[0]["id"].as_i64().unwrap()))); settle(&mut app, t);
     assert_eq!(app.lk.price_level_bp(cust.id), None);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn end_to_end_print_forms() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("e2e-printforms");
+    let t = app.update(Message::Nav(Route::PrintForms)); settle(&mut app, t);
+    let unsent = |app: &App| app.be.call_now("docs.list", json!({"type": "ACCREC", "limit": 5000})).unwrap()["rows"].as_array().unwrap().iter()
+        .filter(|d| matches!(d["status"].as_str(), Some("AUTHORISED" | "PAID")) && d["sent"].as_i64().unwrap_or(0) == 0).map(|d| d["id"].as_i64().unwrap()).collect::<Vec<_>>();
+    let before = unsent(&app);
+    assert!(before.len() >= 2, "demo data has unsent invoices");
+    // Leave one out, print the rest into one PDF.
+    let _ = app.update(Message::Desk(W::PfPick(before[0], false)));
+    press(&mut app, "Print");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert_eq!(unsent(&app), vec![before[0]], "printed invoices are marked sent");
+    let pdf = std::fs::read_dir(std::env::temp_dir().join("lc-test-output")).unwrap().filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with("Invoices ")).max_by_key(|e| e.metadata().unwrap().modified().unwrap()).unwrap().path();
+    let bytes = std::fs::read(&pdf).unwrap();
+    assert!(bytes.starts_with(b"%PDF"));
+    let pages = String::from_utf8_lossy(&bytes).matches("/Type /Page /").count();
+    assert!(pages >= before.len() - 1, "one page per invoice ({pages})");
+    let _ = std::fs::remove_file(pdf);
     let _ = std::fs::remove_dir_all(dir);
 }
