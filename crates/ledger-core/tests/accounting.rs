@@ -428,6 +428,25 @@ fn tick_off_reconciliation() {
 }
 
 #[test]
+fn excluded_bank_lines() {
+    let l = org();
+    let bank = acct(&l, "090");
+    l.import_lines(bank, "s.csv", "CSV", &[
+        StmtLine { date: "2026-07-08".into(), amount: -5000, payee: "Cafe".into(), ..Default::default() },
+        StmtLine { date: "2026-07-09".into(), amount: -5000, payee: "Cafe (duplicate)".into(), ..Default::default() },
+    ]).unwrap();
+    let lines = l.statement_lines(bank, "UNRECONCILED", 10).unwrap();
+    let dup = lines[1]["id"].as_i64().unwrap();
+    l.exclude_statement_line(dup, true).unwrap();
+    assert_eq!(l.statement_lines(bank, "UNRECONCILED", 10).unwrap().len(), 1, "excluded lines leave review");
+    assert_eq!(l.statement_lines(bank, "EXCLUDED", 10).unwrap().len(), 1);
+    assert_eq!(l.reconciliation_report(bank, "2026-07-31").unwrap()["statement_balance"], -5000, "and don't count towards the statement balance");
+    assert!(l.exclude_statement_line(dup, true).is_err());
+    l.exclude_statement_line(dup, false).unwrap();
+    assert_eq!(l.statement_lines(bank, "UNRECONCILED", 10).unwrap().len(), 2, "restored to review");
+}
+
+#[test]
 fn reports_add_up() {
     let l = org();
     let sales = acct(&l, "200");

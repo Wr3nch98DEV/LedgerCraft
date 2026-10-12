@@ -20,7 +20,7 @@ pub struct State {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Tab { #[default] Review, Categorized }
+pub enum Tab { #[default] Review, Categorized, Excluded }
 
 #[derive(Debug, Clone)]
 pub enum Msg {
@@ -39,6 +39,8 @@ pub enum Msg {
     /// Apply the matching bank rule.
     ApplyRule(i64),
     Undo(i64),
+    /// Exclude a line from review (or restore it).
+    Exclude(i64, bool),
     AcceptAll,
     Done(Result<Value, String>, &'static str),
     /// Pick a statement file (CSV, OFX/QFX, QIF, CAMT.053, MT940) and import it.
@@ -61,7 +63,7 @@ pub fn load(app: &mut App, account: Option<i64>) -> Task<Message> {
                 let active: Vec<Value> = banks.as_array().cloned().unwrap_or_default().into_iter().filter(|b| b["status"] == "ACTIVE").collect();
                 let acc = acc.filter(|a| active.iter().any(|b| b["id"] == *a)).or_else(|| active.first().and_then(|b| b["id"].as_i64()));
                 let Some(acc) = acc else { return Ok(json!({"banks": active, "lines": [], "account": null})) };
-                let status = if tab == Tab::Review { "UNRECONCILED" } else { "RECONCILED" };
+                let status = match tab { Tab::Review => "UNRECONCILED", Tab::Categorized => "RECONCILED", Tab::Excluded => "EXCLUDED" };
                 let mut lines = be.call_now("statements.lines", json!({"account_id": acc, "status": status, "limit": 300}))?;
                 if tab == Tab::Review {
                     if let Some(arr) = lines.as_array_mut() {
@@ -119,6 +121,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             update(app, Msg::Add(line))
         }
         Msg::Undo(line) => app.be.call("rec.unreconcile", json!({"id": line}), |r| Message::Bank(Msg::Done(r, "Moved back to review"))),
+        Msg::Exclude(line, on) => app.be.call("statements.exclude", json!({"id": line, "on": on}), move |r| Message::Bank(Msg::Done(r, if on { "Excluded" } else { "Moved back to review" }))),
         Msg::AcceptAll => {
             let Some(acc) = acc else { return Task::none() };
             app.be.call("rec.auto", json!({"account_id": acc}), |r| Message::Bank(Msg::Done(r, "auto")))
@@ -256,6 +259,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let tabs = row![
         tab(if qb { format!("For review ({})", if app.bank.tab == Tab::Review { lines.len() } else { 0 }) } else { "Reconcile".into() }, Tab::Review),
         tab(if qb { "Categorized".into() } else { "Reconciled".into() }, Tab::Categorized),
+        tab(if qb { "Excluded".into() } else { "Deleted lines".into() }, Tab::Excluded),
         ui::hspace(),
         if app.bank.tab == Tab::Review && !lines.is_empty() { ui::btn(if qb { "Accept all matches" } else { "Auto-reconcile exact matches" }, Some(Message::Bank(Msg::AcceptAll))) } else { Space::new().into() },
     ].align_y(Alignment::Center).spacing(4);
@@ -273,7 +277,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     })).spacing(10).padding([9, 14])).style(theme::header_row).width(Fill);
     let mut table = column![head];
     if lines.is_empty() {
-        table = table.push(container(ui::muted(if review { "Nothing to review — you're all caught up. Use \"Upload from file\" to bring in a new statement." } else { "Nothing categorized yet." })).padding(28).center_x(Fill));
+        table = table.push(container(ui::muted(if review { "Nothing to review — you're all caught up. Use \"Upload from file\" to bring in a new statement." } else if app.bank.tab == Tab::Excluded { "Nothing excluded." } else { "Nothing categorized yet." })).padding(28).center_x(Fill));
     }
     let busy = app.bank.busy;
     for l in lines {
@@ -295,7 +299,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             vec![ui::cell(app.d(l["date"].as_str().unwrap_or(""))), desc.into(), spent, recv,
                  text(sugg).size(13).color(if is_match { k.ok } else { k.muted }).into(), action]
         } else {
-            vec![ui::cell(app.d(l["date"].as_str().unwrap_or(""))), desc.into(), spent, recv, ui::btn("Undo", Some(Message::Bank(Msg::Undo(id))))]
+            vec![ui::cell(app.d(l["date"].as_str().unwrap_or(""))), desc.into(), spent, recv, ui::btn("Undo", Some(Message::Bank(if app.bank.tab == Tab::Excluded { Msg::Exclude(id, false) } else { Msg::Undo(id) })))]
         };
         let r = row(cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into())).spacing(10).align_y(Alignment::Center).padding([8, 14]);
         let r = button(r).style(theme::row_btn).padding(0).width(Fill).on_press_maybe(if review { Some(Message::Bank(Msg::Expand(id))) } else { None });
@@ -389,6 +393,7 @@ fn detail<'a>(app: &'a App, l: &'a Value) -> Element<'a, Message> {
     container(column![
         text(if qb { "Categorize" } else { "Create a transaction" }).size(13).font(BOLD).color(k.muted), cat,
         text(if qb { "Or find a match" } else { "Or match an existing transaction" }).size(13).font(BOLD).color(k.muted), matches,
+        row![ui::hspace(), ui::btn(if qb { "Exclude" } else { "Delete statement line" }, if app.bank.busy { None } else { Some(Message::Bank(Msg::Exclude(id, true))) })],
     ].spacing(10)).padding([14, 16]).style(theme::soft).width(Fill).into()
 }
 

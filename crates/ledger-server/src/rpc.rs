@@ -292,6 +292,7 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
         }
         "statements.mappings" => Ok(json!(l.csv_mappings(i(p, "account_id")?)?)),
         "statements.lines" => { need("banking:read")?; Ok(json!(l.statement_lines(i(p, "account_id")?, p["status"].as_str().unwrap_or("UNRECONCILED"), oi(p, "limit").unwrap_or(500))?)) }
+        "statements.exclude" => { need("banking:write")?; l.exclude_statement_line(id(p)?, p["on"].as_bool().unwrap_or(true))?; ok() }
         "statements.deleteLine" => { need("banking:write")?; l.delete_statement_line(id(p)?)?; ok() }
         "statements.note" => { l.set_statement_note(id(p)?, s(p, "note"))?; ok() }
         "rec.suggestions" => { need("banking:read")?; Ok(l.reconcile_suggestions(id(p)?)?) }

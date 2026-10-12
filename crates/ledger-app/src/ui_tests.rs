@@ -389,3 +389,30 @@ fn render_reconcile_screen() {
     ui.snapshot(&app.theme()).unwrap().matches_image(&out).unwrap();
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn exclude_bank_line_and_restore() {
+    use crate::banking::{Msg as B, Tab};
+    let (mut app, dir) = demo_app("exclude", Skin::QuickBooks);
+    let _ = app.update(Message::Nav(Route::Banking(None)));
+    let acc = app.be.call_now("accounts.bank", json!({})).unwrap()[0]["id"].as_i64().unwrap();
+    let lines = app.be.call_now("statements.lines", json!({"account_id": acc})).unwrap();
+    let n = lines.as_array().unwrap().len();
+    let id = lines[0]["id"].as_i64().unwrap();
+    let banks = app.be.call_now("accounts.bank", json!({})).unwrap();
+    app.data = Some(json!({"banks": banks, "lines": lines, "account": acc}));
+    let _ = app.update(Message::Bank(B::Expand(id)));
+    let msgs = click(&app, "Exclude");
+    assert!(matches!(msgs.as_slice(), [Message::Bank(B::Exclude(x, true))] if *x == id), "{msgs:?}");
+    app.be.call_now("statements.exclude", json!({"id": id, "on": true})).unwrap();
+    assert_eq!(app.be.call_now("statements.lines", json!({"account_id": acc})).unwrap().as_array().unwrap().len(), n - 1);
+    // Excluded tab → Undo puts it back in review.
+    let _ = app.update(Message::Bank(B::Tab(Tab::Excluded)));
+    let excluded = app.be.call_now("statements.lines", json!({"account_id": acc, "status": "EXCLUDED"})).unwrap();
+    app.data = Some(json!({"banks": banks, "lines": excluded, "account": acc}));
+    let msgs = click(&app, "Undo");
+    assert!(matches!(msgs.as_slice(), [Message::Bank(B::Exclude(x, false))] if *x == id), "{msgs:?}");
+    app.be.call_now("statements.exclude", json!({"id": id, "on": false})).unwrap();
+    assert_eq!(app.be.call_now("statements.lines", json!({"account_id": acc})).unwrap().as_array().unwrap().len(), n);
+    let _ = std::fs::remove_dir_all(dir);
+}

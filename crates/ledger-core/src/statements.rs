@@ -289,7 +289,7 @@ impl Ledger {
 
     pub fn statement_lines(&self, account_id: i64, status: &str, limit: i64) -> Result<Vec<Value>> {
         util::query_json(&self.conn,
-            "SELECT s.* FROM statement_lines s WHERE s.account_id = ?1 AND (?2 = 'ALL' AND s.status <> 'DELETED' OR s.status = ?2) ORDER BY s.date, s.id LIMIT ?3",
+            "SELECT s.* FROM statement_lines s WHERE s.account_id = ?1 AND (?2 = 'ALL' AND s.status NOT IN ('DELETED','EXCLUDED') OR s.status = ?2) ORDER BY s.date, s.id LIMIT ?3",
             params![account_id, status, limit])
     }
 
@@ -428,6 +428,17 @@ impl Ledger {
         Ok(())
     }
 
+    /// Exclude a bank line (QuickBooks "Exclude", e.g. a duplicate or personal item): it leaves
+    /// review and stops counting towards the statement balance, but can be restored.
+    pub fn exclude_statement_line(&self, line_id: i64, on: bool) -> Result<()> {
+        let st: String = self.conn.query_row("SELECT status FROM statement_lines WHERE id = ?1", [line_id], |r| r.get(0))?;
+        let (from, to) = if on { ("UNRECONCILED", "EXCLUDED") } else { ("EXCLUDED", "UNRECONCILED") };
+        if st != from { return invalid(if on { "only lines waiting for review can be excluded" } else { "this line isn't excluded" }); }
+        self.conn.execute("UPDATE statement_lines SET status = ?2 WHERE id = ?1", params![line_id, to])?;
+        self.audit(if on { "EXCLUDE" } else { "INCLUDE" }, "statement_line", Some(line_id), None, None)?;
+        Ok(())
+    }
+
     pub fn set_statement_note(&self, line_id: i64, note: &str) -> Result<()> {
         self.conn.execute("UPDATE statement_lines SET notes = ?2 WHERE id = ?1", params![line_id, note])?;
         Ok(())
@@ -547,7 +558,7 @@ impl Ledger {
     /// less any of those earlier ledger items that were later reconciled to a statement line (the bank
     /// cleared them after the statement starts, so the statement line already carries them).
     pub fn statement_opening_balance(&self, account: i64) -> Result<i64> {
-        let first: Option<String> = self.conn.query_row("SELECT MIN(date) FROM statement_lines WHERE account_id = ?1 AND status <> 'DELETED'", [account], |r| r.get(0))?;
+        let first: Option<String> = self.conn.query_row("SELECT MIN(date) FROM statement_lines WHERE account_id = ?1 AND status NOT IN ('DELETED','EXCLUDED')", [account], |r| r.get(0))?;
         let Some(first) = first else { return Ok(0) };
         let before: i64 = self.conn.query_row("SELECT COALESCE(SUM(COALESCE(jl.fx_amount, jl.amount)), 0) FROM journal_lines jl JOIN journals j ON j.id = jl.journal_id
             WHERE jl.account_id = ?1 AND j.posted = 1 AND j.date < ?2", params![account, first], |r| r.get(0))?;
@@ -567,7 +578,7 @@ impl Ledger {
 
     /// Bank reconciliation report as at a date.
     pub fn reconciliation_report(&self, account: i64, date: &str) -> Result<Value> {
-        let stmt_bal: i64 = self.conn.query_row("SELECT COALESCE(SUM(amount), 0) FROM statement_lines WHERE account_id = ?1 AND status <> 'DELETED' AND date <= ?2", params![account, date], |r| r.get::<_, i64>(0))?
+        let stmt_bal: i64 = self.conn.query_row("SELECT COALESCE(SUM(amount), 0) FROM statement_lines WHERE account_id = ?1 AND status NOT IN ('DELETED','EXCLUDED') AND date <= ?2", params![account, date], |r| r.get::<_, i64>(0))?
             + self.statement_opening_balance(account)?;
         let unrec_stmt = util::query_json(&self.conn, "SELECT id, date, payee, description, reference, amount FROM statement_lines WHERE account_id = ?1 AND status = 'UNRECONCILED' AND date <= ?2 ORDER BY date", params![account, date])?;
         let mut unrec_ledger = self.unreconciled_ledger_items(account)?;

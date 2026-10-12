@@ -152,7 +152,7 @@ impl Ledger {
             "SELECT a.id, a.code, a.name, a.bank_type, a.bank_account_number, a.currency, a.status,
                COALESCE((SELECT SUM(jl.amount) FROM journal_lines jl JOIN journals j ON j.id = jl.journal_id WHERE jl.account_id = a.id AND j.posted = 1), 0) AS ledger_balance,
                COALESCE((SELECT SUM(COALESCE(jl.fx_amount, jl.amount)) FROM journal_lines jl JOIN journals j ON j.id = jl.journal_id WHERE jl.account_id = a.id AND j.posted = 1), 0) AS ledger_balance_fx,
-               COALESCE((SELECT SUM(amount) FROM statement_lines s WHERE s.account_id = a.id AND s.status <> 'DELETED'), 0) AS statement_balance,
+               COALESCE((SELECT SUM(amount) FROM statement_lines s WHERE s.account_id = a.id AND s.status NOT IN ('DELETED','EXCLUDED')), 0) AS statement_balance,
                (SELECT COUNT(*) FROM statement_lines s WHERE s.account_id = a.id AND s.status = 'UNRECONCILED') AS unreconciled_count,
                (SELECT MAX(date) FROM statement_lines s WHERE s.account_id = a.id) AS last_statement_date
              FROM accounts a WHERE a.type = 'BANK' ORDER BY a.status, a.code", [])?;
