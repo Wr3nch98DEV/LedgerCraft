@@ -2476,3 +2476,30 @@ fn date_keys_in_the_invoice_form() {
     assert_eq!(iso(&e.due), crate::ui::add_days_iso(&iso(&due0), 1), "terms keep the due date in step");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_form_keys_alt_a_and_alt_s() {
+    use crate::doc::Msg as D;
+    use iced::keyboard::{key::Code, Modifiers};
+    let key = |c: &str, m: Modifiers, code: Code| iced::keyboard::Event::KeyPressed {
+        key: iced::keyboard::Key::Character(c.into()), modified_key: iced::keyboard::Key::Character(c.into()),
+        physical_key: iced::keyboard::key::Physical::Code(code), location: iced::keyboard::Location::Standard, modifiers: m, text: None, repeat: false };
+    let (mut app, dir) = desktop_app("formkeys");
+    let cust = app.lk.contact_opts(true)[0].clone();
+    let fill = |app: &mut App| for m in [D::Contact(cust.clone()), D::Desc(0, "Keys".into()), D::Price(0, "10".into())] { let t = app.update(Message::Doc(m)); settle(app, t); };
+    // Alt+S: Save & New — saved, and a fresh form in the same window.
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None })); settle(&mut app, t);
+    fill(&mut app);
+    let before = count(&app, "ACCREC");
+    let t = app.update(Message::Key(key("s", Modifiers::ALT, Code::KeyS))); settle(&mut app, t);
+    assert_eq!(count(&app, "ACCREC"), before + 1);
+    assert!(app.doc.as_ref().is_some_and(|e| e.id.is_none()), "a new form follows");
+    // Alt+A: Save & Close — saved, and the window closes.
+    fill(&mut app);
+    let windows = app.desk.windows.len();
+    let t = app.update(Message::Key(key("a", Modifiers::ALT, Code::KeyA))); settle(&mut app, t);
+    assert_eq!(count(&app, "ACCREC"), before + 2);
+    assert_eq!(app.desk.windows.len(), windows - 1);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let _ = std::fs::remove_dir_all(dir);
+}

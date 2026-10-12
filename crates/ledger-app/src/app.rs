@@ -718,6 +718,31 @@ impl App {
                 keyboard::Key::Character("s") if modifiers.command() => {
                     if matches!(self.route, Route::Doc { .. }) { return doc::update(self, doc::Msg::Save(false)); }
                 }
+                // QuickBooks Desktop form keys: Alt+A Save & Close, Alt+S Save & New.
+                keyboard::Key::Character(c @ ("a" | "s")) if modifiers.alt() && !modifiers.command() && self.desktop() => {
+                    let close = c == "a";
+                    let m = match &self.route {
+                        Route::Doc { .. } if self.doc.is_some() => Some(Message::Doc(if close { doc::Msg::SaveClose } else { doc::Msg::SaveAndNew })),
+                        Route::Check(_) | Route::Spend(_) | Route::ReceivePayment(_) | Route::PayBills | Route::Deposit if self.pay.is_some() =>
+                            Some(Message::Pay(if close { crate::payments::Msg::Save } else { crate::payments::Msg::SaveNew })),
+                        Route::NewContact(_) | Route::NewProduct | Route::Transfer | Route::Journal | Route::NewAccount if self.form.is_some() =>
+                            Some(Message::Form(if close { crate::forms::Msg::Save } else { crate::forms::Msg::SaveNew })),
+                        _ => None,
+                    };
+                    if let Some(m) = m { return self.update(m); }
+                }
+                // In a transaction: Ctrl+P print, Ctrl+M memorize, Ctrl+N a new one of the same kind.
+                keyboard::Key::Character(c @ ("p" | "m" | "n")) if modifiers.command() && self.desktop() && matches!(self.route, Route::Doc { .. }) && self.doc.is_some() => {
+                    return match c {
+                        "p" => doc::update(self, doc::Msg::Print),
+                        "m" => doc::update(self, doc::Msg::Memorize),
+                        _ => match self.doc.as_ref() {
+                            // Already a new, unsaved form: nothing to do (and nothing to lose).
+                            Some(e) if e.id.is_some() => { let kind = e.kind.clone(); self.go(Route::Doc { kind, id: None }) }
+                            _ => Task::none(),
+                        },
+                    };
+                }
                 // QuickBooks Desktop shortcuts.
                 keyboard::Key::Character(c) if modifiers.command() && self.desktop() && self.session.is_some() => {
                     let r = match c { "i" => Some(Route::Doc { kind: "ACCREC".into(), id: None }), "w" => Some(Route::Check(None)), "a" => Some(Route::Chart),
