@@ -1767,7 +1767,7 @@ fn every_screen_in_every_layout_loads() {
         Route::ReceivePayment(None), Route::PayBills, Route::Spend(None), Route::Check(None), Route::Deposit, Route::Transfer, Route::Journal,
         Route::NewContact(true), Route::NewProduct, Route::NewAccount, Route::Payroll, Route::Taxes, Route::Projects, Route::Mileage, Route::Reconcile,
         Route::Register(None), Route::Calendar, Route::Statements, Route::Memorized, Route::PaySalesTax, Route::AdjustInventory, Route::Help, Route::DocCenter,
-        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports];
+        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges];
     for layout in Layout::ALL {
         let (mut app, dir) = desktop_app(&format!("all-{}", layout.key()));
         let t = app.update(Message::SetLayout(layout));
@@ -2024,5 +2024,72 @@ fn desktop_insights_loads_pl_and_top_customers() {
     // Back to the Home Page tab loads the ordinary home data again.
     let t = app.update(Message::Desk(crate::desktop::Msg::Insights(false))); settle(&mut app, t);
     assert!(app.data.as_ref().map_or(true, |d| !d["pl"].is_object()));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn end_to_end_payroll_items_other_names_finance_charges() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("e2e-lists3");
+    // Payroll Item List → New Item (a deduction).
+    let t = app.update(Message::Nav(Route::PayrollItems)); settle(&mut app, t);
+    assert!(app.data.as_ref().unwrap()["pay_items"].as_array().map_or(0, |a| a.len()) > 0);
+    let _ = app.update(Message::Desk(W::PiNew("Uniform deduction".into())));
+    let _ = app.update(Message::Desk(W::PiKind("Deduction")));
+    press(&mut app, "New Item");
+    let items = app.be.call_now("payroll.settings", json!({})).unwrap()["pay_items"].clone();
+    let it = items.as_array().unwrap().iter().find(|i| i["name"] == "Uniform deduction").expect("pay item saved").clone();
+    assert_eq!(it["kind"], "DEDUCTION");
+    assert!(it["liability_account_id"].is_number(), "posts like the other deductions");
+    // Other Names List → New Name shows in the list.
+    let t = app.update(Message::Nav(Route::OtherNames)); settle(&mut app, t);
+    let _ = app.update(Message::Desk(W::OnNew("Jordan Owner".into())));
+    press(&mut app, "New Name");
+    assert!(app.data.as_ref().unwrap().to_string().contains("Jordan Owner"));
+    // Assess Finance Charges: one invoice per overdue customer, posted to an income account.
+    let t = app.update(Message::Nav(Route::FinanceCharges)); settle(&mut app, t);
+    let due = crate::desktop::finance_charges_due(&app);
+    assert!(!due.is_empty() && due.iter().all(|c| c.3 > 0), "demo data has overdue customers: {due:?}");
+    // Leave the first customer out.
+    let _ = app.update(Message::Desk(W::FcPick(due[0].0, false)));
+    let before = count(&app, "ACCREC");
+    press(&mut app, "Assess Charges");
+    assert_eq!(count(&app, "ACCREC"), before + due.len() - 1);
+    let errors: Vec<_> = app.toasts.iter().filter(|t| t.2).collect();
+    assert!(errors.is_empty(), "errors: {errors:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn finance_charge_math() {
+    let (mut app, dir) = desktop_app("fc-math");
+    app.route = Route::FinanceCharges;
+    app.data = Some(json!({"rows": [
+        {"status": "AUTHORISED", "due_date": "2026-01-01", "amount_due": 100000, "contact_id": 1, "contact_name": "A"},
+        {"status": "AUTHORISED", "due_date": "2026-03-01", "amount_due": 1000, "contact_id": 2, "contact_name": "B"},
+    ]}));
+    app.desk.fc_date = app.d("2026-01-31");
+    app.desk.fc_rate = "36.5".into();
+    // 30 days at 0.1%/day on 1,000.00 = 30.00; B isn't overdue yet.
+    assert_eq!(crate::desktop::finance_charges_due(&app), vec![(1, "A".to_string(), 100000, 3000)]);
+    app.desk.fc_grace = "10".into();
+    assert_eq!(crate::desktop::finance_charges_due(&app)[0].3, 2000);
+    app.desk.fc_min = "25".into();
+    assert_eq!(crate::desktop::finance_charges_due(&app)[0].3, 2500);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Snapshot any Desktop screen: LC_ROUTE=financecharges cargo test -p ledger-app render_route -- --ignored
+#[test]
+#[ignore]
+fn render_route() {
+    let key = std::env::var("LC_ROUTE").unwrap_or_else(|_| "dashboard".into());
+    let (mut app, dir) = desktop_app("route-shot");
+    let route = crate::app::parse_route(&key).expect("route key");
+    let t = app.update(Message::Nav(route)); settle(&mut app, t);
+    let _ = std::fs::remove_file(std::env::temp_dir().join("lc-route-wgpu.png"));
+    let _g = sim_lock();
+    let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
+    ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join("lc-route.png")).unwrap();
     let _ = std::fs::remove_dir_all(dir);
 }

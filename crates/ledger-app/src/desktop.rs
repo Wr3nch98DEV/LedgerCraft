@@ -69,6 +69,18 @@ pub struct State {
     pub liab_pay: Vec<(i64, bool, String)>,
     /// Class List: the name being added.
     pub class_new: String,
+    /// Payroll Item List: the item being added and its type.
+    pub pi_new: String,
+    pub pi_kind: Option<&'static str>,
+    /// Other Names List: the name being added.
+    pub on_new: String,
+    /// Assess Finance Charges: annual rate %, minimum charge, grace days, assessment date, customers left out, busy.
+    pub fc_rate: String,
+    pub fc_min: String,
+    pub fc_grace: String,
+    pub fc_date: String,
+    pub fc_skip: Vec<i64>,
+    pub fc_busy: bool,
     /// Enter Time: project, task, date, duration (h:mm) and notes.
     pub time_project: Option<crate::app::Opt>,
     pub time_task: Option<crate::app::Opt>,
@@ -86,7 +98,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
     /// Remember the Desktop view choices (One Window, icon bar pane).
@@ -183,6 +195,51 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         }
         Msg::ReportCat(c) => { app.desk.report_cat = Some(c); Task::none() }
         Msg::ClassNew(v) => { app.desk.class_new = v; Task::none() }
+        Msg::PiNew(v) => { app.desk.pi_new = v; Task::none() }
+        Msg::PiKind(k) => { app.desk.pi_kind = Some(k); Task::none() }
+        Msg::PiAdd => {
+            let name = app.desk.pi_new.trim().to_string();
+            if name.is_empty() { return app.toast("Enter the payroll item name", true); }
+            let label = app.desk.pi_kind.unwrap_or("Earnings");
+            let kind = PAY_KINDS.iter().find(|(l, _)| *l == label).map(|x| x.1).unwrap_or("EARNINGS");
+            // New items post like the existing items of the same type.
+            let like = app.data.as_ref().and_then(|d| d["pay_items"].as_array().cloned()).unwrap_or_default().into_iter().find(|i| i["kind"] == kind).unwrap_or(Value::Null);
+            let item = serde_json::json!({"name": name, "kind": kind, "account_id": like["account_id"], "liability_account_id": like["liability_account_id"],
+                "rate_type": if kind == "EARNINGS" { "RATEPERUNIT" } else { "FIXED" }, "taxable": kind == "EARNINGS", "super_eligible": false});
+            app.be.call("payroll.savePayItem", serde_json::json!({"item": item}), |r| Message::Desk(Msg::ClassDone(r)))
+        }
+        Msg::OnNew(v) => { app.desk.on_new = v; Task::none() }
+        Msg::OnAdd => {
+            let name = app.desk.on_new.trim().to_string();
+            if name.is_empty() { return app.toast("Enter the name", true); }
+            app.be.call("contacts.create", serde_json::json!({"name": name}), |r| Message::Desk(Msg::ClassDone(r)))
+        }
+        Msg::FcField(f, v) => { match f { 0 => app.desk.fc_rate = v, 1 => app.desk.fc_min = v, 2 => app.desk.fc_grace = v, _ => app.desk.fc_date = v } Task::none() }
+        Msg::FcPick(id, on) => { app.desk.fc_skip.retain(|x| *x != id); if !on { app.desk.fc_skip.push(id); } Task::none() }
+        Msg::FcAssess => {
+            let Some(date) = ui::to_iso(&fc_date(app), app.date_style()) else { return app.toast("Check the assessment date", true) };
+            let charges: Vec<(i64, i64)> = finance_charges_due(app).into_iter().filter(|c| !app.desk.fc_skip.contains(&c.0) && c.3 > 0).map(|c| (c.0, c.3)).collect();
+            if charges.is_empty() { return app.toast("No finance charges to assess", true); }
+            let Some(acct) = interest_account(app) else { return app.toast("Add an income account for finance charges first", true) };
+            let be = app.be.clone();
+            app.desk.fc_busy = true;
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                    for (cid, amt) in &charges {
+                        be.call_now("docs.save", serde_json::json!({"doc": {"type": "ACCREC", "contact_id": cid, "reference": "Finance charge", "date": date, "due_date": date, "line_amount_type": "NOTAX", "status": "AUTHORISED",
+                            "lines": [{"description": "Finance charge on overdue balance", "quantity": "1", "unit_price": ui::plain(*amt), "account_id": acct}]}}))?;
+                    }
+                    Ok(serde_json::json!({"count": charges.len()}))
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Desk(Msg::FcDone(r)))
+        }
+        Msg::FcDone(r) => {
+            app.desk.fc_busy = false;
+            match r {
+                Ok(v) => { let t1 = app.toast(format!("Assessed finance charges for {} customer(s)", v["count"]), false); Task::batch([t1, app.load()]) }
+                Err(e) => app.toast(e, true),
+            }
+        }
         Msg::ClassAdd => {
             let name = app.desk.class_new.trim().to_string();
             if name.is_empty() { return app.toast("Enter the class name", true); }
@@ -197,7 +254,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.be.call("tracking.save", serde_json::json!({"id": id, "name": cat_name, "options": opts}), |r| Message::Desk(Msg::ClassDone(r)))
         }
         Msg::ClassDone(r) => match r {
-            Ok(_) => { app.desk.class_new.clear(); let t1 = app.toast("Class added", false); Task::batch([t1, app.load()]) }
+            Ok(_) => { app.desk.class_new.clear(); app.desk.pi_new.clear(); app.desk.on_new.clear(); let t1 = app.toast("Added", false); Task::batch([t1, app.load()]) }
             Err(e) => app.toast(e, true),
         },
         Msg::TimeProject(p) => { app.desk.time_project = Some(p); app.desk.time_task = None; Task::none() }
@@ -506,6 +563,9 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::DocCenter => "Doc Center".into(),
         Route::PayLiabilities => "Pay Liabilities".into(),
         Route::ClassList => "Class List".into(),
+        Route::PayrollItems => "Payroll Item List".into(),
+        Route::OtherNames => "Other Names List".into(),
+        Route::FinanceCharges => "Assess Finance Charges".into(),
         Route::EnterTime => "Time/Enter Single Activity".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
@@ -558,7 +618,7 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
             e("My Shortcuts", "", Some(Message::Desk(Msg::Pane(Pane::Shortcuts)))), sep(), e(if app.dark { "Light Mode" } else { "Dark Mode" }, "Alt+T", Some(Message::ToggleTheme)), sep(),
             e("Switch to QuickBooks Online-style layout", "", Some(Message::SetLayout(theme::Layout::Online))), e("Switch to Xero-style layout", "", Some(Message::SetLayout(theme::Layout::Xero)))],
         "Lists" => vec![e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)), e("Item List", "", nav(Route::Products)), e("Fixed Asset Item List", "", rep("fixed-asset-register")), e("Price Level List", "", None),
-            e("Sales Tax Code List", "", nav(Route::Taxes)), e("Payroll Item List", "", None), e("Class List", "", nav(Route::ClassList)), e("Other Names List", "", None), e("Templates", "", None), e("Memorized Transaction List", "Ctrl+T", nav(Route::Memorized))],
+            e("Sales Tax Code List", "", nav(Route::Taxes)), e("Payroll Item List", "", nav(Route::PayrollItems)), e("Class List", "", nav(Route::ClassList)), e("Other Names List", "", nav(Route::OtherNames)), e("Templates", "", None), e("Memorized Transaction List", "Ctrl+T", nav(Route::Memorized))],
         "Favorites" => vec![e("Customize Favorites…", "", None)],
         "Company" => vec![e("Home Page", "", nav(Route::Dashboard)), e("Company Snapshot", "", Some(Message::Desk(Msg::Insights(true)))), sep(), e("My Company", "", nav(Route::Settings)),
             e("Company Information…", "", nav(Route::Settings)), e("Set Up Users and Roles…", "", nav(Route::Settings)), sep(), e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)),
@@ -567,7 +627,7 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
             e("Purchase Orders List", "", nav(Route::PurchaseOrders)), e("Receive Items", "", Some(Message::ReceiveItems)), e("Enter Bills Against Inventory", "", nav(Route::PurchaseOrders)), e("Adjust Quantity/Value on Hand…", "", nav(Route::AdjustInventory))],
         "Customers" => vec![e("Customer Center", "Ctrl+J", nav(Route::Customers)), sep(), e("Create Estimates", "", doc_new("QUOTE")), e("Create Sales Orders", "", doc_new("SALESORDER")),
             e("Create Invoices", "Ctrl+I", doc_new("ACCREC")), e("Enter Sales Receipts", "", doc_new("SALESRECEIPT")), e("Enter Statement Charges", "", doc_new("DELAYEDCHARGE")),
-            e("Create Statements…", "", nav(Route::Statements)), e("Assess Finance Charges…", "", None), sep(), e("Receive Payments", "", nav(Route::ReceivePayment(None))),
+            e("Create Statements…", "", nav(Route::Statements)), e("Assess Finance Charges…", "", nav(Route::FinanceCharges)), sep(), e("Receive Payments", "", nav(Route::ReceivePayment(None))),
             e("Create Credit Memos/Refunds", "", doc_new("ACCRECCREDIT")), sep(), e("Income Tracker", "", nav(Route::AllSales)), e("Item List", "", nav(Route::Products))],
         "Vendors" => vec![e("Vendor Center", "", nav(Route::Vendors)), sep(), e("Enter Bills", "", doc_new("ACCPAY")), e("Pay Bills", "", nav(Route::PayBills)), e("Bill Tracker", "", nav(Route::Bills)),
             sep(), e("Sales Tax: Manage Sales Tax…", "", nav(Route::Taxes)), e("Sales Tax: Pay Sales Tax…", "", nav(Route::PaySalesTax)), sep(), e("Create Purchase Orders", "", doc_new("PO")), e("Purchase Orders List", "", nav(Route::PurchaseOrders)),
@@ -760,6 +820,135 @@ pub fn class_list(app: &App) -> Element<'_, Message> {
         ui::hspace(),
         text("Classes tag transactions for reports by department, location or anything you like.").size(12).color(k.muted).into(),
     ])
+}
+
+// ---------------- Payroll Item List / Other Names / Finance Charges ----------------
+
+const PAY_KINDS: [(&str, &str); 4] = [("Earnings", "EARNINGS"), ("Deduction", "DEDUCTION"), ("Reimbursement", "REIMBURSEMENT"), ("Retirement", "SUPER")];
+
+/// Lists ▸ Payroll Item List.
+pub fn payroll_items(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let mut items = d["pay_items"].as_array().cloned().unwrap_or_default();
+    // Earnings, then retirement, deductions and reimbursements — the order QuickBooks lists them.
+    let rank = |i: &Value| match i["kind"].as_str() { Some("EARNINGS") => 0, Some("SUPER") => 1, Some("DEDUCTION") => 2, _ => 3 };
+    items.sort_by_key(|i| (rank(i), i["id"].as_i64()));
+    let rows = items.iter().map(|i| {
+        let kind = PAY_KINDS.iter().find(|(_, c)| i["kind"] == *c).map(|x| x.0).unwrap_or("Other");
+        let kind = if i["kind"] == "SUPER" { d["retirement_label"].as_str().unwrap_or(kind).to_string() } else { kind.to_string() };
+        (vec![ui::cell(i["name"].as_str().unwrap_or("").to_string()), ui::cell_muted(kind),
+            ui::cell_muted(i["account_name"].as_str().unwrap_or("").to_string()), ui::cell_muted(i["liability_name"].as_str().unwrap_or("").to_string()),
+            ui::cell_muted(if i["taxable"].as_i64() == Some(1) { "Yes" } else { "No" })], None)
+    }).collect();
+    let cols: Vec<(&str, u16, bool)> = vec![("Item Name", 30, false), ("Type", 16, false), ("Expense Account", 22, false), ("Liability Account", 22, false), ("Taxable", 8, false)];
+    list_window(&cols, rows, vec![
+        text_input("New payroll item", &app.desk.pi_new).on_input(|v| Message::Desk(Msg::PiNew(v))).on_submit(Message::Desk(Msg::PiAdd)).padding([5, 7]).size(13).style(theme::input).width(240).into(),
+        pick_list(PAY_KINDS.iter().map(|x| x.0).collect::<Vec<_>>(), Some(app.desk.pi_kind.unwrap_or("Earnings")), |v| Message::Desk(Msg::PiKind(v))).padding([5, 7]).text_size(13).style(theme::pick).width(150).into(),
+        ui::btn_primary("New Item", Some(Message::Desk(Msg::PiAdd))),
+        ui::hspace(),
+        text("Payroll items set how pay, deductions and contributions post to the books.").size(12).color(k.muted).into(),
+    ])
+}
+
+/// Lists ▸ Other Names List: people and businesses you deal with that are neither customers, vendors nor employees.
+pub fn other_names(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let on = |v: &Value| v.as_i64() == Some(1) || v.as_bool() == Some(true);
+    let rows = d.as_array().cloned().unwrap_or_default().iter().filter(|c| !on(&c["is_customer"]) && !on(&c["is_supplier"]) && !on(&c["is_employee"])).map(|c| {
+        (vec![ui::cell(c["name"].as_str().unwrap_or("").to_string()), ui::cell_muted(c["email"].as_str().unwrap_or("").to_string()), ui::cell_muted(c["phone"].as_str().unwrap_or("").to_string())],
+         c["id"].as_i64().map(|id| Message::Nav(Route::Contact(id))))
+    }).collect();
+    let cols: Vec<(&str, u16, bool)> = vec![("Name", 34, false), ("Email", 30, false), ("Phone", 18, false)];
+    list_window(&cols, rows, vec![
+        text_input("New name", &app.desk.on_new).on_input(|v| Message::Desk(Msg::OnNew(v))).on_submit(Message::Desk(Msg::OnAdd)).padding([5, 7]).size(13).style(theme::input).width(260).into(),
+        ui::btn_primary("New Name", Some(Message::Desk(Msg::OnAdd))),
+        ui::hspace(),
+        text("Owners, partners and one-off payees. A name becomes a customer or vendor once you transact with it.").size(12).color(k.muted).into(),
+    ])
+}
+
+fn fc_date(app: &App) -> String { if app.desk.fc_date.is_empty() { app.d(&ui::today_iso()) } else { app.desk.fc_date.clone() } }
+fn fc_rate(app: &App) -> f64 { if app.desk.fc_rate.trim().is_empty() { 18.0 } else { app.desk.fc_rate.trim().trim_end_matches('%').parse().unwrap_or(0.0) } }
+fn fc_min(app: &App) -> i64 { if app.desk.fc_min.trim().is_empty() { 0 } else { ui::parse_money(&app.desk.fc_min).unwrap_or(0) } }
+fn fc_grace(app: &App) -> i64 { if app.desk.fc_grace.trim().is_empty() { 0 } else { app.desk.fc_grace.trim().parse().unwrap_or(0) } }
+
+/// Per customer: (contact id, name, overdue balance, finance charge) — simple daily interest on each
+/// overdue invoice from its due date (plus grace days) to the assessment date, at least the minimum charge.
+pub fn finance_charges_due(app: &App) -> Vec<(i64, String, i64, i64)> {
+    let Some(asof) = ui::to_iso(&fc_date(app), app.date_style()).and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok()) else { return vec![] };
+    let (rate, grace, min) = (fc_rate(app), fc_grace(app), fc_min(app));
+    let mut out: Vec<(i64, String, i64, i64)> = vec![];
+    for r in app.data.as_ref().and_then(|d| d["rows"].as_array().cloned()).unwrap_or_default() {
+        if r["status"] != "AUTHORISED" { continue; }
+        let Some(due) = r["due_date"].as_str().and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()) else { continue };
+        let bal = r["amount_due"].as_i64().unwrap_or(0);
+        let days = (asof - due).num_days() - grace;
+        if bal <= 0 || days <= 0 { continue; }
+        let charge = (bal as f64 * rate / 100.0 * days as f64 / 365.0).round() as i64;
+        let cid = r["contact_id"].as_i64().unwrap_or(0);
+        match out.iter_mut().find(|c| c.0 == cid) {
+            Some(c) => { c.2 += bal; c.3 += charge; }
+            None => out.push((cid, r["contact_name"].as_str().unwrap_or("").to_string(), bal, charge)),
+        }
+    }
+    for c in out.iter_mut() { if c.3 > 0 { c.3 = c.3.max(min); } }
+    out.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+    out
+}
+
+/// The income account finance charges post to: Interest Income, else any other-income account.
+fn interest_account(app: &App) -> Option<i64> {
+    let a = &app.lk.accounts;
+    let active = |x: &&Value| x["status"] == "ACTIVE";
+    a.iter().filter(active).find(|x| x["type"] == "OTHERINCOME" && x["name"].as_str().unwrap_or("").to_lowercase().contains("interest"))
+        .or_else(|| a.iter().filter(active).find(|x| x["type"] == "OTHERINCOME"))
+        .or_else(|| a.iter().filter(active).find(|x| x["type"] == "REVENUE"))
+        .and_then(|x| x["id"].as_i64())
+}
+
+/// Customers ▸ Assess Finance Charges.
+pub fn finance_charges(app: &App) -> Element<'_, Message> {
+    let k = t();
+    if app.data.is_none() { return container(ui::muted("Loading…")).padding(20).into() }
+    let due = finance_charges_due(app);
+    let cols: Vec<(&str, u16, bool)> = vec![("Assess", 5, false), ("Customer", 34, false), ("Overdue Bal.", 14, true), ("Finance Charge", 14, true)];
+    let head = container(row(cols.iter().map(|(h, w, r)| {
+        let tx = text(h.to_uppercase()).size(11).font(BOLD).color(k.muted);
+        container(if *r { tx.align_x(iced::alignment::Horizontal::Right).width(Fill) } else { tx.width(Fill) }).width(Length::FillPortion(*w)).into()
+    })).spacing(8).padding([6, 10])).style(theme::header_row).width(Fill);
+    let mut list = column![head];
+    let mut total = 0;
+    for (cid, name, bal, charge) in &due {
+        let (cid, on) = (*cid, !app.desk.fc_skip.contains(cid));
+        if on { total += charge; }
+        let cells: Vec<Element<Message>> = vec![
+            iced::widget::checkbox(on).on_toggle(move |v| Message::Desk(Msg::FcPick(cid, v))).into(),
+            ui::cell(name.clone()), ui::cell_money(*bal), ui::cell_money(*charge),
+        ];
+        list = list.push(row(cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into())).spacing(8).align_y(Alignment::Center).padding([5, 10]));
+        list = list.push(ui::hr());
+    }
+    if due.is_empty() { list = list.push(container(ui::muted("No customers have overdue balances to charge on this date.")).padding(16)); }
+    let lbl = |s: &'static str| text(s).size(11).font(BOLD).color(k.info);
+    let field = |label: &'static str, ph: &'static str, v: &str, f: u8, w: f32| -> Element<'_, Message> {
+        column![lbl(label), text_input(ph, v).on_input(move |x| Message::Desk(Msg::FcField(f, x))).padding([5, 7]).size(13).style(theme::input).width(Length::Fixed(w))].spacing(3).into()
+    };
+    let date = fc_date(app);
+    container(column![
+        text("Assess Finance Charges").size(22).font(BOLD),
+        row![
+            field("ASSESSMENT DATE", "", &date, 3, 140.0),
+            field("ANNUAL INTEREST RATE (%)", "18", &app.desk.fc_rate, 0, 170.0),
+            field("MINIMUM FINANCE CHARGE", "0.00", &app.desk.fc_min, 1, 170.0),
+            field("GRACE PERIOD (DAYS)", "0", &app.desk.fc_grace, 2, 150.0),
+        ].spacing(16),
+        container(list).style(theme::card).width(Fill).clip(true),
+        row![ui::hspace(), text("Total finance charges").size(13).font(BOLD), text(ui::money(total)).size(14).font(BOLD)].spacing(12),
+        row![text("Each charge is raised as an invoice to the customer, posted to Interest Income.").size(12).color(k.muted), ui::hspace(),
+            ui::btn_primary("Assess Charges", if app.desk.fc_busy { None } else { Some(Message::Desk(Msg::FcAssess)) }), ui::btn("Cancel", Some(Message::Back))].spacing(8).align_y(Alignment::Center),
+    ].spacing(12)).padding(18).max_width(1100).into()
 }
 
 /// "1:30", "1.5" or "90m" → minutes.
