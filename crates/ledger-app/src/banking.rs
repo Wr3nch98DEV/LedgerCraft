@@ -229,7 +229,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let k = t();
     let acc = d["account"].as_i64();
     // ---- account tiles ----
-    let tiles = row(d["banks"].as_array().cloned().unwrap_or_default().into_iter().map(|b| {
+    let desk = app.desktop();
+    let tile_els: Vec<Element<Message>> = d["banks"].as_array().cloned().unwrap_or_default().into_iter().map(|b| {
         let id = i(&b["id"]);
         let active = Some(id) == acc;
         let review = i(&b["unreconciled_count"]);
@@ -239,13 +240,14 @@ pub fn view(app: &App) -> Element<'_, Message> {
             row![ui::muted("In LedgerCraft"), ui::hspace(), text(ui::money(i(&b["ledger_balance_fx"]))).size(13)],
             if review > 0 { ui::chip(&format!("{review} {}", if qb { "for review" } else { "to reconcile" }), k.accent) } else { ui::chip("Up to date", k.ok) },
         ].spacing(5);
-        button(content).padding(14).width(260).on_press(Message::Bank(Msg::Account(id)))
+        button(content).padding(14).width(if desk { Length::Fill } else { Length::Fixed(260.0) }).on_press(Message::Bank(Msg::Account(id)))
             .style(move |_, s| {
                 let hover = matches!(s, button::Status::Hovered);
                 button::Style { background: Some(iced::Background::Color(if hover { k.hover } else { k.panel })), text_color: k.text,
                     border: iced::Border { color: if active { k.accent } else { k.line }, width: if active { 2.0 } else { 1.0 }, radius: 8.0.into() }, shadow: Default::default(), snap: true }
             }).into()
-    })).spacing(12);
+    }).collect();
+    let tiles: Element<Message> = if desk { column(tile_els).spacing(8).width(280).into() } else { row(tile_els).spacing(12).into() };
 
     // ---- tabs ----
     let tab = |label: String, tb: Tab| -> Element<'_, Message> {
@@ -267,7 +269,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     // ---- table ----
     let review = app.bank.tab == Tab::Review;
     let cols: Vec<(&str, u16, bool)> = if review {
-        vec![("Date", 10, false), ("Description", 30, false), ("Spent", 11, true), ("Received", 11, true), (if qb { "Assign to" } else { "Match / create" }, 28, false), ("Action", 10, false)]
+        vec![("Date", 10, false), ("Description", 30, false), ("Spent", 11, true), ("Received", 11, true), (if qb { "Assign to" } else { "Match / create" }, 25, false), ("Action", 13, false)]
     } else {
         vec![("Date", 10, false), ("Description", 40, false), ("Spent", 12, true), ("Received", 12, true), ("Action", 12, false)]
     };
@@ -308,6 +310,14 @@ pub fn view(app: &App) -> Element<'_, Message> {
         table = table.push(ui::hr());
     }
     let list: Element<Message> = if !qb && review { xero_cards(app, lines) } else { container(table).style(theme::card).width(Fill).clip(true).into() };
+    if desk {
+        // QuickBooks Desktop Bank Feeds Center: accounts down the left, transactions to review on the right.
+        let head = row![text("Bank Feeds Center").size(20).font(BOLD), ui::hspace(),
+            ui::btn("Upload from file", acc.map(|_| Message::Bank(Msg::Upload))), ui::btn("Use Register", Some(Message::Nav(Route::Register(acc))))].spacing(8).align_y(Alignment::Center);
+        return column![head, row![iced::widget::scrollable(tiles).style(theme::scroll).height(Fill),
+            iced::widget::scrollable(column![tabs, list].spacing(12).width(Fill)).style(theme::scroll).height(Fill)].spacing(14).height(Fill)]
+            .spacing(12).padding(12).height(Fill).into();
+    }
     let body = column![tiles, tabs, list].spacing(16);
     let actions: Vec<Element<Message>> = vec![
         ui::btn(if qb { "Upload from file" } else { "Import a statement" }, acc.map(|_| Message::Bank(Msg::Upload))),

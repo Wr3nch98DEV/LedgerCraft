@@ -156,7 +156,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::Contact(_) => "Customer Center".into(),
         Route::Products => "Item List".into(),
         Route::Chart => "Chart of Accounts".into(),
-        Route::Banking(_) => "Bank Feeds".into(),
+        Route::Banking(_) => "Bank Feeds Center".into(),
         Route::Reports => "Report Center".into(),
         Route::Report(k) => match k.as_str() {
             "profit-and-loss" => "Profit & Loss".into(), "balance-sheet" => "Balance Sheet".into(), "cash-flow-statement" => "Statement of Cash Flows".into(),
