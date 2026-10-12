@@ -775,3 +775,32 @@ fn desktop_menus_windows_and_shortcuts() {
     assert_eq!(app.route, Route::Dashboard);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_customer_center() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("center");
+    let _ = app.update(Message::Nav(Route::Customers));
+    let list = app.be.call_now("contacts.list", json!({"filter": "customers"})).unwrap();
+    let first = list[0]["id"].as_i64().unwrap();
+    let second = list[1].clone();
+    let _ = app.update(Message::Loaded(app.page_gen, Ok(list.clone())));
+    assert_eq!(app.desk.sel, Some(first), "first name selected automatically");
+    // Clicking a name selects it; its details arrive and show with its transactions.
+    let msgs = click(&app, second["name"].as_str().unwrap());
+    let sid = second["id"].as_i64().unwrap();
+    assert!(matches!(msgs.as_slice(), [Message::Desk(W::Select(x))] if *x == sid), "{msgs:?}");
+    let _ = app.update(Message::Desk(W::Select(sid)));
+    let c = app.be.call_now("contacts.get", json!({"id": sid})).unwrap();
+    let rows = app.be.call_now("docs.list", json!({"type": "SALES", "contact_id": sid})).unwrap()["rows"].clone();
+    let _ = app.update(Message::Desk(W::Detail(sid, Ok(json!({"contact": c, "rows": rows})))));
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["Customer Information", "Customers & Jobs", "BALANCE TOTAL", "New Customer & Job"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    // Opening a contact (e.g. from search) lands in the Center with that name selected.
+    let _ = app.update(Message::Nav(Route::Contact(first)));
+    assert_eq!((app.route.clone(), app.desk.sel), (Route::Customers, Some(first)));
+    let _ = std::fs::remove_dir_all(dir);
+}

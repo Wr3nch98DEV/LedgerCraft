@@ -79,6 +79,8 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::Dashboard if app.desktop() => crate::desktop::home(app),
         Route::Dashboard => dashboard::view(app),
         Route::AllSales | Route::Invoices | Route::Quotes | Route::CreditNotes | Route::Bills | Route::Expenses | Route::PurchaseOrders => lists::docs(app),
+        Route::Customers | Route::Contacts if app.desktop() => crate::desktop::center(app, true),
+        Route::Vendors if app.desktop() => crate::desktop::center(app, false),
         Route::Customers | Route::Vendors | Route::Contacts => lists::contacts(app),
         Route::Contact(_) => lists::contact(app),
         Route::Products => lists::products(app),

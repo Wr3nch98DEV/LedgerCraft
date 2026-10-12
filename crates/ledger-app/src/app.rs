@@ -336,6 +336,16 @@ impl App {
 
     /// Navigate, remembering where we came from.
     pub fn go(&mut self, r: Route) -> Task<Message> {
+        // Desktop shows a customer/vendor inside its Center.
+        let r = match r {
+            Route::Contact(id) if self.desktop() => {
+                self.desk.sel = Some(id);
+                self.desk.detail = None;
+                let vendor = self.lk.contacts.iter().find(|c| c["id"].as_i64() == Some(id)).map(|c| c["is_supplier"] == 1 && c["is_customer"] != 1).unwrap_or(false);
+                if vendor { Route::Vendors } else { Route::Customers }
+            }
+            r => r,
+        };
         if self.desktop() && !matches!(r, Route::Setup | Route::Login) && !matches!(self.route, Route::Setup | Route::Login) {
             self.new_menu = false; self.gear_menu = false; self.menu = None;
             let same = self.desk.windows.get(self.desk.active).map(|w| w.route == r).unwrap_or(false);
@@ -468,7 +478,7 @@ impl App {
             Message::Loaded(g, r) => {
                 if g != self.page_gen { return Task::none(); }
                 match r {
-                    Ok(v) => { self.data = Some(v); Task::none() }
+                    Ok(v) => { self.data = Some(v); crate::desktop::after_load(self) }
                     Err(e) => { self.error = Some(e); Task::none() }
                 }
             }
