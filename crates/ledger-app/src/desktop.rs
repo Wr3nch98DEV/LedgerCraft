@@ -54,6 +54,8 @@ pub struct State {
     pub tx_rows: Vec<Value>,
     /// View ▸ One Window: each screen replaces the last (no window list).
     pub one_window: bool,
+    /// Favorites menu: "Menu ▸ Item" entries, in order.
+    pub favorites: Vec<String>,
     /// Pay Sales Tax: per agency (pay?, amount), the account to pay from and the date.
     pub tax_pay: Vec<(i64, bool, String)>,
     pub tax_from: Option<crate::app::Opt>,
@@ -109,19 +111,21 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
     /// Remember the Desktop view choices (One Window, icon bar pane).
     pub fn save_desk_prefs(&self) {
         let mut p = self.prefs();
         p["one_window"] = serde_json::json!(self.desk.one_window);
+        p["favorites"] = serde_json::json!(self.desk.favorites);
         p["pane"] = serde_json::json!(match self.desk.pane { Pane::Shortcuts => "shortcuts", Pane::Balances => "balances", Pane::Windows => "windows" });
         self.write_prefs(&p);
     }
     pub fn load_desk_prefs(&mut self) {
         let p = self.prefs();
         self.desk.one_window = p["one_window"].as_bool().unwrap_or(false);
+        self.desk.favorites = p["favorites"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
         self.desk.pane = match p["pane"].as_str() { Some("balances") => Pane::Balances, Some("windows") => Pane::Windows, _ => Pane::Shortcuts };
     }
 
@@ -225,6 +229,9 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             if name.is_empty() { return app.toast("Enter the name", true); }
             app.be.call("contacts.create", serde_json::json!({"name": name}), |r| Message::Desk(Msg::ClassDone(r)))
         }
+        Msg::FavAdd(f) => { if !app.desk.favorites.contains(&f) { app.desk.favorites.push(f); app.save_desk_prefs(); } Task::none() }
+        Msg::FavRemove(n) => { if n < app.desk.favorites.len() { app.desk.favorites.remove(n); app.save_desk_prefs(); } Task::none() }
+        Msg::FavUp(n) => { if n > 0 && n < app.desk.favorites.len() { app.desk.favorites.swap(n, n - 1); app.save_desk_prefs(); } Task::none() }
         Msg::PrFile(id) => {
             let be = app.be.clone();
             let open = !cfg!(test);
@@ -694,6 +701,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::PriceLevels => "Price Level List".into(),
         Route::PrintForms => "Select Invoices to Print".into(),
         Route::PayrollForms => "Process Payroll Forms".into(),
+        Route::CustomizeFavorites => "Customize Your Menus".into(),
         Route::EnterTime => "Time/Enter Single Activity".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
@@ -747,7 +755,12 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
             e("Switch to QuickBooks Online-style layout", "", Some(Message::SetLayout(theme::Layout::Online))), e("Switch to Xero-style layout", "", Some(Message::SetLayout(theme::Layout::Xero)))],
         "Lists" => vec![e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)), e("Item List", "", nav(Route::Products)), e("Fixed Asset Item List", "", rep("fixed-asset-register")), e("Price Level List", "", nav(Route::PriceLevels)),
             e("Sales Tax Code List", "", nav(Route::Taxes)), e("Payroll Item List", "", nav(Route::PayrollItems)), e("Class List", "", nav(Route::ClassList)), e("Other Names List", "", nav(Route::OtherNames)), e("Templates", "", nav(Route::Templates)), e("Memorized Transaction List", "Ctrl+T", nav(Route::Memorized))],
-        "Favorites" => vec![e("Customize Favorites…", "", None)],
+        "Favorites" => {
+            let mut v: Vec<(String, &'static str, Option<Message>)> = app.desk.favorites.iter().filter_map(|f| favorite_action(app, f).map(|m| (f.split(" ▸ ").last().unwrap_or(f).to_string(), "", Some(m)))).collect();
+            if !v.is_empty() { v.push(sep()); }
+            v.push(e("Customize Favorites…", "", nav(Route::CustomizeFavorites)));
+            v
+        }
         "Company" => vec![e("Home Page", "", nav(Route::Dashboard)), e("Company Snapshot", "", Some(Message::Desk(Msg::Insights(true)))), sep(), e("My Company", "", nav(Route::Settings)),
             e("Company Information…", "", nav(Route::Settings)), e("Set Up Users and Roles…", "", nav(Route::Settings)), sep(), e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)),
             e("Make General Journal Entries…", "", nav(Route::Journal)), e("Enter Vehicle Mileage…", "", nav(Route::Mileage)), e("Calendar", "", nav(Route::Calendar)), e("Documents", "", nav(Route::DocCenter))],
@@ -995,6 +1008,64 @@ pub fn other_names(app: &App) -> Element<'_, Message> {
         ui::hspace(),
         text("Owners, partners and one-off payees. A name becomes a customer or vendor once you transact with it.").size(12).color(k.muted).into(),
     ])
+}
+
+/// Menus whose commands can be added to Favorites (not View/Window, which change with state).
+const FAV_MENUS: [&str; 10] = ["File", "Lists", "Company", "Inventory", "Customers", "Vendors", "Employees", "Banking", "Reports", "Help"];
+
+/// Every command that can be a favorite, as "Menu ▸ Item".
+fn favorite_choices(app: &App) -> Vec<String> {
+    let mut out = vec![];
+    for m in FAV_MENUS {
+        for (label, _, msg) in menu_items(app, m) {
+            if label == "-" || label.starts_with('#') || msg.is_none() { continue; }
+            out.push(format!("{m} ▸ {}", label.trim()));
+        }
+    }
+    out
+}
+
+/// What a favorite does: the command it names, if it still exists.
+fn favorite_action(app: &App, fav: &str) -> Option<Message> {
+    let (menu, item) = fav.split_once(" ▸ ")?;
+    if !FAV_MENUS.contains(&menu) { return None; }
+    menu_items(app, menu).into_iter().find(|(l, _, _)| l.trim() == item).and_then(|x| x.2)
+}
+
+/// Favorites ▸ Customize Favorites: pick commands from the menus for the Favorites menu.
+pub fn customize_favorites(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let mut avail = column![].spacing(1);
+    let mut last_menu = "";
+    let all = favorite_choices(app);
+    for f in all.iter() {
+        let menu = f.split(" ▸ ").next().unwrap_or("");
+        if menu != last_menu {
+            avail = avail.push(container(text(menu.to_uppercase()).size(11).font(BOLD).color(k.info)).padding(Padding { top: 8.0, bottom: 2.0, left: 8.0, right: 0.0 }));
+            last_menu = menu;
+        }
+        let chosen = app.desk.favorites.contains(f);
+        let label = f.split(" ▸ ").last().unwrap_or("").to_string();
+        avail = avail.push(button(row![text(label).size(13), ui::hspace(), text(if chosen { "✓" } else { "" }).size(13).color(k.ok)])
+            .style(theme::nav_item(false)).padding([4, 16]).width(Fill).on_press_maybe((!chosen).then(|| Message::Desk(Msg::FavAdd(f.clone())))));
+    }
+    let mut chosen = column![].spacing(1);
+    for (n, f) in app.desk.favorites.iter().enumerate() {
+        let ok = favorite_action(app, f).is_some();
+        chosen = chosen.push(row![
+            text(f.clone()).size(13).color(if ok { k.text } else { k.muted }).width(Fill),
+            ui::link("Move Up", Message::Desk(Msg::FavUp(n))), ui::link("Remove", Message::Desk(Msg::FavRemove(n))),
+        ].spacing(12).align_y(Alignment::Center).padding([5, 10]));
+    }
+    if app.desk.favorites.is_empty() { chosen = chosen.push(container(ui::muted("Click a command on the left to add it.")).padding(10)); }
+    container(column![
+        text("Customize Your Menus").size(22).font(BOLD),
+        row![
+            container(column![text("Available Menu Items").size(13).font(BOLD), scrollable(avail).style(theme::scroll).height(Fill)].spacing(8)).padding(12).width(Fill).height(Fill).style(theme::card),
+            container(column![text("Chosen Menu Items").size(13).font(BOLD), scrollable(chosen).style(theme::scroll).height(Fill)].spacing(8)).padding(12).width(Fill).height(Fill).style(theme::card),
+        ].spacing(14).height(Fill),
+        row![text("Chosen items appear on the Favorites menu, in this order.").size(12).color(k.muted), ui::hspace(), ui::btn_primary("OK", Some(Message::Back))].align_y(Alignment::Center),
+    ].spacing(12)).padding(18).height(Fill).into()
 }
 
 /// Employees ▸ Process Payroll Forms: a filing file for each posted pay run, plus the payroll summary.

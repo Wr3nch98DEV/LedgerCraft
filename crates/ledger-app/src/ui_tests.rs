@@ -1767,7 +1767,7 @@ fn every_screen_in_every_layout_loads() {
         Route::ReceivePayment(None), Route::PayBills, Route::Spend(None), Route::Check(None), Route::Deposit, Route::Transfer, Route::Journal,
         Route::NewContact(true), Route::NewProduct, Route::NewAccount, Route::Payroll, Route::Taxes, Route::Projects, Route::Mileage, Route::Reconcile,
         Route::Register(None), Route::Calendar, Route::Statements, Route::Memorized, Route::PaySalesTax, Route::AdjustInventory, Route::Help, Route::DocCenter,
-        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates, Route::PriceLevels, Route::PrintForms, Route::PayrollForms];
+        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates, Route::PriceLevels, Route::PrintForms, Route::PayrollForms, Route::CustomizeFavorites];
     for layout in Layout::ALL {
         let (mut app, dir) = desktop_app(&format!("all-{}", layout.key()));
         let t = app.update(Message::SetLayout(layout));
@@ -2223,5 +2223,31 @@ fn end_to_end_payroll_forms() {
     let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
     assert!(v["format"].is_string());
     let _ = std::fs::remove_file(file);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn desktop_customize_favorites() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("favorites");
+    let t = app.update(Message::Nav(Route::CustomizeFavorites)); settle(&mut app, t);
+    // Only Customize Favorites… to begin with.
+    assert_eq!(crate::desktop::menu_items(&app, "Favorites").len(), 1);
+    // Adding commands, then moving one up.
+    let _ = app.update(Message::Desk(W::FavAdd("Banking ▸ Write Checks".into())));
+    let _ = app.update(Message::Desk(W::FavAdd("Customers ▸ Create Invoices".into())));
+    let _ = app.update(Message::Desk(W::FavUp(1)));
+    assert_eq!(app.desk.favorites, vec!["Customers ▸ Create Invoices".to_string(), "Banking ▸ Write Checks".to_string()]);
+    let menu = crate::desktop::menu_items(&app, "Favorites");
+    assert_eq!(menu[0].0, "Create Invoices");
+    assert!(menu[0].2.is_some() && menu[1].2.is_some());
+    assert_eq!(menu[1].0, "Write Checks");
+    // Remembered in preferences.
+    app.desk.favorites.clear();
+    app.load_desk_prefs();
+    assert_eq!(app.desk.favorites.len(), 2);
+    let _ = app.update(Message::Desk(W::FavRemove(0)));
+    app.load_desk_prefs();
+    assert_eq!(app.desk.favorites, vec!["Banking ▸ Write Checks".to_string()]);
     let _ = std::fs::remove_dir_all(dir);
 }

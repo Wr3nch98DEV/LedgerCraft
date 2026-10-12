@@ -117,6 +117,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::PriceLevels => crate::desktop::price_levels(app),
         Route::PrintForms => crate::desktop::print_forms(app),
         Route::PayrollForms => crate::desktop::payroll_forms(app),
+        Route::CustomizeFavorites => crate::desktop::customize_favorites(app),
         Route::EnterTime => crate::desktop::enter_time(app),
         Route::Doc { .. } => doc::view(app),
         Route::ReceivePayment(_) | Route::PayBills | Route::Spend(_) | Route::Check(_) | Route::Deposit => payments::view(app),
