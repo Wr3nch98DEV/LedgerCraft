@@ -1416,3 +1416,33 @@ fn desktop_pay_sales_tax() {
     assert_eq!(bal(&app) - before, 6000, "liability (a credit balance) reduced by 60.00");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_adjust_inventory_and_receive_items() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("adjinv");
+    let _ = app.update(Message::Nav(Route::AdjustInventory));
+    let items = app.be.call_now("items.list", json!({})).unwrap();
+    app.data = Some(items.clone());
+    let tracked = items.as_array().unwrap().iter().find(|x| x["is_tracked"].as_i64() == Some(1)).expect("demo has a tracked item").clone();
+    let id = tracked["id"].as_i64().unwrap();
+    let cur = tracked["qty_on_hand_e4"].as_i64().unwrap();
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["ADJUSTMENT ACCOUNT", "NEW QUANTITY", "QTY DIFFERENCE", tracked["name"].as_str().unwrap()] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    let new_qty = format!("{}", (cur - 10000) as f64 / 10000.0);
+    let _ = app.update(Message::Desk(W::AdjQty(id, new_qty)));
+    let _ = app.update(Message::Desk(W::AdjSave));
+    assert!(app.desk.adj_busy, "sent to the engine");
+    let acc = app.lk.account_opts(|a| a["type"] == "DIRECTCOSTS")[0].id;
+    app.be.call_now("items.adjust", json!({"id": id, "date": crate::ui::today_iso(), "quantity": "-1", "account_id": acc, "reason": ""})).unwrap();
+    let after = app.be.call_now("items.list", json!({})).unwrap().as_array().unwrap().iter().find(|x| x["id"].as_i64() == Some(id)).unwrap()["qty_on_hand_e4"].as_i64().unwrap();
+    assert_eq!(after, cur - 10000);
+    // Receive Items opens Enter Bills on the Items tab.
+    let _ = app.update(Message::ReceiveItems);
+    assert_eq!(app.route, Route::Doc { kind: "ACCPAY".into(), id: None });
+    assert!(app.doc.as_ref().unwrap().items_tab);
+    let _ = std::fs::remove_dir_all(dir);
+}

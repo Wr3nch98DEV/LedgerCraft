@@ -56,6 +56,8 @@ pub enum Route {
     Memorized,
     /// QuickBooks Desktop Pay Sales Tax.
     PaySalesTax,
+    /// QuickBooks Desktop Adjust Quantity/Value on Hand.
+    AdjustInventory,
     NewProduct,
     NewAccount,
     Journal,
@@ -145,6 +147,8 @@ pub enum Message {
     Set1099(i64, bool),
     /// Show an engine error as a toast.
     Failed(String),
+    /// Desktop Receive Items: Enter Bills opened on the Items tab.
+    ReceiveItems,
     /// Put the cursor in the search box (Desktop Ctrl+F / Edit ▸ Find).
     FocusSearch,
     Noop,
@@ -200,7 +204,7 @@ pub fn parse_route(s: &str) -> Option<Route> {
         "customers" => Route::Customers, "products" => Route::Products, "expenses" => Route::Expenses, "bills" => Route::Bills, "vendors" => Route::Vendors,
         "pos" => Route::PurchaseOrders, "contacts" => Route::Contacts, "contact" => Route::Contact(id(1)?), "banking" => Route::Banking(id(1)), "chart" => Route::Chart,
         "reports" => Route::Reports, "report" => Route::Report(parts.get(1)?.to_string()), "settings" => Route::Settings, "setup" => Route::Setup,
-        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
+        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "adjustinventory" => Route::AdjustInventory, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
         _ => return None,
     })
 }
@@ -436,6 +440,7 @@ impl App {
             Route::Deposit => payments::open_deposit(self),
             Route::Reconcile => crate::reconcile::load(self),
             Route::Calendar => crate::desktop::load_calendar(self),
+            Route::AdjustInventory => call("items.list", json!({})),
             Route::PaySalesTax => call("agencies.list", json!({})),
             Route::Memorized => call("repeating.list", json!({"kind": "ALL"})),
             Route::Statements => call("contacts.list", json!({"filter": "customers"})),
@@ -574,6 +579,7 @@ impl App {
             Message::Settings(m) => crate::settings::update(self, m),
             Message::NewDocFor(kind, cid) => { self.prefill_contact = Some(cid); self.go(Route::Doc { kind, id: None }) }
             Message::Failed(e) => self.toast(e, true),
+            Message::ReceiveItems => { let t = self.go(Route::Doc { kind: "ACCPAY".into(), id: None }); let t2 = doc::update(self, doc::Msg::BillTab(true)); Task::batch([t, t2]) }
             Message::FocusSearch => { self.menu = None; iced::widget::operation::focus(crate::desktop::SEARCH_ID) }
             Message::Set1099(cid, on) => {
                 if let Some(d) = self.data.as_mut() { d["contact"]["track_1099"] = json!(on as i64); }

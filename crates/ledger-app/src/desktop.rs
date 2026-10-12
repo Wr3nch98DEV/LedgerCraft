@@ -59,6 +59,12 @@ pub struct State {
     pub tax_from: Option<crate::app::Opt>,
     pub tax_date: String,
     pub tax_busy: bool,
+    /// Adjust Quantity/Value on Hand: per item the new quantity, plus date, account and memo.
+    pub adj: Vec<(i64, String)>,
+    pub adj_date: String,
+    pub adj_account: Option<crate::app::Opt>,
+    pub adj_memo: String,
+    pub adj_busy: bool,
 }
 
 /// A transaction typed straight into the register.
@@ -69,7 +75,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply) }
 
 impl App {
     /// Keep the current screen's unsaved state with its window.
@@ -149,6 +155,43 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, move |r| Message::Desk(Msg::Detail(id, r)))
         }
         Msg::ReportCat(c) => { app.desk.report_cat = Some(c); Task::none() }
+        Msg::AdjQty(id, v) => { match app.desk.adj.iter_mut().find(|x| x.0 == id) { Some(x) => x.1 = v, None => app.desk.adj.push((id, v)) } Task::none() }
+        Msg::AdjDate(v) => { app.desk.adj_date = v; Task::none() }
+        Msg::AdjAccount(a) => { app.desk.adj_account = Some(a); Task::none() }
+        Msg::AdjMemo(v) => { app.desk.adj_memo = v; Task::none() }
+        Msg::AdjSave => {
+            let items = app.data.as_ref().and_then(|d| d.as_array().cloned()).unwrap_or_default();
+            let Some(acc) = app.desk.adj_account.clone().or_else(|| default_adj_account(app)) else { return app.toast("Choose the adjustment account", true) };
+            let date_in = if app.desk.adj_date.is_empty() { app.d(&ui::today_iso()) } else { app.desk.adj_date.clone() };
+            let Some(date) = ui::to_iso(&date_in, app.date_style()) else { return app.toast("Check the adjustment date", true) };
+            let mut calls = vec![];
+            for (id, new_qty) in &app.desk.adj {
+                let Some(item) = items.iter().find(|x| x["id"].as_i64() == Some(*id)) else { continue };
+                let Some(new_e4) = crate::doc::parse_e4(new_qty).filter(|_| !new_qty.trim().is_empty()) else { continue };
+                let diff = new_e4 - item["qty_on_hand_e4"].as_i64().unwrap_or(0);
+                if diff == 0 { continue; }
+                let mut p = serde_json::json!({"id": id, "date": date, "quantity": format!("{}", diff as f64 / 10000.0), "account_id": acc.id, "reason": app.desk.adj_memo.trim()});
+                // Added stock is valued at the item's purchase cost.
+                if diff > 0 { p["unit_cost"] = serde_json::json!(format!("{}", item["purchase_unit_e2"].as_i64().unwrap_or(0) as f64 / 10000.0)); }
+                calls.push(p);
+            }
+            if calls.is_empty() { return app.toast("Enter a new quantity for at least one item", true); }
+            let be = app.be.clone();
+            app.desk.adj_busy = true;
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                    for p in &calls { be.call_now("items.adjust", p.clone())?; }
+                    Ok(serde_json::json!({"adjusted": calls.len()}))
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Desk(Msg::AdjSaved(r)))
+        }
+        Msg::AdjSaved(r) => {
+            app.desk.adj_busy = false;
+            match r {
+                Ok(v) => { app.desk.adj.clear(); app.desk.adj_memo.clear(); let t1 = app.toast(format!("{} item(s) adjusted", v["adjusted"].as_i64().unwrap_or(0)), false); let t2 = app.load_lookups(); let i = app.desk.active; Task::batch([t1, t2, app.close_window(i)]) }
+                Err(e) => app.toast(e, true),
+            }
+        }
         Msg::TaxPick(id, on) => { tax_row(app, id).1 = on; Task::none() }
         Msg::TaxAmt(id, v) => { let r = tax_row(app, id); r.2 = v; r.1 = true; Task::none() }
         Msg::TaxFrom(a) => { app.desk.tax_from = Some(a); Task::none() }
@@ -333,6 +376,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::Statements => "Create Statements".into(),
         Route::Memorized => "Memorized Transaction List".into(),
         Route::PaySalesTax => "Pay Sales Tax".into(),
+        Route::AdjustInventory => "Adjust Quantity/Value on Hand".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
             "ACCREC" => "Create Invoices", "QUOTE" => "Create Estimates", "ACCRECCREDIT" => "Create Credit Memos/Refunds", "SALESRECEIPT" => "Enter Sales Receipts",
@@ -390,7 +434,7 @@ fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Messag
             e("Company Information…", "", nav(Route::Settings)), e("Set Up Users and Roles…", "", nav(Route::Settings)), sep(), e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)),
             e("Make General Journal Entries…", "", nav(Route::Journal)), e("Enter Vehicle Mileage…", "", nav(Route::Mileage)), e("Calendar", "", nav(Route::Calendar)), e("Documents", "", None)],
         "Inventory" => vec![e("Inventory Center", "", nav(Route::Products)), e("Item List", "", nav(Route::Products)), sep(), e("Create Purchase Orders", "", doc_new("PO")),
-            e("Purchase Orders List", "", nav(Route::PurchaseOrders)), e("Receive Items", "", None), e("Adjust Quantity/Value on Hand…", "", None)],
+            e("Purchase Orders List", "", nav(Route::PurchaseOrders)), e("Receive Items", "", Some(Message::ReceiveItems)), e("Enter Bills Against Inventory", "", nav(Route::PurchaseOrders)), e("Adjust Quantity/Value on Hand…", "", nav(Route::AdjustInventory))],
         "Customers" => vec![e("Customer Center", "Ctrl+J", nav(Route::Customers)), sep(), e("Create Estimates", "", doc_new("QUOTE")), e("Create Sales Orders", "", None),
             e("Create Invoices", "Ctrl+I", doc_new("ACCREC")), e("Enter Sales Receipts", "", doc_new("SALESRECEIPT")), e("Enter Statement Charges", "", doc_new("DELAYEDCHARGE")),
             e("Create Statements…", "", nav(Route::Statements)), e("Assess Finance Charges…", "", None), sep(), e("Receive Payments", "", nav(Route::ReceivePayment(None))),
@@ -564,6 +608,57 @@ pub fn frame<'a>(app: &'a App, content: Element<'a, Message>) -> Element<'a, Mes
         layers = layers.push(container(opaque(container(list).padding(8).width(400).style(theme::menu))).padding(Padding { top: 72.0, left: 8.0, ..Padding::ZERO }));
     }
     layers.into()
+}
+
+// ---------------- Adjust Quantity/Value on Hand ----------------
+
+/// The usual account for stock adjustments: Cost of Goods Sold.
+fn default_adj_account(app: &App) -> Option<crate::app::Opt> {
+    app.lk.account_opts(|a| a["type"] == "DIRECTCOSTS").into_iter().next()
+}
+
+/// Inventory ▸ Adjust Quantity/Value on Hand.
+pub fn adjust_inventory(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let items: Vec<Value> = d.as_array().cloned().unwrap_or_default().into_iter().filter(|x| x["is_tracked"].as_i64() == Some(1)).collect();
+    let accounts = app.lk.account_opts(|a| matches!(a["class"].as_str(), Some("EXPENSE")));
+    let acc = app.desk.adj_account.clone().or_else(|| default_adj_account(app));
+    let date = if app.desk.adj_date.is_empty() { app.d(&ui::today_iso()) } else { app.desk.adj_date.clone() };
+    let cols: Vec<(&str, u16, bool)> = vec![("Item", 30, false), ("Description", 30, false), ("Current Qty", 12, true), ("New Quantity", 14, true), ("Qty Difference", 12, true)];
+    let head = container(row(cols.iter().map(|(h, w, r)| {
+        let tx = text(h.to_uppercase()).size(11).font(BOLD).color(k.muted);
+        container(if *r { tx.align_x(iced::alignment::Horizontal::Right).width(Fill) } else { tx.width(Fill) }).width(Length::FillPortion(*w)).into()
+    })).spacing(8).padding([6, 10])).style(theme::header_row).width(Fill);
+    let mut list = column![head];
+    if items.is_empty() { list = list.push(container(ui::muted("No inventory items with quantity tracking.")).padding(16)); }
+    let qty = |e4: i64| { let s = format!("{:.4}", e4 as f64 / 10000.0); s.trim_end_matches('0').trim_end_matches('.').to_string() };
+    for x in &items {
+        let id = x["id"].as_i64().unwrap_or(0);
+        let cur = x["qty_on_hand_e4"].as_i64().unwrap_or(0);
+        let new = app.desk.adj.iter().find(|a| a.0 == id).map(|a| a.1.clone()).unwrap_or_default();
+        let diff = crate::doc::parse_e4(&new).filter(|_| !new.trim().is_empty()).map(|n| n - cur);
+        let cells: Vec<Element<Message>> = vec![
+            ui::cell(x["name"].as_str().unwrap_or("").to_string()), ui::cell_muted(x["purchase_description"].as_str().or(x["sales_description"].as_str()).unwrap_or("").to_string()),
+            ui::num(qty(cur)),
+            text_input("", &new).on_input(move |v| Message::Desk(Msg::AdjQty(id, v))).padding([4, 6]).size(13).align_x(iced::alignment::Horizontal::Right).style(theme::cell_input).into(),
+            text(diff.map(|d| format!("{}{}", if d > 0 { "+" } else { "" }, qty(d))).unwrap_or_default()).size(13).color(if diff.unwrap_or(0) < 0 { k.bad } else { k.text }).align_x(iced::alignment::Horizontal::Right).width(Fill).into(),
+        ];
+        list = list.push(row(cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into())).spacing(8).align_y(Alignment::Center).padding([5, 10]));
+        list = list.push(ui::hr());
+    }
+    let busy = app.desk.adj_busy;
+    container(column![
+        text("Adjust Quantity/Value on Hand").size(22).font(BOLD),
+        row![
+            column![text("ADJUSTMENT DATE").size(11).font(BOLD).color(k.info), text_input("", &date).on_input(|v| Message::Desk(Msg::AdjDate(v))).padding([5, 7]).size(13).style(theme::input).width(130)].spacing(3),
+            column![text("ADJUSTMENT ACCOUNT").size(11).font(BOLD).color(k.info), pick_list(accounts, acc, |a| Message::Desk(Msg::AdjAccount(a))).padding([5, 7]).text_size(13).style(theme::pick).width(300)].spacing(3),
+            column![text("MEMO").size(11).font(BOLD).color(k.info), text_input("", &app.desk.adj_memo).on_input(|v| Message::Desk(Msg::AdjMemo(v))).padding([5, 7]).size(13).style(theme::input).width(320)].spacing(3),
+        ].spacing(16).align_y(Alignment::End),
+        container(scrollable(list).style(theme::scroll)).style(theme::card).width(Fill).height(Length::Fixed(420.0)).clip(true),
+        row![text("Increases are valued at each item's purchase cost; decreases at its average cost.").size(12).color(k.muted), ui::hspace(),
+            ui::btn_primary("Save & Close", if busy { None } else { Some(Message::Desk(Msg::AdjSave)) }), ui::btn("Cancel", Some(Message::Back))].spacing(8).align_y(Alignment::Center),
+    ].spacing(12)).padding(18).max_width(1150).into()
 }
 
 // ---------------- Pay Sales Tax ----------------
@@ -1369,7 +1464,7 @@ pub fn home(app: &App) -> Element<'_, Message> {
         return column![container(tabs).padding(Padding { top: 10.0, left: 20.0, ..Padding::ZERO }), crate::dashboard::view(app)].into();
     }
     let vendors = band("VENDORS", vec![
-        row![node("box", "Purchase Orders", doc_new("PO")), arrow(), node("truck", "Receive Inventory", None), arrow(), node("expenses", "Enter Bills Against Inventory", None), gap(), node("taxes", "Manage Sales Tax", nav(Route::Taxes))].align_y(Alignment::Start).into(),
+        row![node("box", "Purchase Orders", doc_new("PO")), arrow(), node("truck", "Receive Inventory", Some(Message::ReceiveItems)), arrow(), node("expenses", "Enter Bills Against Inventory", nav(Route::PurchaseOrders)), gap(), node("taxes", "Manage Sales Tax", nav(Route::Taxes))].align_y(Alignment::Start).into(),
         row![node("expenses", "Enter Bills", doc_new("ACCPAY")), arrow(), node("check-write", "Pay Bills", nav(Route::PayBills)), gap(), node("file", "1099 Summary", rep("contractor-1099"))].align_y(Alignment::Start).into(),
     ]);
     let customers = band("CUSTOMERS", vec![
