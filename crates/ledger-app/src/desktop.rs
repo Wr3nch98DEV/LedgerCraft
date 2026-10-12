@@ -485,6 +485,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::PaySalesTax => "Pay Sales Tax".into(),
         Route::AdjustInventory => "Adjust Quantity/Value on Hand".into(),
         Route::Help => "LedgerCraft Help".into(),
+        Route::MemorizedReports => "Memorized Report List".into(),
         Route::DocCenter => "Doc Center".into(),
         Route::PayLiabilities => "Pay Liabilities".into(),
         Route::ClassList => "Class List".into(),
@@ -559,7 +560,7 @@ fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Messag
         "Banking" => vec![e("Write Checks", "Ctrl+W", nav(Route::Check(None))), e("Order Checks & Envelopes", "", None), e("Enter Credit Card Charges", "", nav(Route::Spend(None))), sep(),
             e("Use Register", "Ctrl+R", nav(Route::Register(None))), e("Make Deposits", "", nav(Route::Deposit)), e("Transfer Funds", "", nav(Route::Transfer)), e("Reconcile", "", nav(Route::Reconcile)),
             sep(), e("Bank Feeds Center", "", nav(Route::Banking(None)))],
-        "Reports" => vec![e("Report Center", "", nav(Route::Reports)), e("Memorized Reports", "", None), e("Company Snapshot", "", Some(Message::Desk(Msg::Insights(true)))), sep(),
+        "Reports" => vec![e("Report Center", "", nav(Route::Reports)), e("Memorized Reports", "", nav(Route::MemorizedReports)), e("Company Snapshot", "", Some(Message::Desk(Msg::Insights(true)))), sep(),
             e("#Company & Financial", "", None), e("Profit & Loss Standard", "", rep("profit-and-loss")), e("Balance Sheet Standard", "", rep("balance-sheet")), e("Statement of Cash Flows", "", rep("cash-flow-statement")),
             e("#Customers & Receivables", "", None), e("A/R Aging Summary", "", rep("aged-receivables")), e("Customer Balance Summary", "", rep("contact-transactions")),
             e("#Sales", "", None), e("Sales by Customer Summary", "", rep("sales-by-contact")), e("Sales by Item Summary", "", rep("sales-by-item")),
@@ -872,6 +873,21 @@ pub fn doc_center(app: &App) -> Element<'_, Message> {
         ui::hspace(),
         text("Bills, receipts and other paperwork. LedgerCraft reads the supplier and total from PDFs where it can.").size(12).color(t().muted).into(),
     ])
+}
+
+// ---------------- Memorized Reports ----------------
+
+/// Reports ▸ Memorized Reports.
+pub fn memorized_reports(app: &App) -> Element<'_, Message> {
+    let list = app.data.as_ref().and_then(|d| d.as_array().cloned()).unwrap_or_default();
+    let cols: Vec<(&str, u16, bool)> = vec![("Report Name", 30, false), ("Report", 26, false), ("Dates", 16, false), ("", 16, false)];
+    let rows = list.iter().enumerate().map(|(n, m)| {
+        let key = m["key"].as_str().unwrap_or("").to_string();
+        (vec![ui::cell(m["name"].as_str().unwrap_or("").to_string()), ui::cell_muted(title(app, &Route::Report(key))), ui::cell_muted(m["period_label"].as_str().unwrap_or("").to_string()),
+            row![ui::link("Run", Message::Report(crate::reports::Msg::RunMemorized(n))), ui::link("Delete", Message::Report(crate::reports::Msg::DeleteMemorized(n)))].spacing(14).into()],
+         Some(Message::Report(crate::reports::Msg::RunMemorized(n))))
+    }).collect();
+    list_window(&cols, rows, vec![ui::hspace(), text("Memorize a report with the Memorize button on any report window.").size(12).color(t().muted).into()])
 }
 
 // ---------------- Help ----------------

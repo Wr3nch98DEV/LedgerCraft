@@ -1661,3 +1661,38 @@ fn desktop_class_list_and_enter_time() {
     assert!(r.is_ok(), "{r:?}");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn memorized_reports() {
+    use crate::reports::{Columns, Msg as Rp, Period};
+    let (mut app, dir) = desktop_app("memrep");
+    let _ = app.update(Message::Nav(Route::Report("profit-and-loss".into())));
+    app.data = Some(json!({"title": "Profit and Loss", "columns": [], "sections": []}));
+    let _ = app.update(Message::Report(Rp::Period(Period::LastYear)));
+    let _ = app.update(Message::Report(Rp::Columns(Columns::Months)));
+    let _ = app.update(Message::Report(Rp::Basis(true)));
+    app.data = Some(json!({"title": "Profit and Loss", "columns": [], "sections": []}));
+    let msgs = click(&app, "Memorize");
+    assert!(matches!(msgs.as_slice(), [Message::Report(Rp::Memorize)]), "{msgs:?}");
+    let _ = app.update(Message::Report(Rp::Memorize));
+    let _ = app.update(Message::Report(Rp::MemoName("Last year by month (cash)".into())));
+    let _ = app.update(Message::Report(Rp::MemoSave));
+    assert_eq!(app.memorized_reports().len(), 1);
+    // Change everything, then run the memorized one: its settings come back.
+    let _ = app.update(Message::Report(Rp::Period(Period::ThisMonth)));
+    let _ = app.update(Message::Report(Rp::Columns(Columns::Total)));
+    let _ = app.update(Message::Report(Rp::Basis(false)));
+    let _ = app.update(Message::Nav(Route::MemorizedReports));
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["Last year by month (cash)", "Profit & Loss", "Last year"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    let _ = app.update(Message::Report(Rp::RunMemorized(0)));
+    assert_eq!(app.route, Route::Report("profit-and-loss".into()));
+    assert_eq!((app.report.period, app.report.columns, app.report.cash), (Period::LastYear, Columns::Months, true));
+    let _ = app.update(Message::Nav(Route::MemorizedReports));
+    let _ = app.update(Message::Report(Rp::DeleteMemorized(0)));
+    assert!(app.memorized_reports().is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}

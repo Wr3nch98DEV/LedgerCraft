@@ -103,6 +103,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::PaySalesTax => crate::desktop::pay_sales_tax(app),
         Route::AdjustInventory => crate::desktop::adjust_inventory(app),
         Route::Help => crate::desktop::help(app),
+        Route::MemorizedReports => crate::desktop::memorized_reports(app),
         Route::DocCenter => crate::desktop::doc_center(app),
         Route::PayLiabilities => crate::desktop::pay_liabilities(app),
         Route::ClassList => crate::desktop::class_list(app),

@@ -71,12 +71,14 @@ pub struct State {
     pub hide_header: bool,
     /// QuickZoom: the account shown on the Account QuickReport.
     pub account: Option<i64>,
+    /// Memorize: the name being typed (Some while the prompt is open).
+    pub memo_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Msg {
     Period(Period), Basis(bool), Export(bool), Exported(Result<String, String>),
-    Customize, From(String), To(String), Columns(Columns), Negative(Negative), ShowZero(bool), Contact(Option<Opt>), Run, HideHeader, Zoom(i64),
+    Customize, From(String), To(String), Columns(Columns), Negative(Negative), ShowZero(bool), Contact(Option<Opt>), Run, HideHeader, Zoom(i64), Memorize, MemoName(String), MemoSave, RunMemorized(usize), DeleteMemorized(usize),
 }
 
 /// The report's dates: the chosen period, or the custom dates when they parse.
@@ -132,6 +134,46 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         }
         Msg::Basis(c) => app.report.cash = c,
         Msg::Customize => { app.report.customize = !app.report.customize; return Task::none(); }
+        Msg::Memorize => { app.report.memo_name = if app.report.memo_name.is_some() { None } else { Some(String::new()) }; return Task::none(); }
+        Msg::MemoName(v) => { app.report.memo_name = Some(v); return Task::none(); }
+        Msg::MemoSave => {
+            let Route::Report(key) = app.route.clone() else { return Task::none() };
+            let name = app.report.memo_name.clone().unwrap_or_default().trim().to_string();
+            if name.is_empty() { return app.toast("Give the memorized report a name", true); }
+            let r = &app.report;
+            let entry = json!({"name": name, "key": key, "period": format!("{:?}", r.period), "period_label": r.period.to_string(), "columns": format!("{:?}", r.columns), "negative": format!("{:?}", r.negative),
+                "cash": r.cash, "from": r.from, "to": r.to, "show_zero": r.show_zero});
+            let org = app.org_name();
+            let mut prefs = app.prefs();
+            if !prefs["memorized_reports"].is_object() { prefs["memorized_reports"] = json!({}); }
+            let mut list = prefs["memorized_reports"][org.as_str()].as_array().cloned().unwrap_or_default();
+            list.retain(|x| x["name"] != name);
+            list.push(entry);
+            prefs["memorized_reports"][org.as_str()] = json!(list);
+            app.write_prefs(&prefs);
+            app.report.memo_name = None;
+            return app.toast(format!("Memorized \"{name}\" — find it in Reports ▸ Memorized Reports"), false);
+        }
+        Msg::RunMemorized(n) => {
+            let Some(m) = app.memorized_reports().get(n).cloned() else { return Task::none() };
+            let s = |k: &str| m[k].as_str().unwrap_or("").to_string();
+            let r = &mut app.report;
+            r.period = Period::ALL.iter().copied().find(|p| format!("{p:?}") == s("period")).unwrap_or_default();
+            r.columns = Columns::ALL.iter().copied().find(|c| format!("{c:?}") == s("columns")).unwrap_or_default();
+            r.negative = if s("negative") == "Parentheses" { Negative::Parentheses } else { Negative::Minus };
+            r.cash = m["cash"].as_bool().unwrap_or(false);
+            r.show_zero = m["show_zero"].as_bool().unwrap_or(false);
+            r.from = s("from"); r.to = s("to");
+            if r.period != Period::Custom { let (f, t) = r.period.range(); let (f, t) = (app.d(&f), app.d(&t)); app.report.from = f; app.report.to = t; }
+            return app.go(Route::Report(s("key")));
+        }
+        Msg::DeleteMemorized(n) => {
+            let org = app.org_name();
+            let mut prefs = app.prefs();
+            if let Some(list) = prefs["memorized_reports"][org.as_str()].as_array_mut() { if n < list.len() { list.remove(n); } }
+            app.write_prefs(&prefs);
+            return app.load();
+        }
         Msg::Zoom(id) => { app.report.account = Some(id); return app.go(Route::Report("account-transactions".into())); }
         Msg::HideHeader => { app.report.hide_header = !app.report.hide_header; return Task::none(); }
         Msg::From(v) => { app.report.from = v; app.report.period = Period::Custom; return Task::none(); }
@@ -347,7 +389,7 @@ fn desk_toolbar<'a>(app: &'a App, key: &str) -> Element<'a, Message> {
     let has = app.data.is_some();
     let b = |l: &'static str, m: Option<Message>| ui::btn(l, m);
     let buttons = row![
-        b("Customize Report", Some(Message::Report(Msg::Customize))), b("Comment on Report", None), b("Memorize", None),
+        b("Customize Report", Some(Message::Report(Msg::Customize))), b("Comment on Report", None), b("Memorize", if has { Some(Message::Report(Msg::Memorize)) } else { None }),
         b("Print", if has { Some(Message::Report(Msg::Export(true))) } else { None }), b("E-mail", None),
         b("Excel", if has { Some(Message::Report(Msg::Export(false))) } else { None }),
         b(if app.report.hide_header { "Show Header" } else { "Hide Header" }, Some(Message::Report(Msg::HideHeader))),
@@ -364,7 +406,15 @@ fn desk_toolbar<'a>(app: &'a App, key: &str) -> Element<'a, Message> {
     }
     dates = dates.push(lbl("Basis")).push(
         button(text(if app.report.cash { "Cash" } else { "Accrual" }).size(13)).style(theme::secondary).padding([4, 10]).on_press(Message::Report(Msg::Basis(!app.report.cash))));
-    column![buttons, dates].spacing(8).into()
+    let memo: Element<'a, Message> = match &app.report.memo_name {
+        None => Space::new().into(),
+        Some(n) => container(row![
+            text("Memorize Report — Name").size(13).font(BOLD),
+            iced::widget::text_input("", n).on_input(|v| Message::Report(Msg::MemoName(v))).on_submit(Message::Report(Msg::MemoSave)).padding([4, 7]).size(13).style(theme::input).width(280),
+            ui::btn_primary("OK", Some(Message::Report(Msg::MemoSave))), ui::btn("Cancel", Some(Message::Report(Msg::Memorize))),
+        ].spacing(10).align_y(Alignment::Center)).padding([8, 12]).style(theme::accent_soft).width(Fill).into(),
+    };
+    column![buttons, dates, memo].spacing(8).into()
 }
 
 /// Reports that can be filtered to one customer or vendor.

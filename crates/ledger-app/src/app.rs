@@ -60,6 +60,8 @@ pub enum Route {
     AdjustInventory,
     /// Help: keyboard shortcuts and where things are.
     Help,
+    /// QuickBooks Desktop Reports ▸ Memorized Reports.
+    MemorizedReports,
     /// QuickBooks Desktop Doc Center (the files inbox).
     DocCenter,
     /// QuickBooks Desktop Pay Liabilities (payroll withholding and pension).
@@ -217,12 +219,25 @@ pub fn parse_route(s: &str) -> Option<Route> {
         "customers" => Route::Customers, "products" => Route::Products, "expenses" => Route::Expenses, "bills" => Route::Bills, "vendors" => Route::Vendors,
         "pos" => Route::PurchaseOrders, "contacts" => Route::Contacts, "contact" => Route::Contact(id(1)?), "banking" => Route::Banking(id(1)), "chart" => Route::Chart,
         "reports" => Route::Reports, "report" => Route::Report(parts.get(1)?.to_string()), "settings" => Route::Settings, "setup" => Route::Setup,
-        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "adjustinventory" => Route::AdjustInventory, "help" => Route::Help, "docs" => Route::DocCenter, "payliabilities" => Route::PayLiabilities, "classes" => Route::ClassList, "time" => Route::EnterTime, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
+        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "adjustinventory" => Route::AdjustInventory, "help" => Route::Help, "memreports" => Route::MemorizedReports, "docs" => Route::DocCenter, "payliabilities" => Route::PayLiabilities, "classes" => Route::ClassList, "time" => Route::EnterTime, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
         _ => return None,
     })
 }
 
 fn prefs_path(be: &Backend) -> std::path::PathBuf { be.st.data_dir.join("ui-preferences.json") }
+
+impl App {
+    /// The preferences file (layout, theme, memorized reports…).
+    pub fn prefs(&self) -> Value {
+        std::fs::read_to_string(prefs_path(&self.be)).ok().and_then(|s| serde_json::from_str(&s).ok()).filter(Value::is_object).unwrap_or(json!({}))
+    }
+    pub fn write_prefs(&self, v: &Value) { let _ = std::fs::write(prefs_path(&self.be), v.to_string()); }
+    /// Memorized reports for the open company.
+    pub fn memorized_reports(&self) -> Vec<Value> {
+        let org = self.org_name();
+        self.prefs()["memorized_reports"][org.as_str()].as_array().cloned().unwrap_or_default()
+    }
+}
 
 /// A saved layout. Files written before the Desktop layout existed ("v" < 2) said "quickbooks" for
 /// the only QuickBooks layout there was; those now open in Desktop, the new default.
@@ -469,6 +484,7 @@ impl App {
             }
             Route::PayLiabilities => call("accounts.list", json!({})),
             Route::DocCenter => call("inbox.list", json!({})),
+            Route::MemorizedReports => { self.data = Some(json!(self.memorized_reports())); Task::none() }
             Route::Help => { self.data = Some(json!({})); Task::none() }
             Route::AdjustInventory => call("items.list", json!({})),
             Route::PaySalesTax => call("agencies.list", json!({})),
