@@ -2582,3 +2582,36 @@ fn desktop_inventory_center() {
     assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn end_to_end_print_check() {
+    use crate::payments::Msg as P;
+    let (mut app, dir) = desktop_app("printcheck");
+    let t = app.update(Message::Nav(Route::Check(None))); settle(&mut app, t);
+    let vendor = app.lk.contact_opts(false)[0].clone();
+    let acct = app.lk.account_opts(|a| a["type"] == "EXPENSE")[0].clone();
+    let no = app.pay.as_ref().unwrap().check_no.clone();
+    for m in [P::Contact(vendor), P::LineAccount(0, acct), P::LineAmount(0, "1234.56".into()), P::Reference("Office chairs".into())] { let t = app.update(Message::Pay(m)); settle(&mut app, t); }
+    let file = std::env::temp_dir().join("lc-test-output").join(format!("Check {no}.pdf"));
+    let _ = std::fs::remove_file(&file);
+    press(&mut app, "Print Check");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let bytes = std::fs::read(&file).expect("check PDF written");
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(text.contains("**1,234.56"), "amount box");
+    assert!(text.contains("One thousand two hundred thirty-four") || text.to_lowercase().contains("one thousand two hundred thirty-four"), "amount in words");
+    // A fresh check follows, numbered after the one printed.
+    let next = app.pay.as_ref().unwrap().check_no.clone();
+    assert_ne!(next, no);
+    let _ = std::fs::remove_file(file);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+#[ignore]
+fn sample_check_pdf() {
+    let c = json!({"payee": "Officeworks", "date": "2026-10-13", "number": "1001", "amount": 123456, "words": crate::paydesk::words(123456), "memo": "Office chairs",
+        "bank": "Business Everyday", "lines": [{"account": "429 General Expenses", "memo": "Chairs x4", "amount": 100000}, {"account": "408 Cleaning", "memo": "Delivery", "amount": 23456}]});
+    let st = json!({"org_name": "Demo Co", "address": "1 George St\nSydney NSW 2000", "country": "US"});
+    std::fs::write(std::env::temp_dir().join("lc-check-sample.pdf"), crate::pdf::check(&c, &st, &|x| crate::ui::date(x, crate::ui::DateStyle::Us))).unwrap();
+}

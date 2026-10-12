@@ -39,6 +39,8 @@ pub struct State {
     pub check_no: String,
     /// Desktop "Save & New": start a fresh form after saving.
     pub new_after: bool,
+    /// Write Checks ▸ Print: print the check once it's saved.
+    pub print_after: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +66,9 @@ pub enum Msg {
     Undeposited(Result<Value, String>),
     /// Desktop: save, then open a fresh form.
     SaveNew,
+    /// Write Checks: save, print the check, and start the next one.
+    SavePrint,
+    Printed(Result<String, String>),
 }
 
 fn i(v: &Value) -> i64 { v.as_i64().unwrap_or(0) }
@@ -79,11 +84,35 @@ pub fn sync_boxes(app: &mut App) {
     s.box_sig = sig;
 }
 
+/// Write the check just saved as a voucher-check PDF and open it.
+fn print_check(app: &App, s: &State) -> Task<Message> {
+    let amount: i64 = s.lines.iter().map(|l| ui::parse_money(&l.amount).unwrap_or(0)).sum();
+    let payee = s.contact.as_ref().map(|c| c.label.clone()).unwrap_or_else(|| s.contact_text.trim().to_string());
+    let lines: Vec<Value> = s.lines.iter().filter(|l| l.account.is_some() && ui::parse_money(&l.amount).unwrap_or(0) != 0)
+        .map(|l| json!({"account": l.account.as_ref().map(|a| a.label.clone()), "memo": l.description, "amount": ui::parse_money(&l.amount).unwrap_or(0)})).collect();
+    let data = json!({"payee": payee, "date": ui::to_iso(&s.date, app.date_style()).unwrap_or_default(), "number": s.check_no.trim(), "amount": amount,
+        "words": crate::paydesk::words(amount), "memo": s.reference, "bank": s.account.as_ref().map(|a| a.label.clone()), "lines": lines});
+    let be = app.be.clone();
+    let style = app.date_style();
+    let open = !cfg!(test);
+    Task::perform(async move {
+        tokio::task::spawn_blocking(move || -> Result<String, String> {
+            let st = be.call_now("settings.get", json!({}))?;
+            let bytes = crate::pdf::check(&data, &st, &|x| ui::date(x, style));
+            let no = data["number"].as_str().filter(|n| !n.is_empty()).unwrap_or("check").to_string();
+            let path = crate::pdf::output_dir().join(["Check ", &no, ".pdf"].concat());
+            std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+            if open { crate::pdf::open_file(&path); }
+            Ok(path.display().to_string())
+        }).await.unwrap_or_else(|e| Err(e.to_string()))
+    }, |r| Message::Pay(Msg::Printed(r)))
+}
+
 fn base(app: &App, mode: Mode, customers: bool) -> State {
     State {
         mode, acct_boxes: vec![], box_sig: vec![], contact: None, contact_text: String::new(), contacts: combo_box::State::new(app.lk.contact_opts(customers)),
         account: app.lk.bank_opts().into_iter().next(), date: ui::date(&ui::today_iso(), app.date_style()), reference: String::new(),
-        docs: vec![], lines: vec![], lat: "INCLUSIVE".into(), busy: false, check: false, check_no: String::new(), new_after: false,
+        docs: vec![], lines: vec![], lat: "INCLUSIVE".into(), busy: false, check: false, check_no: String::new(), new_after: false, print_after: false,
     }
 }
 
@@ -135,9 +164,9 @@ fn load_docs(app: &App, kind: &str, contact: Option<i64>) -> Task<Message> {
 pub fn update(app: &mut App, m: Msg) -> Task<Message> {
     let style = app.date_style();
     let Some(mut s) = app.pay.take() else { return Task::none() };
-    let m = match m { Msg::SaveNew => { s.new_after = true; Msg::Save } Msg::Save => { s.new_after = false; Msg::Save } m => m };
+    let m = match m { Msg::SaveNew => { s.new_after = true; s.print_after = false; Msg::Save } Msg::SavePrint => { s.new_after = true; s.print_after = true; Msg::Save } Msg::Save => { s.new_after = false; s.print_after = false; Msg::Save } m => m };
     let task = match m {
-        Msg::SaveNew => Task::none(),
+        Msg::SaveNew | Msg::SavePrint => Task::none(),
         Msg::Docs(Ok(v)) => {
             s.docs = v["rows"].as_array().cloned().unwrap_or_default().iter().map(|r| OpenDoc {
                 id: i(&r["id"]), number: r["number"].as_str().unwrap_or("").into(), contact: r["contact_name"].as_str().unwrap_or("").into(),
@@ -229,9 +258,17 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                 }
             }
         }
+        Msg::Printed(r) => { app.pay = Some(s); return match r { Ok(p) => app.toast(format!("Check printed to {p}"), false), Err(e) => app.toast(e, true) }; }
         Msg::Saved(r) => {
             s.busy = false;
             match r {
+                Ok(_) if app.desktop() && s.print_after && s.check => {
+                    let t0 = print_check(app, &s);
+                    let t1 = app.toast("Check saved", false);
+                    let t2 = app.load_lookups();
+                    let t3 = app.load();
+                    return Task::batch([t0, t1, t2, t3]);
+                }
                 Ok(_) if app.desktop() => {
                     // Desktop: Save & Close closes the window; Save & New starts a fresh form.
                     let msg = match s.mode { Mode::Receive => "Payment recorded", Mode::PayBills => "Bills paid", Mode::Spend if s.check => "Check saved", Mode::Spend => "Charge saved", Mode::Deposit => "Deposit saved" };

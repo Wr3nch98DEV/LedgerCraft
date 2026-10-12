@@ -265,6 +265,61 @@ fn cell(v: &Value, qty: bool) -> String {
     match v.as_i64() { None => String::new(), Some(x) if qty => { let s = format!("{:.2}", x as f64 / 10000.0); s.trim_end_matches('0').trim_end_matches('.').to_string() } Some(x) => money(x) }
 }
 
+/// A voucher check (QuickBooks Desktop style, US Letter): the check in the top third, then two
+/// stubs (payee's and yours) with the expense lines. `c`: payee, date (ISO), number, amount
+/// (cents), words, memo, bank, lines [{account, memo, amount}].
+pub fn check(c: &Value, settings: &Value, fmt_date: &dyn Fn(&str) -> String) -> Vec<u8> {
+    let mut p = Pdf::new(true);
+    let (l, r) = (36.0, p.w - 36.0);
+    let s = |k: &str| c[k].as_str().unwrap_or("").to_string();
+    let amount = c["amount"].as_i64().unwrap_or(0);
+    // --- the check ---
+    p.text(l, 50.0, 12.0, true, INK, st(settings, "org_name"));
+    let mut y = 62.0;
+    for line in st(settings, "address").lines().filter(|x| !x.trim().is_empty()).take(3) { p.text(l, y, 8.5, false, MUTED, line); y += 10.0; }
+    p.text_right(r, 50.0, 10.0, true, INK, &s("number"));
+    p.text(r - 150.0, 82.0, 8.0, false, MUTED, "DATE");
+    p.text(r - 110.0, 82.0, 10.5, false, INK, &fmt_date(&s("date")));
+    p.line(r - 115.0, 85.0, r, 0.6, RULE);
+    p.text(l, 118.0, 7.5, false, MUTED, "PAY TO THE");
+    p.text(l, 127.0, 7.5, false, MUTED, "ORDER OF");
+    p.text(l + 62.0, 126.0, 11.0, true, INK, &s("payee"));
+    p.line(l + 60.0, 130.0, r - 130.0, 0.6, RULE);
+    p.text(r - 120.0, 126.0, 11.0, false, INK, "$");
+    p.rect(r - 108.0, 112.0, 108.0, 18.0, BAND);
+    p.text_right(r - 6.0, 126.0, 11.0, true, INK, &format!("**{}", money(amount)));
+    let words = s("words");
+    p.text(l, 152.0, 10.0, false, INK, &format!("{words}{}", "*".repeat(90usize.saturating_sub(words.len()))));
+    p.text_right(r, 152.0, 8.0, false, MUTED, "DOLLARS");
+    p.line(l, 156.0, r, 0.6, RULE);
+    p.text(l + 20.0, 178.0, 10.0, false, INK, &s("payee"));
+    p.text(l, 232.0, 7.5, false, MUTED, "MEMO");
+    p.text(l + 32.0, 232.0, 9.5, false, INK, &s("memo"));
+    p.line(l + 30.0, 236.0, l + 250.0, 0.6, RULE);
+    p.line(r - 200.0, 236.0, r, 0.6, RULE);
+    p.text(r - 200.0, 246.0, 7.0, false, MUTED, "AUTHORIZED SIGNATURE");
+    // --- two stubs ---
+    for top in [276.0f32, 540.0] {
+        p.line(l, top - 8.0, r, 0.4, RULE);
+        p.text(l, top + 10.0, 10.0, true, INK, &s("payee"));
+        p.text_right(r, top + 10.0, 10.0, true, INK, &format!("{}   {}", fmt_date(&s("date")), s("number")));
+        p.text(l, top + 30.0, 8.0, true, MUTED, "ACCOUNT");
+        p.text(l + 230.0, top + 30.0, 8.0, true, MUTED, "MEMO");
+        p.text_right(r, top + 30.0, 8.0, true, MUTED, "AMOUNT");
+        let mut yy = top + 46.0;
+        for ln in c["lines"].as_array().cloned().unwrap_or_default().iter().take(10) {
+            p.text(l, yy, 9.5, false, INK, ln["account"].as_str().unwrap_or(""));
+            p.text(l + 230.0, yy, 9.5, false, INK, ln["memo"].as_str().unwrap_or(""));
+            p.text_right(r, yy, 9.5, false, INK, &money(ln["amount"].as_i64().unwrap_or(0)));
+            yy += 13.0;
+        }
+        p.line(r - 120.0, top + 200.0, r, 0.6, RULE);
+        p.text(l, top + 214.0, 9.0, false, MUTED, &s("bank"));
+        p.text_right(r, top + 214.0, 10.0, true, INK, &money(amount));
+    }
+    p.finish()
+}
+
 /// A report as a PDF table (landscape when there are many columns).
 pub fn report(rep: &Value, title: &str, letter: bool, relabel: &dyn Fn(&str) -> String) -> Vec<u8> {
     let cols: Vec<String> = rep["columns"].as_array().cloned().unwrap_or_default().iter().map(|c| c.as_str().unwrap_or("").to_string()).collect();
