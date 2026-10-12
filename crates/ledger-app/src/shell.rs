@@ -104,6 +104,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::AdjustInventory => crate::desktop::adjust_inventory(app),
         Route::Help => crate::desktop::help(app),
         Route::DocCenter => crate::desktop::doc_center(app),
+        Route::PayLiabilities => crate::desktop::pay_liabilities(app),
         Route::Doc { .. } => doc::view(app),
         Route::ReceivePayment(_) | Route::PayBills | Route::Spend(_) | Route::Check(_) | Route::Deposit => payments::view(app),
         Route::NewContact(_) | Route::NewProduct | Route::NewAccount | Route::Journal | Route::Transfer => forms::view(app),

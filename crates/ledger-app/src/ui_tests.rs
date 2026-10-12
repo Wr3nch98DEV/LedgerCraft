@@ -1588,3 +1588,37 @@ fn desktop_doc_center() {
     assert!(matches!(app.route, Route::Doc { ref kind, id: Some(_) } if kind == "ACCPAY"));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_pay_liabilities() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("payliab");
+    // Make sure some withholding is owed: wages expense / withholding payable.
+    let all = app.be.call_now("accounts.list", json!({})).unwrap();
+    let wid = all.as_array().unwrap().iter().find(|a| a["system_account"] == "PAYGWITHHOLDING").unwrap()["id"].clone();
+    let exp = all.as_array().unwrap().iter().find(|a| a["system_account"] == "WAGESEXPENSE").unwrap()["id"].clone();
+    app.be.call_now("mj.save", json!({"id": null, "journal": {"date": crate::ui::today_iso(), "narration": "Withholding", "line_amount_type": "NOTAX", "status": "POSTED",
+        "lines": [{"account_id": exp, "description": "", "debit": "500", "credit": ""}, {"account_id": wid, "description": "", "debit": "", "credit": "500"}]}})).unwrap();
+    let _ = app.update(Message::Nav(Route::PayLiabilities));
+    let accts = app.be.call_now("accounts.list", json!({})).unwrap();
+    app.data = Some(accts.clone());
+    let w = accts.as_array().unwrap().iter().find(|a| a["system_account"] == "PAYGWITHHOLDING").unwrap().clone();
+    let owed = -w["ytd_balance"].as_i64().unwrap();
+    assert!(owed >= 50000, "withholding is owed");
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["Pay Liabilities", "PAYABLE TO", "Internal Revenue Service", "Create Payment"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    let id = w["id"].as_i64().unwrap();
+    let _ = app.update(Message::Desk(W::LiabPick(id, true)));
+    assert_eq!(app.desk.liab_pay[0].2, crate::ui::plain(owed), "defaults to the balance owed");
+    let _ = app.update(Message::Desk(W::LiabPay));
+    assert!(app.desk.tax_busy);
+    let bank = crate::payments::bank_only(&app)[0].id;
+    app.be.call_now("banktx.save", json!({"tx": {"type": "SPEND", "account_id": bank, "date": crate::ui::today_iso(), "reference": "Payroll liability payment", "contact_name": "Internal Revenue Service",
+        "line_amount_type": "NOTAX", "lines": [{"account_id": id, "description": "Payroll liability payment", "amount": crate::ui::plain(owed)}]}})).unwrap();
+    let after = app.be.call_now("accounts.list", json!({})).unwrap().as_array().unwrap().iter().find(|a| a["id"].as_i64() == Some(id)).unwrap()["ytd_balance"].as_i64().unwrap();
+    assert_eq!(after, 0, "liability cleared");
+    let _ = std::fs::remove_dir_all(dir);
+}

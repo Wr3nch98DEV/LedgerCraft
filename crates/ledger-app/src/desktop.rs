@@ -65,6 +65,8 @@ pub struct State {
     pub adj_account: Option<crate::app::Opt>,
     pub adj_memo: String,
     pub adj_busy: bool,
+    /// Pay Liabilities: per liability account (pay?, amount).
+    pub liab_pay: Vec<(i64, bool, String)>,
 }
 
 /// A transaction typed straight into the register.
@@ -75,7 +77,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay }
 
 impl App {
     /// Keep the current screen's unsaved state with its window.
@@ -155,6 +157,29 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, move |r| Message::Desk(Msg::Detail(id, r)))
         }
         Msg::ReportCat(c) => { app.desk.report_cat = Some(c); Task::none() }
+        Msg::LiabPick(id, on) => { liab_row(app, id).1 = on; Task::none() }
+        Msg::LiabAmt(id, v) => { let r = liab_row(app, id); r.2 = v; r.1 = true; Task::none() }
+        Msg::LiabPay => {
+            let Some(from) = app.desk.tax_from.clone().or_else(|| crate::payments::bank_only(app).into_iter().next()) else { return app.toast("Choose the account to pay from", true) };
+            let date_in = if app.desk.tax_date.is_empty() { app.d(&ui::today_iso()) } else { app.desk.tax_date.clone() };
+            let Some(date) = ui::to_iso(&date_in, app.date_style()) else { return app.toast("Check the payment date", true) };
+            let accts = liability_accounts(app);
+            let country = app.country();
+            let pays: Vec<(i64, String, String)> = app.desk.liab_pay.iter().filter(|(_, on, a)| *on && ui::parse_money(a).unwrap_or(0) > 0)
+                .filter_map(|(id, _, a)| accts.iter().find(|x| x["id"].as_i64() == Some(*id)).map(|x| (*id, liability_payee(x, &country), a.replace(',', "")))).collect();
+            if pays.is_empty() { return app.toast("Tick a liability and enter the amount to pay", true); }
+            let be = app.be.clone();
+            app.desk.tax_busy = true;
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                    for (acc, payee, amt) in &pays {
+                        be.call_now("banktx.save", serde_json::json!({"tx": {"type": "SPEND", "account_id": from.id, "date": date, "reference": "Payroll liability payment", "contact_name": payee, "line_amount_type": "NOTAX",
+                            "lines": [{"account_id": acc, "description": "Payroll liability payment", "amount": amt}]}}))?;
+                    }
+                    Ok(serde_json::json!({"paid": pays.len()}))
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Desk(Msg::TaxPaid(r)))
+        }
         Msg::DocAdd => {
             let be = app.be.clone();
             Task::perform(async move {
@@ -255,8 +280,9 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         }
         Msg::TaxPaid(r) => {
             app.desk.tax_busy = false;
+            app.desk.liab_pay.clear();
             match r {
-                Ok(v) => { app.desk.tax_pay.clear(); let t1 = app.toast(format!("{} sales tax payment(s) recorded", v["paid"].as_i64().unwrap_or(0)), false); let t2 = app.load_lookups(); let i = app.desk.active; Task::batch([t1, t2, app.close_window(i)]) }
+                Ok(v) => { app.desk.tax_pay.clear(); let t1 = app.toast(format!("{} payment(s) recorded", v["paid"].as_i64().unwrap_or(0)), false); let t2 = app.load_lookups(); let i = app.desk.active; Task::batch([t1, t2, app.close_window(i)]) }
                 Err(e) => app.toast(e, true),
             }
         }
@@ -415,6 +441,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::AdjustInventory => "Adjust Quantity/Value on Hand".into(),
         Route::Help => "LedgerCraft Help".into(),
         Route::DocCenter => "Doc Center".into(),
+        Route::PayLiabilities => "Pay Liabilities".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
             "ACCREC" => "Create Invoices", "QUOTE" => "Create Estimates", "ACCRECCREDIT" => "Create Credit Memos/Refunds", "SALESRECEIPT" => "Enter Sales Receipts",
@@ -481,7 +508,7 @@ fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Messag
             sep(), e("Sales Tax: Manage Sales Tax…", "", nav(Route::Taxes)), e("Sales Tax: Pay Sales Tax…", "", nav(Route::PaySalesTax)), sep(), e("Create Purchase Orders", "", doc_new("PO")), e("Purchase Orders List", "", nav(Route::PurchaseOrders)),
             sep(), e("Print/E-file 1099s: 1099 Summary", "", rep("contractor-1099")), e("Enter Bills for Received Items", "", None)],
         "Employees" => vec![e("Employee Center", "", nav(Route::Payroll)), e("Payroll Center", "", nav(Route::Payroll)), sep(), e("Pay Employees", "", nav(Route::Payroll)),
-            e("Pay Liabilities", "", None), e("Process Payroll Forms", "", None), sep(), e("Enter Time", "", None)],
+            e("Pay Liabilities", "", nav(Route::PayLiabilities)), e("Process Payroll Forms", "", None), sep(), e("Enter Time", "", None)],
         "Banking" => vec![e("Write Checks", "Ctrl+W", nav(Route::Check(None))), e("Order Checks & Envelopes", "", None), e("Enter Credit Card Charges", "", nav(Route::Spend(None))), sep(),
             e("Use Register", "Ctrl+R", nav(Route::Register(None))), e("Make Deposits", "", nav(Route::Deposit)), e("Transfer Funds", "", nav(Route::Transfer)), e("Reconcile", "", nav(Route::Reconcile)),
             sep(), e("Bank Feeds Center", "", nav(Route::Banking(None)))],
@@ -646,6 +673,75 @@ pub fn frame<'a>(app: &'a App, content: Element<'a, Message>) -> Element<'a, Mes
         layers = layers.push(container(opaque(container(list).padding(8).width(400).style(theme::menu))).padding(Padding { top: 72.0, left: 8.0, ..Padding::ZERO }));
     }
     layers.into()
+}
+
+// ---------------- Pay Liabilities ----------------
+
+/// Payroll liability accounts: tax withheld, pension/super, and other payroll deductions.
+fn liability_accounts(app: &App) -> Vec<Value> {
+    let src = app.data.as_ref().and_then(|d| d.as_array().cloned()).unwrap_or_else(|| app.lk.accounts.clone());
+    src.into_iter().filter(|a| a["status"] == "ACTIVE" && (matches!(a["system_account"].as_str(), Some("PAYGWITHHOLDING" | "SUPERPAYABLE"))
+        || (a["type"] == "CURRLIAB" && a["name"].as_str().unwrap_or("").to_lowercase().contains("payroll")))).collect()
+}
+
+/// Who a liability is usually paid to.
+fn liability_payee(a: &Value, country: &str) -> String {
+    match (a["system_account"].as_str(), country) {
+        (Some("PAYGWITHHOLDING"), "AU") => "Australian Taxation Office".into(), (Some("PAYGWITHHOLDING"), "US") => "Internal Revenue Service".into(),
+        (Some("PAYGWITHHOLDING"), "GB") => "HMRC".into(), (Some("PAYGWITHHOLDING"), "NZ") => "Inland Revenue".into(), (Some("PAYGWITHHOLDING"), _) => "Tax office".into(),
+        (Some("SUPERPAYABLE"), "AU") => "Superannuation fund".into(), (Some("SUPERPAYABLE"), _) => "Pension provider".into(),
+        _ => a["name"].as_str().unwrap_or("Payroll").to_string(),
+    }
+}
+
+/// The (pay?, amount) entry for a liability, created with the balance owed as the amount.
+fn liab_row(app: &mut App, id: i64) -> &mut (i64, bool, String) {
+    if let Some(i) = app.desk.liab_pay.iter().position(|r| r.0 == id) { return &mut app.desk.liab_pay[i]; }
+    let owed = -liability_accounts(app).iter().find(|a| a["id"].as_i64() == Some(id)).and_then(|a| a["ytd_balance"].as_i64()).unwrap_or(0);
+    app.desk.liab_pay.push((id, false, ui::plain(owed.max(0))));
+    app.desk.liab_pay.last_mut().unwrap()
+}
+
+/// Employees ▸ Pay Liabilities.
+pub fn pay_liabilities(app: &App) -> Element<'_, Message> {
+    let k = t();
+    if app.data.is_none() { return container(ui::muted("Loading…")).padding(20).into() }
+    let accts = liability_accounts(app);
+    let banks = crate::payments::bank_only(app);
+    let from = app.desk.tax_from.clone().or_else(|| banks.first().cloned());
+    let date = if app.desk.tax_date.is_empty() { app.d(&ui::today_iso()) } else { app.desk.tax_date.clone() };
+    let country = app.country();
+    let cols: Vec<(&str, u16, bool)> = vec![("Pay", 4, false), ("Payroll Item", 28, false), ("Payable To", 24, false), ("Balance", 12, true), ("Amt. To Pay", 14, true)];
+    let head = container(row(cols.iter().map(|(h, w, r)| {
+        let tx = text(h.to_uppercase()).size(11).font(BOLD).color(k.muted);
+        container(if *r { tx.align_x(iced::alignment::Horizontal::Right).width(Fill) } else { tx.width(Fill) }).width(Length::FillPortion(*w)).into()
+    })).spacing(8).padding([6, 10])).style(theme::header_row).width(Fill);
+    let mut list = column![head];
+    let mut total = 0;
+    for a in &accts {
+        let id = a["id"].as_i64().unwrap_or(0);
+        let owed = -a["ytd_balance"].as_i64().unwrap_or(0);
+        let (on, amt) = app.desk.liab_pay.iter().find(|r| r.0 == id).map(|r| (r.1, r.2.clone())).unwrap_or((false, ui::plain(owed.max(0))));
+        if on { total += ui::parse_money(&amt).unwrap_or(0); }
+        let cells: Vec<Element<Message>> = vec![
+            iced::widget::checkbox(on).on_toggle(move |v| Message::Desk(Msg::LiabPick(id, v))).into(),
+            ui::cell(a["name"].as_str().unwrap_or("").to_string()), ui::cell_muted(liability_payee(a, &country)), ui::cell_money(owed),
+            text_input("", &amt).on_input(move |v| Message::Desk(Msg::LiabAmt(id, v))).padding([4, 6]).size(13).align_x(iced::alignment::Horizontal::Right).style(theme::cell_input).into(),
+        ];
+        list = list.push(row(cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into())).spacing(8).align_y(Alignment::Center).padding([5, 10]));
+        list = list.push(ui::hr());
+    }
+    if accts.is_empty() { list = list.push(container(ui::muted("No payroll liabilities yet — they appear once a pay run is submitted.")).padding(16)); }
+    container(column![
+        text("Pay Liabilities").size(22).font(BOLD),
+        row![
+            column![text("PAY FROM ACCOUNT").size(11).font(BOLD).color(k.info), pick_list(banks, from, |a| Message::Desk(Msg::TaxFrom(a))).padding([5, 7]).text_size(13).style(theme::pick).width(280)].spacing(3),
+            column![text("CHECK DATE").size(11).font(BOLD).color(k.info), text_input("", &date).on_input(|v| Message::Desk(Msg::TaxDate(v))).padding([5, 7]).size(13).style(theme::input).width(130)].spacing(3),
+        ].spacing(20),
+        container(list).style(theme::card).width(Fill).clip(true),
+        row![ui::hspace(), text("Total").size(13).font(BOLD), text(ui::money(total)).size(14).font(BOLD)].spacing(12),
+        row![ui::hspace(), ui::btn_primary("Create Payment", if app.desk.tax_busy { None } else { Some(Message::Desk(Msg::LiabPay)) }), ui::btn("Cancel", Some(Message::Back))].spacing(8),
+    ].spacing(12)).padding(18).max_width(1100).into()
 }
 
 // ---------------- Doc Center ----------------
@@ -1574,7 +1670,7 @@ pub fn home(app: &App) -> Element<'_, Message> {
         row![node("receive", "Create Sales Receipts", doc_new("SALESRECEIPT")), gap(), node("list", "Statement Charges", doc_new("DELAYEDCHARGE")), arrow(), node("docs", "Statements", nav(Route::Statements)), gap(), node("refresh", "Refunds & Credits", doc_new("ACCRECCREDIT"))].align_y(Alignment::Start).into(),
     ]);
     let employees = band("EMPLOYEES", vec![
-        row![node("payroll", "Payroll Center", nav(Route::Payroll)), gap(), node("check-write", "Pay Employees", nav(Route::Payroll)), arrow(), node("taxes", "Pay Liabilities", None), arrow(), node("docs", "Process Payroll Forms", None)].align_y(Alignment::Start).into(),
+        row![node("payroll", "Payroll Center", nav(Route::Payroll)), gap(), node("check-write", "Pay Employees", nav(Route::Payroll)), arrow(), node("taxes", "Pay Liabilities", nav(Route::PayLiabilities)), arrow(), node("docs", "Process Payroll Forms", None)].align_y(Alignment::Start).into(),
     ]);
     let company = band("COMPANY", vec![
         row![node("accounting", "Chart of Accounts", nav(Route::Chart)), node("box", "Items & Services", nav(Route::Products))].into(),
