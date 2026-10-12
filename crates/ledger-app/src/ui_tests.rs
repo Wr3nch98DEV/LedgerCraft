@@ -1767,7 +1767,7 @@ fn every_screen_in_every_layout_loads() {
         Route::ReceivePayment(None), Route::PayBills, Route::Spend(None), Route::Check(None), Route::Deposit, Route::Transfer, Route::Journal,
         Route::NewContact(true), Route::NewProduct, Route::NewAccount, Route::Payroll, Route::Taxes, Route::Projects, Route::Mileage, Route::Reconcile,
         Route::Register(None), Route::Calendar, Route::Statements, Route::Memorized, Route::PaySalesTax, Route::AdjustInventory, Route::Help, Route::DocCenter,
-        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges];
+        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates];
     for layout in Layout::ALL {
         let (mut app, dir) = desktop_app(&format!("all-{}", layout.key()));
         let t = app.update(Message::SetLayout(layout));
@@ -2091,5 +2091,44 @@ fn render_route() {
     let _g = sim_lock();
     let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
     ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join("lc-route.png")).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn end_to_end_templates() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("e2e-templates");
+    let t = app.update(Message::Nav(Route::Templates)); settle(&mut app, t);
+    let n0 = app.data.as_ref().unwrap().as_array().unwrap().len();
+    assert!(n0 >= 1);
+    // Edit the default straight away (no click on it first) and save.
+    let _ = app.update(Message::Desk(W::TplField("invoice_title", "Tax Invoice (Custom)".into())));
+    press(&mut app, "Save Template");
+    let list = app.be.call_now("branding.list", json!({})).unwrap();
+    assert_eq!(list[0]["invoice_title"], "Tax Invoice (Custom)");
+    // A bad colour is refused.
+    let _ = app.update(Message::Desk(W::TplField("accent", "blue".into())));
+    let _ = app.update(Message::Desk(W::TplSave));
+    assert!(app.toasts.iter().any(|t| t.2), "bad colour refused");
+    app.toasts.clear();
+    let _ = app.update(Message::Desk(W::TplField("accent", "#2f6fb5".into())));
+    // New Template copies it; make it the default.
+    press(&mut app, "New Template");
+    let _ = app.update(Message::Desk(W::TplField("name", "Blue".into())));
+    let _ = app.update(Message::Desk(W::TplDefault(true)));
+    press(&mut app, "Save Template");
+    let list = app.be.call_now("branding.list", json!({})).unwrap();
+    assert_eq!(list.as_array().unwrap().len(), n0 + 1);
+    assert_eq!(list[0]["name"], "Blue", "new default listed first");
+    assert_eq!(list[0]["accent"], "#2f6fb5");
+    // The default can't be deleted; pick the old one and delete it.
+    let _ = app.update(Message::Desk(W::TplDelete));
+    assert!(app.toasts.iter().any(|t| t.2));
+    app.toasts.clear();
+    let old = list[1]["id"].as_i64().unwrap();
+    let _ = app.update(Message::Desk(W::TplPick(old)));
+    press(&mut app, "Delete");
+    assert_eq!(app.be.call_now("branding.list", json!({})).unwrap().as_array().unwrap().len(), n0);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
     let _ = std::fs::remove_dir_all(dir);
 }

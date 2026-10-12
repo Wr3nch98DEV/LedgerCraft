@@ -74,6 +74,8 @@ pub enum Route {
     OtherNames,
     /// QuickBooks Desktop Customers ▸ Assess Finance Charges.
     FinanceCharges,
+    /// QuickBooks Desktop Lists ▸ Templates (invoice/quote/PO form designs).
+    Templates,
     /// QuickBooks Desktop Enter Time (single activity against a project task).
     EnterTime,
     NewProduct,
@@ -225,7 +227,7 @@ pub fn parse_route(s: &str) -> Option<Route> {
         "customers" => Route::Customers, "products" => Route::Products, "expenses" => Route::Expenses, "bills" => Route::Bills, "vendors" => Route::Vendors,
         "pos" => Route::PurchaseOrders, "contacts" => Route::Contacts, "contact" => Route::Contact(id(1)?), "banking" => Route::Banking(id(1)), "chart" => Route::Chart,
         "reports" => Route::Reports, "report" => Route::Report(parts.get(1)?.to_string()), "settings" => Route::Settings, "setup" => Route::Setup,
-        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "adjustinventory" => Route::AdjustInventory, "help" => Route::Help, "memreports" => Route::MemorizedReports, "docs" => Route::DocCenter, "payliabilities" => Route::PayLiabilities, "classes" => Route::ClassList, "payitems" => Route::PayrollItems, "othernames" => Route::OtherNames, "financecharges" => Route::FinanceCharges, "time" => Route::EnterTime, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
+        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "adjustinventory" => Route::AdjustInventory, "help" => Route::Help, "memreports" => Route::MemorizedReports, "docs" => Route::DocCenter, "payliabilities" => Route::PayLiabilities, "classes" => Route::ClassList, "payitems" => Route::PayrollItems, "othernames" => Route::OtherNames, "financecharges" => Route::FinanceCharges, "templates" => Route::Templates, "time" => Route::EnterTime, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
         _ => return None,
     })
 }
@@ -478,6 +480,7 @@ impl App {
             Route::Calendar => crate::desktop::load_calendar(self),
             Route::ClassList => call("tracking.list", json!({})),
             Route::PayrollItems => call("payroll.settings", json!({})),
+            Route::Templates => call("branding.list", json!({})),
             Route::OtherNames => call("contacts.list", json!({"filter": "all"})),
             Route::FinanceCharges => call("docs.list", json!({"type": "ACCREC", "tab": "overdue", "limit": 2000})),
             Route::EnterTime => {

@@ -81,6 +81,9 @@ pub struct State {
     pub fc_date: String,
     pub fc_skip: Vec<i64>,
     pub fc_busy: bool,
+    /// Templates: the template being edited (a working copy of its row) and whether it's the default.
+    pub tpl: Option<Value>,
+    pub tpl_default: bool,
     /// Enter Time: project, task, date, duration (h:mm) and notes.
     pub time_project: Option<crate::app::Opt>,
     pub time_task: Option<crate::app::Opt>,
@@ -98,7 +101,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
     /// Remember the Desktop view choices (One Window, icon bar pane).
@@ -214,6 +217,48 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             if name.is_empty() { return app.toast("Enter the name", true); }
             app.be.call("contacts.create", serde_json::json!({"name": name}), |r| Message::Desk(Msg::ClassDone(r)))
         }
+        Msg::TplPick(id) => {
+            let row = app.data.as_ref().and_then(|d| d.as_array().cloned()).unwrap_or_default().into_iter().find(|t| t["id"].as_i64() == Some(id));
+            app.desk.tpl_default = row.as_ref().is_some_and(|r| r["is_default"].as_i64() == Some(1));
+            app.desk.tpl = row;
+            Task::none()
+        }
+        Msg::TplField(f, v) => { if let Some(t) = tpl_mut(app) { t[f] = Value::String(v); } Task::none() }
+        Msg::TplFlag(f, on) => { if let Some(t) = tpl_mut(app) { t[f] = serde_json::json!(on as i64); } Task::none() }
+        Msg::TplDefault(on) => { let _ = tpl_mut(app); app.desk.tpl_default = on; Task::none() }
+        Msg::TplNew => {
+            // A new template starts as a copy of the one on screen.
+            let mut t = app.desk.tpl.clone().unwrap_or_else(|| serde_json::json!({}));
+            let base = t["name"].as_str().unwrap_or("Template").to_string();
+            t["id"] = Value::Null; t["is_default"] = serde_json::json!(0); t["name"] = Value::String(format!("Copy of {base}"));
+            app.desk.tpl = Some(t); app.desk.tpl_default = false;
+            Task::none()
+        }
+        Msg::TplSave => {
+            let Some(t) = tpl_mut(app).cloned() else { return Task::none() };
+            if t["name"].as_str().unwrap_or("").trim().is_empty() { return app.toast("Give the template a name", true); }
+            let accent = t["accent"].as_str().unwrap_or("").trim().to_string();
+            if hex_color(&accent).is_none() { return app.toast("Enter the colour as a hex code like #2f6fb5", true); }
+            let flag = |k: &str| t[k].as_i64().map_or(true, |v| v == 1);
+            let theme_v = serde_json::json!({"name": t["name"].as_str().unwrap_or("").trim(), "font": t["font"].as_str().unwrap_or("Inter"), "accent": accent, "terms": t["terms"], "payment_instructions": t["payment_instructions"],
+                "invoice_title": t["invoice_title"], "credit_title": t["credit_title"], "quote_title": t["quote_title"], "po_title": t["po_title"], "logo_attachment_id": t["logo_attachment_id"],
+                "payment_advice": flag("payment_advice"), "show_tax_number": flag("show_tax_number")});
+            app.be.call("branding.save", serde_json::json!({"id": t["id"], "theme": theme_v, "default": app.desk.tpl_default}), |r| Message::Desk(Msg::TplDone(r)))
+        }
+        Msg::TplDelete => {
+            let Some(id) = tpl_mut(app).and_then(|t| t["id"].as_i64()) else { app.desk.tpl = None; return app.load() };
+            if app.desk.tpl_default { return app.toast("The default template can't be deleted — make another one the default first", true); }
+            app.desk.tpl = None;
+            app.be.call("branding.delete", serde_json::json!({"id": id}), |r| Message::Desk(Msg::TplDone(r)))
+        }
+        Msg::TplDone(r) => match r {
+            Ok(v) => {
+                if let (Some(t), Some(id)) = (app.desk.tpl.as_mut(), v["id"].as_i64()) { t["id"] = serde_json::json!(id); }
+                let t1 = app.toast("Template saved", false);
+                Task::batch([t1, app.load()])
+            }
+            Err(e) => app.toast(e, true),
+        },
         Msg::FcField(f, v) => { match f { 0 => app.desk.fc_rate = v, 1 => app.desk.fc_min = v, 2 => app.desk.fc_grace = v, _ => app.desk.fc_date = v } Task::none() }
         Msg::FcPick(id, on) => { app.desk.fc_skip.retain(|x| *x != id); if !on { app.desk.fc_skip.push(id); } Task::none() }
         Msg::FcAssess => {
@@ -566,6 +611,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::PayrollItems => "Payroll Item List".into(),
         Route::OtherNames => "Other Names List".into(),
         Route::FinanceCharges => "Assess Finance Charges".into(),
+        Route::Templates => "Templates".into(),
         Route::EnterTime => "Time/Enter Single Activity".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
@@ -618,7 +664,7 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
             e("My Shortcuts", "", Some(Message::Desk(Msg::Pane(Pane::Shortcuts)))), sep(), e(if app.dark { "Light Mode" } else { "Dark Mode" }, "Alt+T", Some(Message::ToggleTheme)), sep(),
             e("Switch to QuickBooks Online-style layout", "", Some(Message::SetLayout(theme::Layout::Online))), e("Switch to Xero-style layout", "", Some(Message::SetLayout(theme::Layout::Xero)))],
         "Lists" => vec![e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)), e("Item List", "", nav(Route::Products)), e("Fixed Asset Item List", "", rep("fixed-asset-register")), e("Price Level List", "", None),
-            e("Sales Tax Code List", "", nav(Route::Taxes)), e("Payroll Item List", "", nav(Route::PayrollItems)), e("Class List", "", nav(Route::ClassList)), e("Other Names List", "", nav(Route::OtherNames)), e("Templates", "", None), e("Memorized Transaction List", "Ctrl+T", nav(Route::Memorized))],
+            e("Sales Tax Code List", "", nav(Route::Taxes)), e("Payroll Item List", "", nav(Route::PayrollItems)), e("Class List", "", nav(Route::ClassList)), e("Other Names List", "", nav(Route::OtherNames)), e("Templates", "", nav(Route::Templates)), e("Memorized Transaction List", "Ctrl+T", nav(Route::Memorized))],
         "Favorites" => vec![e("Customize Favorites…", "", None)],
         "Company" => vec![e("Home Page", "", nav(Route::Dashboard)), e("Company Snapshot", "", Some(Message::Desk(Msg::Insights(true)))), sep(), e("My Company", "", nav(Route::Settings)),
             e("Company Information…", "", nav(Route::Settings)), e("Set Up Users and Roles…", "", nav(Route::Settings)), sep(), e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)),
@@ -867,6 +913,78 @@ pub fn other_names(app: &App) -> Element<'_, Message> {
         ui::hspace(),
         text("Owners, partners and one-off payees. A name becomes a customer or vendor once you transact with it.").size(12).color(k.muted).into(),
     ])
+}
+
+/// The template being edited, starting a working copy of the default the first time it's changed.
+fn tpl_mut(app: &mut App) -> Option<&mut Value> {
+    if app.desk.tpl.is_none() {
+        let first = app.data.as_ref().and_then(|d| d.as_array().and_then(|a| a.first().cloned()))?;
+        app.desk.tpl_default = first["is_default"].as_i64() == Some(1);
+        app.desk.tpl = Some(first);
+    }
+    app.desk.tpl.as_mut()
+}
+
+fn hex_color(s: &str) -> Option<iced::Color> {
+    let h = s.trim().trim_start_matches('#');
+    if h.len() != 6 { return None; }
+    u32::from_str_radix(h, 16).ok().map(hexc)
+}
+
+/// Lists ▸ Templates: the invoice, quote, credit note and purchase order designs.
+pub fn templates(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let list = d.as_array().cloned().unwrap_or_default();
+    // Show the default template until another is picked.
+    let cur = app.desk.tpl.clone().or_else(|| list.first().cloned());
+    let cur_id = cur.as_ref().and_then(|t| t["id"].as_i64());
+    let mut names = column![row![text("TEMPLATE NAME").size(11).font(BOLD).color(k.muted), ui::hspace(), text("DEFAULT").size(11).font(BOLD).color(k.muted)].padding([6, 10])].spacing(1);
+    for tpl in &list {
+        let id = tpl["id"].as_i64().unwrap_or(0);
+        let on = Some(id) == cur_id;
+        names = names.push(button(row![text(tpl["name"].as_str().unwrap_or("").to_string()).size(13), ui::hspace(), text(if tpl["is_default"].as_i64() == Some(1) { "✓" } else { "" }).size(13)])
+            .style(theme::nav_item(on)).padding([6, 10]).width(Fill).on_press(Message::Desk(Msg::TplPick(id))));
+    }
+    if cur.as_ref().is_some_and(|t| t["id"].is_null()) { names = names.push(container(text(cur.as_ref().unwrap()["name"].as_str().unwrap_or("").to_string()).size(13).font(BOLD)).padding([6, 10])); }
+    let left = container(column![scrollable(names).height(Fill).style(theme::scroll),
+        row![ui::btn("New Template", Some(Message::Desk(Msg::TplNew))), ui::btn("Delete", Some(Message::Desk(Msg::TplDelete)))].spacing(8)].spacing(8)).padding(10).width(300).height(Fill).style(theme::card);
+    let Some(tp) = cur else { return container(row![left, ui::muted("No templates.")].spacing(14)).padding(18).into() };
+    // Editing works on a working copy, started from the row on the first change.
+    let editing = app.desk.tpl.is_some();
+    let v = |f: &str| tp[f].as_str().unwrap_or("").to_string();
+    let lbl = |s: &'static str| text(s).size(11).font(BOLD).color(k.info);
+    let input = move |label: &'static str, f: &'static str, val: String, w: f32| -> Element<'_, Message> {
+        column![lbl(label), text_input("", &val).on_input(move |x| Message::Desk(Msg::TplField(f, x)))
+            .padding([5, 7]).size(13).style(theme::input).width(Length::Fixed(w))].spacing(3).into()
+    };
+    let flag = |f: &str| tp[f].as_i64().map_or(true, |x| x == 1);
+    let accent = hex_color(&v("accent")).unwrap_or(k.accent);
+    // A small preview of the form header in the template's colour.
+    let preview = container(column![
+        row![text(if v("invoice_title").is_empty() { "Invoice".to_string() } else { v("invoice_title") }).size(22).font(BOLD).color(accent), ui::hspace(), text(app.org_name()).size(13).font(BOLD).color(hexc(0x222222))],
+        container(Space::new()).height(3).width(Fill).style(move |_: &iced::Theme| container::Style { background: Some(iced::Background::Color(accent)), ..Default::default() }),
+        row![text("Description").size(11).font(BOLD).color(hexc(0x555555)), ui::hspace(), text("Amount").size(11).font(BOLD).color(hexc(0x555555))],
+        row![text("Consulting services").size(12).color(hexc(0x222222)), ui::hspace(), text("1,250.00").size(12).color(hexc(0x222222))],
+        text(if v("terms").is_empty() { "Thank you for your business.".to_string() } else { v("terms") }).size(11).color(hexc(0x666666)),
+    ].spacing(8)).padding(18).width(420).style(|_: &iced::Theme| container::Style { background: Some(iced::Background::Color(iced::Color::WHITE)), border: iced::Border { radius: 4.0.into(), ..Default::default() }, ..Default::default() });
+    let form = column![
+        row![input("TEMPLATE NAME", "name", v("name"), 260.0), input("COLOUR (HEX)", "accent", v("accent"), 120.0),
+            container(Space::new()).width(24).height(24).style(move |_: &iced::Theme| container::Style { background: Some(iced::Background::Color(accent)), border: iced::Border { radius: 4.0.into(), ..Default::default() }, ..Default::default() })].spacing(14).align_y(Alignment::End),
+        row![input("INVOICE TITLE", "invoice_title", v("invoice_title"), 180.0), input("CREDIT MEMO TITLE", "credit_title", v("credit_title"), 180.0),
+            input("ESTIMATE TITLE", "quote_title", v("quote_title"), 180.0), input("PURCHASE ORDER TITLE", "po_title", v("po_title"), 180.0)].spacing(14),
+        input("TERMS / FOOTER MESSAGE", "terms", v("terms"), 760.0),
+        input("PAYMENT INSTRUCTIONS", "payment_instructions", v("payment_instructions"), 760.0),
+        row![
+            iced::widget::checkbox(flag("show_tax_number")).label("Print the company tax number").on_toggle(|on| Message::Desk(Msg::TplFlag("show_tax_number", on))).text_size(13),
+            iced::widget::checkbox(flag("payment_advice")).label("Include a payment stub").on_toggle(|on| Message::Desk(Msg::TplFlag("payment_advice", on))).text_size(13),
+            iced::widget::checkbox(if editing { app.desk.tpl_default } else { tp["is_default"].as_i64() == Some(1) }).label("Use as the default template").on_toggle(|on| Message::Desk(Msg::TplDefault(on))).text_size(13),
+        ].spacing(24),
+        row![ui::hspace(), ui::btn_primary("Save Template", Some(Message::Desk(Msg::TplSave))), ui::btn("Close", Some(Message::Back))].spacing(8),
+        text("PREVIEW").size(11).font(BOLD).color(k.info),
+        preview,
+    ].spacing(14);
+    container(row![left, container(scrollable(form).style(theme::scroll)).padding(16).width(Fill).height(Fill).style(theme::card)].spacing(14)).padding(18).height(Fill).into()
 }
 
 fn fc_date(app: &App) -> String { if app.desk.fc_date.is_empty() { app.d(&ui::today_iso()) } else { app.desk.fc_date.clone() } }

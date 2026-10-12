@@ -305,7 +305,7 @@ fn file_section(_app: &App) -> Element<'_, Message> {
     ui::card(column![
         ui::h2("Company file"),
         row![ui::muted("Open a different company or create a new one."), ui::hspace(), ui::btn("Switch company", Some(Message::Nav(Route::Setup)))].align_y(Alignment::Center),
-        ui::muted("Invoice branding, bank feeds, currencies and other advanced settings are still in the web version (start.bat web) during the native rewrite."),
+        ui::muted("Invoice templates are in Lists ▸ Templates. Bank feeds, currencies and other advanced settings are still in the web version (start.bat web) during the native rewrite."),
     ].spacing(10))
 }
 
