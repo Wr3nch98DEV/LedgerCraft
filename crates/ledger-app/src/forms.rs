@@ -41,12 +41,14 @@ pub struct State {
     pub last: String,
     pub address: String,
     pub new_after: bool,
+    /// Desktop New Customer: price level (Payment Settings).
+    pub price_level: Option<Opt>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Msg {
     Name(String), Email(String), Phone(String), Code(String), Price(String), Cost(String),
-    SaleAccount(Opt), PurchaseAccount(Opt), Tax(Opt), Service(bool), Track1099(bool),
+    SaleAccount(Opt), PurchaseAccount(Opt), Tax(Opt), Service(bool), Track1099(bool), PriceLevel(Opt),
     Date(String), Memo(String), From(Opt), To(Opt), Amount(String), First(String), Last(String), Address(String), SaveNew, AcctType(String), Detail(String), JAccount(usize, Opt), JDesc(usize, String), JDebit(usize, String), JCredit(usize, String), AddLine,
     Save, Saved(Result<Value, String>),
 }
@@ -82,6 +84,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::Tax(x) => { s.tax = Some(x); Task::none() }
         Msg::Service(v) => { s.service = v; Task::none() }
         Msg::Track1099(v) => { s.track_1099 = v; Task::none() }
+        Msg::PriceLevel(p) => { s.price_level = Some(p); Task::none() }
         Msg::Date(v) => { s.date = v; Task::none() }
         Msg::From(v) => { s.from = Some(v); Task::none() }
         Msg::To(v) => { s.to = Some(v); Task::none() }
@@ -109,7 +112,8 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                 Route::NewContact(_) => {
                     if s.name.trim().is_empty() { app.form = Some(s); return app.toast("Enter a name", true); }
                     ("contacts.create", json!({"name": s.name.trim(), "email": s.email.trim(), "phone": s.phone.trim(), "is_customer": s.customer, "is_supplier": !s.customer,
-                        "first_name": s.first.trim(), "last_name": s.last.trim(), "postal_address": s.address.trim()}))
+                        "first_name": s.first.trim(), "last_name": s.last.trim(), "postal_address": s.address.trim(),
+                        "price_level_id": s.price_level.as_ref().map(|p| p.id).filter(|id| *id > 0)}))
                 }
                 Route::Transfer => {
                     let (Some(f), Some(t)) = (s.from.clone(), s.to.clone()) else { app.form = Some(s); return app.toast("Choose both accounts", true) };

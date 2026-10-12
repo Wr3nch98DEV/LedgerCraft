@@ -2181,6 +2181,13 @@ fn end_to_end_price_levels() {
     let t = app.update(Message::Doc(D::Contact(other))); settle(&mut app, t);
     let t = app.update(Message::Doc(D::Item(0, iopt))); settle(&mut app, t);
     assert_eq!(crate::doc::parse_e4(&app.doc.as_ref().unwrap().lines[0].price).unwrap(), base);
+    // New Customer ▸ Price Level.
+    let t = app.update(Message::Nav(Route::NewContact(true))); settle(&mut app, t);
+    let _ = app.update(Message::Form(crate::forms::Msg::Name("Trade Buyer Pty".into())));
+    let _ = app.update(Message::Form(crate::forms::Msg::PriceLevel(crate::app::Opt { id: levels[0]["id"].as_i64().unwrap(), label: "Wholesale".into() })));
+    press(&mut app, "Save & Close");
+    let tb = app.lk.contacts.iter().find(|c| c["name"] == "Trade Buyer Pty").expect("customer saved").clone();
+    assert_eq!(tb["price_level_id"], levels[0]["id"]);
     // Deleting the level puts the customer back on standard prices.
     let t = app.update(Message::Nav(Route::PriceLevels)); settle(&mut app, t);
     let t = app.update(Message::Desk(W::PlDelete(levels[0]["id"].as_i64().unwrap()))); settle(&mut app, t);

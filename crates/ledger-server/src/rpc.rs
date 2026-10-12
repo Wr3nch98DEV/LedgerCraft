@@ -180,7 +180,12 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
         "contacts.list" => { need("contacts:read")?; Ok(json!(l.list_contacts(p["filter"].as_str().unwrap_or("all"), s(p, "q"))?)) }
         "contacts.get" => { need("contacts:read")?; Ok(l.get_contact(id(p)?)?) }
         "contacts.activity" => { need("contacts:read")?; Ok(json!(l.contact_activity(id(p)?)?)) }
-        "contacts.create" => { need("contacts:write")?; Ok(json!({"id": l.create_contact(&de::<ContactInput>(p)?)?})) }
+        "contacts.create" => {
+            need("contacts:write")?;
+            let cid = l.create_contact(&de::<ContactInput>(p)?)?;
+            if let Some(level) = oi(p, "price_level_id") { l.set_contact_price_level(cid, Some(level))?; }
+            Ok(json!({"id": cid}))
+        }
         "contacts.update" => { need("contacts:write")?; l.update_contact(id(p)?, &de::<ContactInput>(&p["contact"])?)?; ok() }
         "contacts.setStatus" => { need("contacts:write")?; l.set_contact_status(id(p)?, s(p, "status"))?; ok() }
         "contacts.merge" => { need("contacts:write")?; l.merge_contacts(i(p, "from")?, i(p, "into")?)?; ok() }

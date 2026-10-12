@@ -55,6 +55,11 @@ fn contact<'a>(app: &'a App, s: &'a State, customer: bool) -> Element<'a, Messag
         column![label(if customer { "Invoice/Bill To" } else { "Billed From" }),
             text_input("Street, city, state, ZIP", &s.address).on_input(|v| Message::Form(Msg::Address(v))).padding([5, 7]).size(13).style(theme::input).width(Length::Fixed(520.0))].spacing(3),
     ].spacing(12);
+    if customer && !app.lk.price_levels.is_empty() {
+        let mut opts = vec![Opt { id: 0, label: "(standard prices)".into() }];
+        opts.extend(app.lk.price_levels.iter().map(|p| Opt { id: p["id"].as_i64().unwrap_or(0), label: p["name"].as_str().unwrap_or("").to_string() }));
+        fields = fields.push(column![label("Price Level"), pick_list(opts, s.price_level.clone(), |o| Message::Form(Msg::PriceLevel(o))).placeholder("(standard prices)").padding([5, 7]).text_size(13).style(theme::pick).width(240)].spacing(3));
+    }
     if !customer && app.country() == "US" {
         fields = fields.push(checkbox(s.track_1099).label("Vendor eligible for 1099").on_toggle(|v| Message::Form(Msg::Track1099(v))).text_size(13));
     }
