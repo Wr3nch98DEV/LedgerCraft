@@ -2821,3 +2821,15 @@ fn receive_payment_auto_applies_oldest_first() {
     assert!(app.pay.as_ref().unwrap().docs.iter().all(|d| !d.pick && d.amount.is_empty()));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn pay_bills_select_all_and_clear() {
+    let (mut app, dir) = desktop_app("paybills-all");
+    let t = app.update(Message::Nav(Route::PayBills)); settle(&mut app, t);
+    assert!(app.pay.as_ref().unwrap().docs.len() >= 2);
+    press(&mut app, "Select All Bills");
+    assert!(app.pay.as_ref().unwrap().docs.iter().all(|d| d.pick && crate::ui::parse_money(&d.amount) == Some(d.due)));
+    press(&mut app, "Clear Selections");
+    assert!(app.pay.as_ref().unwrap().docs.iter().all(|d| !d.pick));
+    let _ = std::fs::remove_dir_all(dir);
+}

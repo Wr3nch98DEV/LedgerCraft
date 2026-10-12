@@ -73,6 +73,8 @@ pub enum Msg {
     /// Receive Payments: the payment amount typed; Un-Apply Payment.
     PayTotal(String),
     Unapply,
+    /// Pay Bills: Select All Bills (pay each in full).
+    SelectAll,
     Printed(Result<String, String>),
 }
 
@@ -221,6 +223,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             s.pay_total = v;
             Task::none()
         }
+        Msg::SelectAll => { for d in s.docs.iter_mut() { d.pick = true; d.amount = ui::plain(d.due); } Task::none() }
         Msg::Unapply => { for d in s.docs.iter_mut() { d.pick = false; d.amount.clear(); } s.pay_total.clear(); Task::none() }
         Msg::Pick(n, on) => { s.pay_total.clear(); let d = &mut s.docs[n]; d.pick = on; d.amount = if on { ui::plain(d.due) } else { String::new() }; Task::none() }
         Msg::Amount(n, a) => { s.pay_total.clear(); let d = &mut s.docs[n]; d.pick = ui::parse_money(&a).unwrap_or(0) > 0; d.amount = a; Task::none() }

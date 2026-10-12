@@ -201,7 +201,8 @@ fn pay_bills<'a>(app: &'a App, s: &'a State) -> Element<'a, Message> {
     column![
         text("Select Bills to Be Paid").size(16).font(BOLD),
         container(scrollable(grid).style(theme::scroll)).height(Length::Fixed(300.0)).style(theme::card).width(Fill).clip(true),
-        row![ui::hspace(), text("Totals").size(13).font(BOLD), text(ui::money(total)).size(14).font(BOLD)].spacing(16),
+        row![ui::btn("Select All Bills", Some(Message::Pay(Msg::SelectAll))), ui::btn("Clear Selections", Some(Message::Pay(Msg::Unapply))),
+            ui::hspace(), text("Totals").size(13).font(BOLD), text(ui::money(total)).size(14).font(BOLD)].spacing(16).align_y(Alignment::Center),
         container(column![
             text("Payment").size(14).font(BOLD),
             row![
