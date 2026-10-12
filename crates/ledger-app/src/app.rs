@@ -353,7 +353,8 @@ impl App {
             Route::NewContact(_) | Route::NewProduct | Route::Journal | Route::Transfer => forms::open(self),
             Route::Payroll | Route::PayRun(_) | Route::Taxes | Route::TaxReturn(_) | Route::Projects | Route::Mileage => people::load(self),
             Route::Setup => setup::load(self),
-            Route::Settings | Route::Placeholder(_) | Route::Login => Task::none(),
+            Route::Settings => crate::settings::load(self),
+            Route::Placeholder(_) | Route::Login => Task::none(),
         }
     }
 

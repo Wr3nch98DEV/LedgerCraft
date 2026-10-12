@@ -1,34 +1,95 @@
-//! Settings: layout (QuickBooks-style / Xero-style), theme and company details.
+//! Settings: layout (QuickBooks-style / Xero-style), theme, company details, users and email.
 
 use crate::app::{App, Message, Route};
+use crate::backend::Reply;
 use crate::icons::icon;
-use crate::theme::{Skin, t};
+use crate::theme::{self, Skin, t};
 use crate::ui::{self, BOLD};
-use iced::widget::{button, column, container, row, text};
-use iced::{Alignment, Element, Fill, Task};
-use serde_json::json;
+use iced::widget::{button, column, container, pick_list, row, text};
+use iced::{Alignment, Element, Fill, Length, Task};
+use serde_json::{Value, json};
 
 /// Editable company fields (settings key, label).
 pub const FIELDS: [(&str, &str); 7] = [("org_name", "Company name"), ("legal_name", "Legal name"), ("tax_number", "Tax number (EIN / ABN / VAT)"), ("email", "Company email"),
     ("phone", "Phone"), ("website", "Website"), ("address", "Address")];
 
+/// Outgoing mail fields (settings key, label). The password is write-only.
+pub const SMTP: [(&str, &str); 5] = [("smtp_host", "SMTP server"), ("smtp_port", "Port"), ("smtp_user", "User name"), ("smtp_pass", "Password"), ("smtp_from", "Send from (email address)")];
+
+/// Engine roles, in the order offered.
+pub const ROLES: [&str; 4] = ["ADVISER", "STANDARD", "INVOICE_ONLY", "READONLY"];
+
+/// A role as each product names it.
+pub fn role_label(skin: Skin, role: &str) -> &'static str {
+    let qb = skin == Skin::QuickBooks;
+    match role {
+        "ADVISER" => if qb { "Admin" } else { "Adviser" },
+        "STANDARD" => if qb { "Standard (all access)" } else { "Standard" },
+        "INVOICE_ONLY" => "Invoice only",
+        "READONLY" => if qb { "Reports only" } else { "Read only" },
+        _ => "Custom",
+    }
+}
+
+/// Connection security for outgoing mail (the engine's `smtp_tls` values).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Security { #[default] StartTls, Tls, None }
+impl Security {
+    pub const ALL: [Security; 3] = [Security::StartTls, Security::Tls, Security::None];
+    pub fn key(self) -> &'static str { match self { Security::StartTls => "STARTTLS", Security::Tls => "TLS", Security::None => "NONE" } }
+    pub fn from_key(s: &str) -> Security { match s { "TLS" => Security::Tls, "NONE" => Security::None, _ => Security::StartTls } }
+}
+impl std::fmt::Display for Security {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self { Security::StartTls => "STARTTLS (port 587)", Security::Tls => "TLS (port 465)", Security::None => "None (local relay)" })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RoleOpt { pub key: &'static str, pub label: &'static str }
+impl std::fmt::Display for RoleOpt { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(self.label) } }
+
 #[derive(Default)]
-pub struct State { pub values: Vec<String>, pub editing: bool, pub busy: bool }
+pub struct State {
+    pub values: Vec<String>,
+    pub editing: bool,
+    pub busy: bool,
+    pub users: Vec<Value>,
+    pub users_error: Option<String>,
+    pub adding: bool,
+    pub u_name: String,
+    pub u_email: String,
+    pub u_role: Option<&'static str>,
+    pub smtp: Vec<String>,
+    pub smtp_tls: Security,
+    pub smtp_editing: bool,
+    pub test_to: String,
+}
 
 #[derive(Debug, Clone)]
-pub enum Msg { Edit, Field(usize, String), Save, Saved(Result<serde_json::Value, String>), Cancel }
+pub enum Msg {
+    Edit, Field(usize, String), Save, Saved(Result<Value, String>), Cancel,
+    Users(Reply), AddUser, UName(String), UEmail(String), URole(RoleOpt), SaveUser, UserSaved(Reply), SetActive(i64, bool),
+    EditSmtp, Smtp(usize, String), SmtpTls(Security), SaveSmtp, SmtpSaved(Reply), TestTo(String), SendTest, TestSent(Reply),
+}
+
+pub fn load(app: &mut App) -> Task<Message> {
+    app.settings.adding = false;
+    app.settings.smtp_editing = false;
+    app.be.call("users.list", json!({}), |r| Message::Settings(Msg::Users(r)))
+}
 
 pub fn update(app: &mut App, m: Msg) -> Task<Message> {
     match m {
         Msg::Edit => { app.settings.values = FIELDS.iter().map(|(k, _)| app.setting(k)).collect(); app.settings.editing = true; Task::none() }
         Msg::Field(n, v) => { if let Some(x) = app.settings.values.get_mut(n) { *x = v; } Task::none() }
-        Msg::Cancel => { app.settings.editing = false; Task::none() }
+        Msg::Cancel => { app.settings.editing = false; app.settings.adding = false; app.settings.smtp_editing = false; Task::none() }
         Msg::Save => {
             if app.settings.values.first().map(|v| v.trim().is_empty()).unwrap_or(true) { return app.toast("Company name can't be empty", true); }
             let mut p = serde_json::Map::new();
             for ((k, _), v) in FIELDS.iter().zip(app.settings.values.iter()) { p.insert(k.to_string(), json!(v.trim())); }
             app.settings.busy = true;
-            app.be.call("settings.update", serde_json::Value::Object(p), |r| Message::Settings(Msg::Saved(r)))
+            app.be.call("settings.update", Value::Object(p), |r| Message::Settings(Msg::Saved(r)))
         }
         Msg::Saved(r) => {
             app.settings.busy = false;
@@ -36,6 +97,74 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                 Ok(_) => { app.settings.editing = false; let t = app.toast("Company details saved", false); Task::batch([t, app.be.call("session.get", json!({}), Message::Session)]) }
                 Err(e) => app.toast(e, true),
             }
+        }
+        // ---- users ----
+        Msg::Users(r) => {
+            match r {
+                Ok(v) => { app.settings.users = v.as_array().cloned().unwrap_or_default(); app.settings.users_error = None; }
+                Err(e) => { app.settings.users.clear(); app.settings.users_error = Some(e); }
+            }
+            Task::none()
+        }
+        Msg::AddUser => { app.settings.adding = true; app.settings.u_name.clear(); app.settings.u_email.clear(); app.settings.u_role = Some("STANDARD"); Task::none() }
+        Msg::UName(v) => { app.settings.u_name = v; Task::none() }
+        Msg::UEmail(v) => { app.settings.u_email = v; Task::none() }
+        Msg::URole(r) => { app.settings.u_role = Some(r.key); Task::none() }
+        Msg::SaveUser => {
+            let s = &app.settings;
+            if s.u_name.trim().is_empty() { return app.toast("Enter the person's name", true); }
+            if !s.u_email.contains('@') { return app.toast("Enter a valid email address", true); }
+            let body = json!({"name": s.u_name.trim(), "email": s.u_email.trim(), "role": s.u_role.unwrap_or("STANDARD")});
+            app.settings.busy = true;
+            app.be.call("users.create", body, |r| Message::Settings(Msg::UserSaved(r)))
+        }
+        Msg::UserSaved(r) => {
+            app.settings.busy = false;
+            match r {
+                Ok(_) => { app.settings.adding = false; let t1 = app.toast("User added", false); Task::batch([t1, app.be.call("users.list", json!({}), |r| Message::Settings(Msg::Users(r)))]) }
+                Err(e) => app.toast(e, true),
+            }
+        }
+        Msg::SetActive(id, on) => app.be.call("users.setActive", json!({"id": id, "active": on}), move |r| Message::Settings(Msg::UserSaved(r.map(|_| json!({"active": on}))))),
+        // ---- email ----
+        Msg::EditSmtp => {
+            app.settings.smtp = SMTP.iter().map(|(k, _)| if *k == "smtp_pass" { String::new() } else { app.setting(k) }).collect();
+            app.settings.smtp_tls = Security::from_key(&app.setting("smtp_tls"));
+            app.settings.smtp_editing = true;
+            Task::none()
+        }
+        Msg::Smtp(n, v) => { if let Some(x) = app.settings.smtp.get_mut(n) { *x = v; } Task::none() }
+        Msg::SmtpTls(v) => { app.settings.smtp_tls = v; Task::none() }
+        Msg::SaveSmtp => {
+            let mut p = serde_json::Map::new();
+            for ((k, _), v) in SMTP.iter().zip(app.settings.smtp.iter()) {
+                // A blank password keeps the saved one.
+                if *k == "smtp_pass" && v.is_empty() { continue; }
+                p.insert(k.to_string(), json!(v.trim()));
+            }
+            if let Some(port) = p.get("smtp_port").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                if port.parse::<u16>().is_err() { return app.toast("The port must be a number, e.g. 587", true); }
+            }
+            p.insert("smtp_tls".into(), json!(app.settings.smtp_tls.key()));
+            app.settings.busy = true;
+            app.be.call("settings.update", Value::Object(p), |r| Message::Settings(Msg::SmtpSaved(r)))
+        }
+        Msg::SmtpSaved(r) => {
+            app.settings.busy = false;
+            match r {
+                Ok(_) => { app.settings.smtp_editing = false; let t = app.toast("Email settings saved", false); Task::batch([t, app.be.call("session.get", json!({}), Message::Session)]) }
+                Err(e) => app.toast(e, true),
+            }
+        }
+        Msg::TestTo(v) => { app.settings.test_to = v; Task::none() }
+        Msg::SendTest => {
+            if !app.settings.test_to.contains('@') { return app.toast("Enter an address to send the test to", true); }
+            app.settings.busy = true;
+            app.be.call("email.test", json!({"to": app.settings.test_to.trim()}), |r| Message::Settings(Msg::TestSent(r)))
+        }
+        Msg::TestSent(r) => {
+            app.settings.busy = false;
+            match r { Ok(_) => app.toast("Test email sent", false), Err(e) => app.toast(format!("Couldn't send: {e}"), true) }
         }
     }
 }
@@ -56,6 +185,70 @@ fn layout_card<'a>(app: &App, skin: Skin, desc: &'a str) -> Element<'a, Message>
             border: iced::Border { color: if active { k.accent } else { k.line }, width: if active { 2.0 } else { 1.0 }, radius: 8.0.into() }, shadow: Default::default(), snap: true }
     })
     .into()
+}
+
+fn users_card(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let qb = app.skin == Skin::QuickBooks;
+    let s = &app.settings;
+    let mut col = column![row![ui::h2(if qb { "Manage users" } else { "Users" }), ui::hspace(),
+        if s.users_error.is_none() && !s.adding { ui::btn_primary(if qb { "Add user" } else { "Invite a user" }, Some(Message::Settings(Msg::AddUser))) } else { iced::widget::Space::new().into() }].align_y(Alignment::Center)].spacing(10);
+    if let Some(e) = &s.users_error {
+        return ui::card(col.push(ui::muted(format!("You can't manage users: {e}"))));
+    }
+    if s.adding {
+        let roles: Vec<RoleOpt> = ROLES.iter().map(|r| RoleOpt { key: r, label: role_label(app.skin, r) }).collect();
+        let sel = s.u_role.map(|r| RoleOpt { key: r, label: role_label(app.skin, r) });
+        col = col.push(container(column![
+            row![ui::field("Name", &s.u_name, |v| Message::Settings(Msg::UName(v))), ui::field("Email", &s.u_email, |v| Message::Settings(Msg::UEmail(v))),
+                column![ui::label(if qb { "User type" } else { "Role" }), pick_list(roles, sel, |r| Message::Settings(Msg::URole(r))).padding([7, 10]).text_size(14).style(theme::pick).width(Fill)].spacing(5).width(Fill)].spacing(14),
+            ui::muted("They sign in with their email; set a password for them from the web version's Users page or they set one on first sign-in."),
+            row![ui::hspace(), ui::btn("Cancel", Some(Message::Settings(Msg::Cancel))), ui::btn_primary("Save", if s.busy { None } else { Some(Message::Settings(Msg::SaveUser)) })].spacing(8),
+        ].spacing(10)).padding(14).style(theme::soft).width(Fill));
+    }
+    let rows: Vec<(Vec<Element<Message>>, Option<Message>)> = s.users.iter().map(|u| {
+        let id = u["id"].as_i64().unwrap_or(0);
+        let active = u["active"].as_i64().map(|a| a != 0).or_else(|| u["active"].as_bool()).unwrap_or(true);
+        let status: Element<Message> = if active { ui::chip("Active", k.ok) } else { ui::chip("Inactive", k.muted) };
+        let action: Element<Message> = if id == 1 { ui::cell_muted(if qb { "Primary admin" } else { "Owner" }) }
+            else { ui::btn(if active { "Deactivate" } else { "Reactivate" }, Some(Message::Settings(Msg::SetActive(id, !active)))) };
+        (vec![ui::cell(u["name"].as_str().unwrap_or("").to_string()), ui::cell_muted(u["email"].as_str().unwrap_or("").to_string()),
+            ui::cell(role_label(app.skin, u["role"].as_str().unwrap_or(""))), status, action], None)
+    }).collect();
+    col = col.push(ui::table(&[ui::col("Name", 20), ui::col("Email", 26), ui::col(if qb { "User type" } else { "Role" }, 18), ui::col("Status", 10), ui::col("", 14)], rows, "No users."));
+    ui::card(col)
+}
+
+fn email_card(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let s = &app.settings;
+    let configured = !app.setting("smtp_host").is_empty();
+    if s.smtp_editing {
+        let mut col = column![ui::h2("Email (outgoing mail)"), ui::muted("Invoices, statements and reminders are sent through your own mail server. For Gmail use smtp.gmail.com, port 587 and an app password.")].spacing(12);
+        let field = |n: usize| -> Element<'_, Message> {
+            let (key, label) = SMTP[n];
+            let ph = if key == "smtp_pass" && configured { "Leave blank to keep the saved password" } else { "" };
+            let input = iced::widget::text_input(ph, s.smtp.get(n).map(|x| x.as_str()).unwrap_or("")).on_input(move |v| Message::Settings(Msg::Smtp(n, v))).padding([7, 10]).size(14).style(theme::input);
+            let input = if key == "smtp_pass" { input.secure(true) } else { input };
+            column![ui::label(label), input].spacing(5).width(Fill).into()
+        };
+        col = col.push(row![field(0), container(field(1)).width(Length::Fixed(120.0))].spacing(14));
+        col = col.push(row![field(2), field(3)].spacing(14));
+        col = col.push(row![field(4), column![ui::label("Security"), pick_list(&Security::ALL[..], Some(s.smtp_tls), |v| Message::Settings(Msg::SmtpTls(v))).padding([7, 10]).text_size(14).style(theme::pick).width(Fill)].spacing(5).width(Fill)].spacing(14));
+        col = col.push(row![ui::btn("Cancel", Some(Message::Settings(Msg::Cancel))), ui::hspace(), ui::btn_primary("Save", if s.busy { None } else { Some(Message::Settings(Msg::SaveSmtp)) })]);
+        return ui::card(col);
+    }
+    let status: Element<Message> = if configured {
+        row![icon("check", 14.0, k.ok), text(format!("Sending through {} as {}", app.setting("smtp_host"), app.setting("smtp_from"))).size(14)].spacing(8).align_y(Alignment::Center).into()
+    } else { ui::muted("Not set up — documents can still be printed or saved as PDF.") };
+    let mut col = column![row![ui::h2("Email (outgoing mail)"), ui::hspace(), ui::btn(if configured { "Edit" } else { "Set up email" }, Some(Message::Settings(Msg::EditSmtp)))].align_y(Alignment::Center), status].spacing(10);
+    if configured {
+        col = col.push(row![
+            iced::widget::text_input("Send a test email to…", &s.test_to).on_input(|v| Message::Settings(Msg::TestTo(v))).padding([7, 10]).size(14).style(theme::input).width(Length::Fixed(320.0)),
+            ui::btn("Send test email", if s.busy { None } else { Some(Message::Settings(Msg::SendTest)) }),
+        ].spacing(8).align_y(Alignment::Center));
+    }
+    ui::card(col)
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -95,12 +288,13 @@ pub fn view(app: &App) -> Element<'_, Message> {
             info("Financial year ends", fy),
             info("Address", s("address").replace('\n', ", ")),
             info("Email", s("email")),
-            ui::gap(4.0),
-            ui::muted("Users, invoice branding, email and other advanced settings are still in the web version (start.bat web) during the native rewrite."),
         ].spacing(10)) },
+        users_card(app),
+        email_card(app),
         ui::card(column![
             ui::h2("Company file"),
             row![ui::muted("Open a different company or create a new one."), ui::hspace(), ui::btn("Switch company", Some(Message::Nav(Route::Setup)))].align_y(Alignment::Center),
+            ui::muted("Invoice branding, bank feeds, currencies and other advanced settings are still in the web version (start.bat web) during the native rewrite."),
         ].spacing(10)),
     ].spacing(16);
     let title = app.term("settings");

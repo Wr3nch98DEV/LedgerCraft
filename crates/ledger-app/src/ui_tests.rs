@@ -497,3 +497,47 @@ fn render_customize_panel() {
     ui.snapshot(&app.theme()).unwrap().matches_image(&out).unwrap();
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn settings_users_and_email() {
+    use crate::settings::{Msg as S, RoleOpt, Security};
+    let (mut app, dir) = demo_app("settings-users", Skin::QuickBooks);
+    let _ = app.update(Message::Nav(Route::Settings));
+    let users = app.be.call_now("users.list", json!({}));
+    let _ = app.update(Message::Settings(S::Users(users)));
+    // Add a user.
+    let msgs = click(&app, "Add user");
+    assert!(matches!(msgs.as_slice(), [Message::Settings(S::AddUser)]), "{msgs:?}");
+    let _ = app.update(Message::Settings(S::AddUser));
+    let _ = app.update(Message::Settings(S::UName("Sam Lee".into())));
+    let _ = app.update(Message::Settings(S::UEmail("not-an-email".into())));
+    let _ = app.update(Message::Settings(S::SaveUser));
+    assert!(app.toasts.iter().any(|t| t.2), "bad email is flagged");
+    let _ = app.update(Message::Settings(S::UEmail("sam@example.test".into())));
+    let _ = app.update(Message::Settings(S::URole(RoleOpt { key: "INVOICE_ONLY", label: "Invoice only" })));
+    let msgs = click(&app, "Save");
+    assert!(matches!(msgs.as_slice(), [Message::Settings(S::SaveUser)]), "{msgs:?}");
+    let saved = app.be.call_now("users.create", json!({"name": "Sam Lee", "email": "sam@example.test", "role": app.settings.u_role.unwrap()}));
+    let _ = app.update(Message::Settings(S::UserSaved(saved)));
+    let _ = app.update(Message::Settings(S::Users(app.be.call_now("users.list", json!({})))));
+    let sam = app.settings.users.iter().find(|u| u["email"] == "sam@example.test").cloned().expect("user added");
+    assert_eq!(sam["role"], "INVOICE_ONLY");
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["Manage users", "Invoice only", "Primary admin", "Deactivate"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    // Email settings: saved with the engine's security value; the password is never shown back.
+    let _ = app.update(Message::Settings(S::EditSmtp));
+    for (n, v) in ["smtp.example.test", "465", "books@example.test", "secret", "books@example.test"].iter().enumerate() { let _ = app.update(Message::Settings(S::Smtp(n, v.to_string()))); }
+    let _ = app.update(Message::Settings(S::SmtpTls(Security::Tls)));
+    let _ = app.update(Message::Settings(S::SaveSmtp));
+    let mut p = serde_json::Map::new();
+    for ((k, _), v) in crate::settings::SMTP.iter().zip(app.settings.smtp.iter()) { p.insert(k.to_string(), json!(v)); }
+    p.insert("smtp_tls".into(), json!(app.settings.smtp_tls.key()));
+    app.be.call_now("settings.update", Value::Object(p)).unwrap();
+    let st = app.be.call_now("settings.get", json!({})).unwrap();
+    assert_eq!((st["smtp_host"].as_str(), st["smtp_port"].as_str(), st["smtp_tls"].as_str()), (Some("smtp.example.test"), Some("465"), Some("TLS")));
+    assert!(st.get("smtp_pass").is_none(), "password isn't readable");
+    let _ = std::fs::remove_dir_all(dir);
+}
