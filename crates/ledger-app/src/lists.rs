@@ -61,13 +61,13 @@ fn type_label(app: &App, kind: &str) -> &'static str {
         "ACCPAYCREDIT" => app.term("supplier_credit"), "PO" => app.term("po"), _ => "Transaction" }
 }
 
-fn search_and_tabs<'a>(app: &'a App, tabs: &[(&'static str, &'static str)]) -> Element<'a, Message> {
+fn search_and_tabs<'a>(app: &'a App, tabs: &[(&'static str, String)]) -> Element<'a, Message> {
     let k = t();
     let mut r = row![].spacing(2).align_y(Alignment::Center);
     for (key, label) in tabs {
         let active = app.list_tab == *key;
         r = r.push(column![
-            button(text(*label).size(14).font(if active { BOLD } else { iced::Font::DEFAULT })).style(theme::tab(active)).padding([8, 12]).on_press(Message::ListTab(key)),
+            button(text(label.clone()).size(14).font(if active { BOLD } else { iced::Font::DEFAULT })).style(theme::tab(active)).padding([8, 12]).on_press(Message::ListTab(key)),
             container(Space::new()).width(Fill).height(2).style(move |_: &iced::Theme| container::Style { background: if active { Some(iced::Background::Color(k.accent)) } else { None }, ..Default::default() }),
         ].width(iced::Shrink));
     }
@@ -126,9 +126,13 @@ pub fn docs(app: &App) -> Element<'_, Message> {
         }
     } else { Space::new().into() };
 
-    let tabs: Vec<(&str, &str)> = match app.skin {
-        Skin::QuickBooks => vec![("all", "All"), ("awaiting", "Unpaid"), ("overdue", "Overdue"), ("paid", "Paid"), ("draft", "Draft")],
-        Skin::Xero => vec![("all", "All"), ("draft", "Draft"), ("submitted", "Awaiting approval"), ("awaiting", "Awaiting payment"), ("paid", "Paid")],
+    let tabs: Vec<(&'static str, String)> = match app.skin {
+        Skin::QuickBooks => [("all", "All"), ("awaiting", "Unpaid"), ("overdue", "Overdue"), ("paid", "Paid"), ("draft", "Draft")].into_iter().map(|(k, l)| (k, l.to_string())).collect(),
+        // Xero shows how many are waiting on the tabs that need action, e.g. "Awaiting payment (5)".
+        Skin::Xero => [("all", "All"), ("draft", "Draft"), ("submitted", "Awaiting approval"), ("awaiting", "Awaiting payment"), ("paid", "Paid")].into_iter().map(|(k, l)| {
+            let n = if matches!(k, "draft" | "submitted" | "awaiting") { i(&counts[k]) } else { 0 };
+            (k, if n > 0 { format!("{l} ({n})") } else { l.to_string() })
+        }).collect(),
     };
     let cols = match app.skin {
         Skin::QuickBooks => vec![col("Date", 10), col("Type", 10), col("No.", 9), col(if purchases { "Payee" } else { "Customer" }, 22), col("Due date", 10), coln("Balance", 11), coln("Total", 11), col("Status", 11)],
@@ -190,7 +194,7 @@ pub fn contacts(app: &App) -> Element<'_, Message> {
         };
         (cells, Some(Message::Nav(Route::Contact(id))))
     }).collect();
-    let tabs: Vec<(&str, &str)> = if customers.is_none() { vec![("all", "All"), ("customers", "Customers"), ("suppliers", "Suppliers")] } else { vec![] };
+    let tabs: Vec<(&'static str, String)> = if customers.is_none() { vec![("all", "All".into()), ("customers", "Customers".into()), ("suppliers", "Suppliers".into())] } else { vec![] };
     let body = column![top, search_and_tabs(app, &tabs), ui::table(&cols, rows, "No contacts yet.")].spacing(16);
     let new_label = match customers { Some(true) => "New customer", Some(false) => if app.skin == Skin::QuickBooks { "New vendor" } else { "New supplier" }, None => "New contact" };
     ui::page(ui::h1(title.to_string()), vec![ui::btn_primary(new_label, Some(Message::Nav(Route::NewContact(customers != Some(false)))))], body.into())
