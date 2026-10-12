@@ -744,8 +744,9 @@ pub fn after_load(app: &mut App) -> Task<Message> {
     let list = app.data.as_ref().and_then(|d| d.as_array().cloned()).unwrap_or_default();
     let keep = app.desk.sel.filter(|s| list.iter().any(|c| c["id"].as_i64() == Some(*s)));
     match keep.or_else(|| list.first().and_then(|c| c["id"].as_i64())) {
-        Some(id) if app.desk.detail.as_ref().and_then(|d| d["contact"]["id"].as_i64()) != Some(id) => update(app, Msg::Select(id)),
-        _ => Task::none(),
+        // Always refresh the shown name's details (they may have just been edited).
+        Some(id) => update(app, Msg::Select(id)),
+        None => Task::none(),
     }
 }
 
@@ -797,6 +798,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::CustomizeFavorites => "Customize Your Menus".into(),
         Route::BuildAssemblies => "Build Assemblies".into(),
         Route::InventoryCenter => "Inventory Center".into(),
+        Route::EditContact(id) => if app.lk.contacts.iter().find(|c| c["id"].as_i64() == Some(*id)).is_some_and(|c| c["is_supplier"].as_i64() == Some(1) && c["is_customer"].as_i64() != Some(1)) { "Edit Vendor".into() } else { "Edit Customer".into() },
         Route::EnterTime => "Time/Enter Single Activity".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
@@ -2612,6 +2614,7 @@ pub fn center(app: &App, customers: bool) -> Element<'_, Message> {
             let full = format!("{} {}", s("first_name"), s("last_name")).trim().to_string();
             let info = container(column![
                 row![text(if customers { "Customer Information" } else { "Vendor Information" }).size(15).font(BOLD), ui::hspace(),
+                    ui::link(if customers { "Edit Customer" } else { "Edit Vendor" }, Message::Nav(Route::EditContact(id))),
                     ui::link("QuickReport", Message::Nav(Route::Report("contact-transactions".into()))),
                     ui::link("Open Balance", Message::Nav(Route::Report(if customers { "aged-receivables" } else { "aged-payables" }.into())))].spacing(14).align_y(Alignment::Center),
                 row![

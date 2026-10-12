@@ -43,12 +43,14 @@ pub struct State {
     pub new_after: bool,
     /// Desktop New Customer: price level (Payment Settings).
     pub price_level: Option<Opt>,
+    /// Edit Customer/Vendor: the contact as saved (everything the form doesn't show is kept).
+    pub orig: Option<Value>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Msg {
     Name(String), Email(String), Phone(String), Code(String), Price(String), Cost(String),
-    SaleAccount(Opt), PurchaseAccount(Opt), Tax(Opt), Service(bool), Track1099(bool), PriceLevel(Opt),
+    SaleAccount(Opt), PurchaseAccount(Opt), Tax(Opt), Service(bool), Track1099(bool), PriceLevel(Opt), EditLoaded(crate::backend::Reply),
     Date(String), Memo(String), From(Opt), To(Opt), Amount(String), First(String), Last(String), Address(String), SaveNew, AcctType(String), Detail(String), JAccount(usize, Opt), JDesc(usize, String), JDebit(usize, String), JCredit(usize, String), AddLine,
     Save, Saved(Result<Value, String>),
 }
@@ -68,11 +70,48 @@ pub fn open(app: &mut App) -> Task<Message> {
     Task::none()
 }
 
+/// Edit Customer / Edit Vendor: load the contact into the form.
+pub fn open_edit(app: &mut App, id: i64) -> Task<Message> {
+    app.form = Some(State { service: true, date: ui::date(&ui::today_iso(), app.date_style()), busy: true, ..Default::default() });
+    app.data = Some(json!({}));
+    app.be.call("contacts.get", json!({"id": id}), |r| Message::Form(Msg::EditLoaded(r)))
+}
+
+/// The full contact for contacts.update: the saved record with the form's fields over it.
+fn merged_contact(orig: &Value, s: &State) -> Value {
+    let str_of = |k: &str| orig[k].as_str().unwrap_or("").to_string();
+    let mut c = json!({});
+    for k in ["mobile", "website", "tax_number", "account_number", "bank_account", "street_address", "default_currency", "sales_terms_type", "bill_terms_type", "notes"] { c[k] = json!(str_of(k)); }
+    for k in ["sales_account_id", "purchase_account_id", "sales_tax_rate_id", "purchase_tax_rate_id", "sales_terms_days", "bill_terms_days", "credit_limit"] { c[k] = orig[k].clone(); }
+    c["discount_bp"] = json!(orig["discount_bp"].as_i64().unwrap_or(0));
+    c["people"] = json!(orig["people"].as_array().cloned().unwrap_or_default().iter().map(|p| json!({"first_name": p["first_name"].as_str().unwrap_or(""), "last_name": p["last_name"].as_str().unwrap_or(""),
+        "email": p["email"].as_str().unwrap_or(""), "include_in_emails": p["include_in_emails"].as_i64().unwrap_or(0) == 1 || p["include_in_emails"].as_bool() == Some(true)})).collect::<Vec<_>>());
+    c["groups"] = json!(orig["groups"].as_array().cloned().unwrap_or_default().iter().filter_map(|g| g["id"].as_i64()).collect::<Vec<_>>());
+    c["name"] = json!(s.name.trim()); c["first_name"] = json!(s.first.trim()); c["last_name"] = json!(s.last.trim());
+    c["email"] = json!(s.email.trim()); c["phone"] = json!(s.phone.trim()); c["postal_address"] = json!(s.address.trim());
+    c
+}
+
 pub fn update(app: &mut App, m: Msg) -> Task<Message> {
     let style = app.date_style();
     let Some(mut s) = app.form.take() else { return Task::none() };
     let m = match m { Msg::SaveNew => { s.new_after = true; Msg::Save } Msg::Save => { s.new_after = false; Msg::Save } m => m };
     let task = match m {
+        Msg::EditLoaded(r) => {
+            s.busy = false;
+            match r {
+                Ok(c) => {
+                    let st = |k: &str| c[k].as_str().unwrap_or("").to_string();
+                    s.name = st("name"); s.first = st("first_name"); s.last = st("last_name"); s.email = st("email"); s.phone = st("phone"); s.address = st("postal_address");
+                    s.customer = c["is_customer"].as_i64() == Some(1) || c["is_supplier"].as_i64() != Some(1);
+                    s.track_1099 = c["track_1099"].as_i64() == Some(1);
+                    s.price_level = c["price_level_id"].as_i64().and_then(|id| app.lk.price_levels.iter().find(|p| p["id"].as_i64() == Some(id))).map(|p| Opt { id: p["id"].as_i64().unwrap_or(0), label: p["name"].as_str().unwrap_or("").to_string() });
+                    s.orig = Some(c);
+                    Task::none()
+                }
+                Err(e) => app.toast(e, true),
+            }
+        }
         Msg::Name(v) => { s.name = v; Task::none() }
         Msg::Email(v) => { s.email = v; Task::none() }
         Msg::Phone(v) => { s.phone = v; Task::none() }
@@ -109,6 +148,16 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::Save => {
             if s.busy { app.form = Some(s); return Task::none(); }
             let call = match &app.route {
+                Route::EditContact(id) => {
+                    let Some(orig) = s.orig.clone() else { app.form = Some(s); return Task::none() };
+                    if s.name.trim().is_empty() { app.form = Some(s); return app.toast("Enter a name", true); }
+                    let id = *id;
+                    // The price level is saved separately (it isn't part of the contact record).
+                    let level = s.price_level.as_ref().map(|p| p.id).filter(|x| *x > 0);
+                    if orig["price_level_id"].as_i64() != level && s.customer { let _ = app.be.call_now("contacts.setPriceLevel", json!({"id": id, "price_level_id": level})); }
+                    if s.track_1099 != (orig["track_1099"].as_i64() == Some(1)) && !s.customer { let _ = app.be.call_now("contacts.set1099", json!({"id": id, "on": s.track_1099})); }
+                    ("contacts.update", json!({"id": id, "contact": merged_contact(&orig, &s)}))
+                }
                 Route::NewContact(_) => {
                     if s.name.trim().is_empty() { app.form = Some(s); return app.toast("Enter a name", true); }
                     ("contacts.create", json!({"name": s.name.trim(), "email": s.email.trim(), "phone": s.phone.trim(), "is_customer": s.customer, "is_supplier": !s.customer,
@@ -162,6 +211,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                 Ok(v) => {
                     let (msg, next) = match &app.route {
                         Route::NewContact(c) => ("Saved", v["id"].as_i64().map(Route::Contact).unwrap_or(if *c { Route::Customers } else { Route::Vendors })),
+                        Route::EditContact(id) => ("Changes saved", Route::Contact(*id)),
                         Route::NewProduct => ("Product saved", Route::Products),
                         Route::NewAccount => ("Account created", Route::Chart),
                         Route::Transfer => ("Transfer recorded", Route::Banking(None)),

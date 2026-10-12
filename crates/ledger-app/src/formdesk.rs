@@ -31,6 +31,7 @@ fn balance(app: &App, acc: &Option<Opt>) -> i64 {
 pub fn view<'a>(app: &'a App, s: &'a State) -> Element<'a, Message> {
     let body: Element<Message> = match &app.route {
         Route::NewContact(customer) => contact(app, s, *customer),
+        Route::EditContact(_) => contact(app, s, s.customer),
         Route::NewProduct => item(app, s),
         Route::Transfer => transfer(app, s),
         _ => journal(app, s),
@@ -67,7 +68,7 @@ fn contact<'a>(app: &'a App, s: &'a State, customer: bool) -> Element<'a, Messag
         row![column![label(who), text_input("", &s.name).on_input(|v| Message::Form(Msg::Name(v))).padding([5, 7]).size(14).style(theme::input).width(Length::Fixed(360.0))].spacing(3),
             Space::new().width(30), column![label("Opening Balance"), container(text("Enter on the Opening Balance screen").size(12).color(k.faint)).padding([6, 0])].spacing(3)].align_y(Alignment::End),
         container(row![tabs, container(fields).padding(Padding { left: 18.0, ..Padding::ZERO })]).padding(16).width(Fill).style(theme::card),
-        buttons(s, true),
+        buttons(s, s.orig.is_none()),
     ].spacing(14).into()
 }
 

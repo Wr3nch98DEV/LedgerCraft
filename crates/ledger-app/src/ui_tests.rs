@@ -2615,3 +2615,39 @@ fn sample_check_pdf() {
     let st = json!({"org_name": "Demo Co", "address": "1 George St\nSydney NSW 2000", "country": "US"});
     std::fs::write(std::env::temp_dir().join("lc-check-sample.pdf"), crate::pdf::check(&c, &st, &|x| crate::ui::date(x, crate::ui::DateStyle::Us))).unwrap();
 }
+
+#[test]
+fn desktop_edit_customer_keeps_other_fields() {
+    use crate::forms::Msg as F;
+    let (mut app, dir) = desktop_app("editcontact");
+    let id = app.lk.contact_opts(true)[0].id;
+    // Fields the Desktop form doesn't show.
+    let mut c = app.be.call_now("contacts.get", json!({"id": id})).unwrap();
+    let website = "https://example.test";
+    let full = json!({"name": c["name"], "website": website, "notes": "VIP — call first", "email": c["email"], "phone": c["phone"],
+        "people": [{"first_name": "Sam", "last_name": "Lee", "email": "sam@example.test", "include_in_emails": true}], "sales_terms_type": "DAYSAFTERBILLDATE", "sales_terms_days": 21});
+    app.be.call_now("contacts.update", json!({"id": id, "contact": full})).unwrap();
+    // Customer Center ▸ Edit Customer.
+    let t = app.update(Message::Nav(Route::Customers)); settle(&mut app, t);
+    let t = app.update(Message::Desk(crate::desktop::Msg::Select(id))); settle(&mut app, t);
+    let msgs = click(&app, "Edit Customer");
+    assert!(matches!(msgs.first(), Some(Message::Nav(Route::EditContact(x))) if *x == id), "{msgs:?}");
+    let t = app.update(Message::Nav(Route::EditContact(id))); settle(&mut app, t);
+    assert_eq!(crate::desktop::title(&app, &app.route), "Edit Customer");
+    c = app.be.call_now("contacts.get", json!({"id": id})).unwrap();
+    assert_eq!(app.form.as_ref().unwrap().name, c["name"].as_str().unwrap());
+    let _ = app.update(Message::Form(F::Phone("02 5555 0000".into())));
+    press(&mut app, "OK");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let after = app.be.call_now("contacts.get", json!({"id": id})).unwrap();
+    assert_eq!(after["phone"], "02 5555 0000");
+    assert_eq!(after["website"], website);
+    assert_eq!(after["notes"], "VIP — call first");
+    assert_eq!(after["sales_terms_days"], 21);
+    assert_eq!(after["people"].as_array().unwrap().len(), 1);
+    assert_eq!(after["is_customer"], 1);
+    // Back in the Customer Center, the details show the change.
+    assert_eq!(app.route, Route::Customers);
+    assert_eq!(app.desk.detail.as_ref().map(|d| d["contact"]["phone"].clone()), Some(json!("02 5555 0000")));
+    let _ = std::fs::remove_dir_all(dir);
+}
