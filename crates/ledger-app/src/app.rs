@@ -730,6 +730,13 @@ impl App {
                         _ => None,
                     };
                     if let Some(m) = m { return self.update(m); }
+                    if close { return self.update(Message::OpenMenu(Some("Favorites"))); }
+                }
+                // Alt+letter opens a menu (the underlined letter in QuickBooks Desktop's menu bar).
+                keyboard::Key::Character(c) if modifiers.alt() && !modifiers.command() && self.desktop() && self.session.is_some() => {
+                    let m = match c { "f" => Some("File"), "e" => Some("Edit"), "v" => Some("View"), "l" => Some("Lists"), "c" => Some("Company"), "i" => Some("Inventory"),
+                        "u" => Some("Customers"), "n" => Some("Vendors"), "m" => Some("Employees"), "b" => Some("Banking"), "r" => Some("Reports"), "w" => Some("Window"), "h" => Some("Help"), _ => None };
+                    if m.is_some() { return self.update(Message::OpenMenu(m)); }
                 }
                 // In a transaction: Ctrl+P print, Ctrl+M memorize, Ctrl+N a new one of the same kind.
                 keyboard::Key::Character(c @ ("p" | "m" | "n")) if modifiers.command() && self.desktop() && matches!(self.route, Route::Doc { .. }) && self.doc.is_some() => {

@@ -2501,5 +2501,11 @@ fn desktop_form_keys_alt_a_and_alt_s() {
     assert_eq!(count(&app, "ACCREC"), before + 2);
     assert_eq!(app.desk.windows.len(), windows - 1);
     assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    // Away from a form, Alt+letter opens that menu (Alt+A = Favorites).
+    let t = app.update(Message::Nav(Route::Dashboard)); settle(&mut app, t);
+    let _ = app.update(Message::Key(key("u", Modifiers::ALT, Code::KeyU)));
+    assert_eq!(app.menu, Some("Customers"));
+    let _ = app.update(Message::Key(key("a", Modifiers::ALT, Code::KeyA)));
+    assert_eq!(app.menu, Some("Favorites"));
     let _ = std::fs::remove_dir_all(dir);
 }

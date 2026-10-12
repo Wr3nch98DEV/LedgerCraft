@@ -1666,6 +1666,7 @@ pub fn help(app: &App) -> Element<'_, Message> {
         pair("Ctrl+I", "Create Invoices"), pair("Ctrl+W", "Write Checks"), pair("Ctrl+E", "Enter Bills"), pair("Ctrl+J", "Customer Center"),
         pair("Ctrl+A", "Chart of Accounts"), pair("Ctrl+R", "Use Register"), pair("Ctrl+T", "Memorized Transaction List"), pair("Ctrl+F / F3", "Search"),
         pair("Ctrl+S", "Save the transaction you're editing"), pair("Alt+A / Alt+S", "Save & Close / Save & New"), pair("Ctrl+P / Ctrl+M", "Print / Memorize the transaction"), pair("Ctrl+N", "New transaction of the same kind"), pair("Tab / Shift+Tab", "Next / previous field"), pair("F5", "Refresh"), pair("Esc", "Close menus"),
+        pair("Alt+letter", "Open a menu: F File, E Edit, V View, L Lists, A Favorites, C Company, I Inventory, U Customers, N Vendors, M Employees, B Banking, R Reports, W Window, H Help"),
         pair("Alt+T", "Light / dark mode"), pair("F1", "This help"),
         text("In any date field").size(14).font(BOLD),
         pair("+ / -", "Next / previous day"), pair("T", "Today"), pair("W / K", "First / last day of the week"),
