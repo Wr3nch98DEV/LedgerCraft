@@ -56,6 +56,8 @@ pub struct State {
     pub one_window: bool,
     /// Favorites menu: "Menu ▸ Item" entries, in order.
     pub favorites: Vec<String>,
+    /// The menu item highlighted with the arrow keys (index into `menu_items`).
+    pub menu_sel: Option<usize>,
     /// Customer Center: jobs (projects) shown under their customers.
     pub jobs: Vec<Value>,
     /// Build Assemblies: the assembly, its components/builds (from items.components), quantity, date, memo,
@@ -893,17 +895,52 @@ fn menu_bar(app: &App) -> Element<'_, Message> {
 fn dropdown<'a>(app: &'a App, name: &'static str) -> Element<'a, Message> {
     let k = t();
     let mut c = column![].spacing(0).width(300);
-    for (label, key, msg) in menu_items(app, name) {
+    for (n, (label, key, msg)) in menu_items(app, name).into_iter().enumerate() {
         if label == "-" { c = c.push(container(ui::hr()).padding([4, 6])); continue; }
         if let Some(h) = label.strip_prefix('#') { c = c.push(container(text(h.to_string()).size(11).font(BOLD).color(k.muted)).padding(Padding { top: 6.0, bottom: 2.0, left: 10.0, right: 10.0 })); continue; }
         let enabled = msg.is_some();
         let mut b = button(row![text(label).size(13).color(if enabled { k.text } else { k.faint }), ui::hspace(), text(key).size(12).color(k.faint)].align_y(Alignment::Center))
             .style(theme::menu_item).padding([5, 10]).width(Fill);
         if let Some(m) = msg { b = b.on_press(m); }
+        if app.desk.menu_sel == Some(n) { c = c.push(container(b).style(move |_: &iced::Theme| container::Style { background: Some(iced::Background::Color(k.hover)), border: iced::Border { radius: 4.0.into(), ..Default::default() }, ..Default::default() })); continue; }
         c = c.push(b);
     }
     let left: f32 = 8.0 + MENUS.iter().take_while(|m| **m != name).map(|m| menu_w(m)).sum::<f32>();
     container(opaque(container(scrollable(c).style(theme::scroll)).max_height(620).padding(4).style(theme::menu))).padding(Padding { top: 28.0, left, ..Padding::ZERO }).into()
+}
+
+/// Arrow keys in an open menu: Up/Down move between commands, Left/Right switch menus, Enter runs it.
+pub fn menu_key(app: &mut App, key: &str) -> Task<Message> {
+    let Some(menu) = app.menu else { return Task::none() };
+    match key {
+        "left" | "right" => {
+            let i = MENUS.iter().position(|m| *m == menu).unwrap_or(0) as i32;
+            let n = MENUS.len() as i32;
+            let next = MENUS[((i + if key == "right" { 1 } else { -1 }) % n + n) as usize % MENUS.len()];
+            app.menu = Some(next);
+            app.desk.menu_sel = None;
+            Task::none()
+        }
+        "up" | "down" => {
+            let items = menu_items(app, menu);
+            let ok = |i: usize| items[i].2.is_some() && items[i].0 != "-" && !items[i].0.starts_with('#');
+            let len = items.len();
+            if len == 0 { return Task::none(); }
+            let mut i = app.desk.menu_sel.unwrap_or(if key == "down" { len - 1 } else { 0 });
+            for _ in 0..len {
+                i = if key == "down" { (i + 1) % len } else { (i + len - 1) % len };
+                if ok(i) { app.desk.menu_sel = Some(i); break; }
+            }
+            Task::none()
+        }
+        _ => {
+            let msg = app.desk.menu_sel.and_then(|i| menu_items(app, menu).into_iter().nth(i)).and_then(|x| x.2);
+            let Some(m) = msg else { return Task::none() };
+            let t1 = app.update(Message::CloseMenus);
+            let t2 = app.update(m);
+            Task::batch([t1, t2])
+        }
+    }
 }
 
 /// The icon bar search box (Ctrl+F / Edit ▸ Find focuses it).
@@ -2643,8 +2680,10 @@ fn gap<'a>() -> Element<'a, Message> { Space::new().width(30).into() }
 
 fn band<'a>(name: &'static str, rows: Vec<Element<'a, Message>>) -> Element<'a, Message> {
     let k = t();
-    let head = container(text(name).size(12).font(BOLD).color(k.accent_ink)).padding([5, 10]).width(Fill)
-        .style(move |_: &iced::Theme| container::Style { background: Some(iced::Background::Color(k.info)), border: iced::Border { radius: iced::border::Radius { top_left: 6.0, top_right: 6.0, bottom_left: 0.0, bottom_right: 0.0 }, ..Default::default() }, ..Default::default() });
+    // QuickBooks Desktop's blue section bands; a deep blue in dark mode so they don't glare.
+    let (bg, ink) = if k.dark { (hexc(0x1d3557), hexc(0xd6e6fa)) } else { (k.info, k.accent_ink) };
+    let head = container(text(name).size(12).font(BOLD).color(ink)).padding([5, 10]).width(Fill)
+        .style(move |_: &iced::Theme| container::Style { background: Some(iced::Background::Color(bg)), border: iced::Border { radius: iced::border::Radius { top_left: 6.0, top_right: 6.0, bottom_left: 0.0, bottom_right: 0.0 }, ..Default::default() }, ..Default::default() });
     container(column![head, container(column(rows).spacing(6)).padding([10, 14])]).width(Fill).style(theme::card).into()
 }
 

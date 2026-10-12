@@ -2096,6 +2096,12 @@ fn render_route() {
     if std::env::var("LC_LIGHT").is_ok() { app.dark = false; }
     let route = crate::app::parse_route(&key).expect("route key");
     let t = app.update(Message::Nav(route)); settle(&mut app, t);
+    // LC_MENU=Customers LC_MENU_SEL=2: an open menu with a keyboard highlight.
+    if let Ok(m) = std::env::var("LC_MENU") {
+        let m: &'static str = crate::desktop::MENUS.iter().find(|x| **x == m).copied().expect("menu name");
+        let _ = app.update(Message::OpenMenu(Some(m)));
+        app.desk.menu_sel = std::env::var("LC_MENU_SEL").ok().and_then(|v| v.parse().ok());
+    }
     let _ = std::fs::remove_file(std::env::temp_dir().join("lc-route-wgpu.png"));
     let _g = sim_lock();
     let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
@@ -2507,5 +2513,38 @@ fn desktop_form_keys_alt_a_and_alt_s() {
     assert_eq!(app.menu, Some("Customers"));
     let _ = app.update(Message::Key(key("a", Modifiers::ALT, Code::KeyA)));
     assert_eq!(app.menu, Some("Favorites"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn desktop_menu_arrow_keys() {
+    use iced::keyboard::{key::{Code, Named}, Modifiers};
+    let named = |n: Named, code: Code| iced::keyboard::Event::KeyPressed {
+        key: iced::keyboard::Key::Named(n), modified_key: iced::keyboard::Key::Named(n),
+        physical_key: iced::keyboard::key::Physical::Code(code), location: iced::keyboard::Location::Standard, modifiers: Modifiers::empty(), text: None, repeat: false };
+    let (mut app, dir) = desktop_app("menukeys");
+    let _ = app.update(Message::OpenMenu(Some("Customers")));
+    // Down highlights the first command (Customer Center), Down again skips the separator.
+    let _ = app.update(Message::Key(named(Named::ArrowDown, Code::ArrowDown)));
+    assert_eq!(app.desk.menu_sel, Some(0));
+    let _ = app.update(Message::Key(named(Named::ArrowDown, Code::ArrowDown)));
+    let items = crate::desktop::menu_items(&app, "Customers");
+    assert_eq!(items[app.desk.menu_sel.unwrap()].0, "Create Estimates");
+    // Up twice wraps past the top to the last command.
+    let _ = app.update(Message::Key(named(Named::ArrowUp, Code::ArrowUp)));
+    let _ = app.update(Message::Key(named(Named::ArrowUp, Code::ArrowUp)));
+    assert!(items[app.desk.menu_sel.unwrap()].2.is_some());
+    assert!(app.desk.menu_sel.unwrap() > 2);
+    // Back to Customer Center and Enter opens it.
+    let _ = app.update(Message::OpenMenu(None));
+    let _ = app.update(Message::OpenMenu(Some("Customers")));
+    let _ = app.update(Message::Key(named(Named::ArrowDown, Code::ArrowDown)));
+    let t = app.update(Message::Key(named(Named::Enter, Code::Enter))); settle(&mut app, t);
+    assert_eq!(app.route, Route::Customers);
+    assert_eq!(app.menu, None);
+    // Left from File wraps round to Help.
+    let _ = app.update(Message::OpenMenu(Some("File")));
+    let _ = app.update(Message::Key(named(Named::ArrowLeft, Code::ArrowLeft)));
+    assert_eq!(app.menu, Some("Help"));
     let _ = std::fs::remove_dir_all(dir);
 }

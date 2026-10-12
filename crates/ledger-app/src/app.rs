@@ -634,7 +634,7 @@ impl App {
             }
             Message::ToggleNew => { self.new_menu = !self.new_menu; self.gear_menu = false; self.menu = None; Task::none() }
             Message::ToggleGear => { self.gear_menu = !self.gear_menu; self.new_menu = false; self.menu = None; Task::none() }
-            Message::OpenMenu(m) => { self.menu = if self.menu == m { None } else { m }; self.new_menu = false; self.gear_menu = false; Task::none() }
+            Message::OpenMenu(m) => { self.desk.menu_sel = None; self.menu = if self.menu == m { None } else { m }; self.new_menu = false; self.gear_menu = false; Task::none() }
             Message::CloseMenus => { self.new_menu = false; self.gear_menu = false; self.menu = None; self.search_results.clear(); Task::none() }
             Message::Search(s) => {
                 self.search = s.clone();
@@ -709,6 +709,11 @@ impl App {
             use keyboard::key::Named;
             match key.as_ref() {
                 keyboard::Key::Named(Named::Escape) => return self.update(Message::CloseMenus),
+                // Arrow keys and Enter inside an open Desktop menu.
+                keyboard::Key::Named(k @ (Named::ArrowUp | Named::ArrowDown | Named::ArrowLeft | Named::ArrowRight | Named::Enter)) if self.desktop() && self.menu.is_some() => {
+                    let k = match k { Named::ArrowUp => "up", Named::ArrowDown => "down", Named::ArrowLeft => "left", Named::ArrowRight => "right", _ => "enter" };
+                    return crate::desktop::menu_key(self, k);
+                }
                 keyboard::Key::Named(Named::F5) => return self.update(Message::Refresh),
                 keyboard::Key::Named(Named::F3) if self.desktop() => return self.update(Message::FocusSearch),
                 keyboard::Key::Character("t") if modifiers.alt() && !modifiers.command() => return self.update(Message::ToggleTheme),
