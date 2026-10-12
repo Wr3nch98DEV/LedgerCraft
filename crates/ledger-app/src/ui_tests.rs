@@ -2093,6 +2093,7 @@ fn finance_charge_math() {
 fn render_route() {
     let key = std::env::var("LC_ROUTE").unwrap_or_else(|_| "dashboard".into());
     let (mut app, dir) = desktop_app("route-shot");
+    if std::env::var("LC_LIGHT").is_ok() { app.dark = false; }
     let route = crate::app::parse_route(&key).expect("route key");
     let t = app.update(Message::Nav(route)); settle(&mut app, t);
     let _ = std::fs::remove_file(std::env::temp_dir().join("lc-route-wgpu.png"));

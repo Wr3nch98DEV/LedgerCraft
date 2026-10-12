@@ -1216,7 +1216,7 @@ pub fn customize_favorites(app: &App) -> Element<'_, Message> {
         let chosen = app.desk.favorites.contains(f);
         let label = f.split(" ▸ ").last().unwrap_or("").to_string();
         avail = avail.push(button(row![text(label).size(13), ui::hspace(), text(if chosen { "✓" } else { "" }).size(13).color(k.ok)])
-            .style(theme::nav_item(false)).padding([4, 16]).width(Fill).on_press_maybe((!chosen).then(|| Message::Desk(Msg::FavAdd(f.clone())))));
+            .style(theme::list_item(false)).padding([4, 16]).width(Fill).on_press_maybe((!chosen).then(|| Message::Desk(Msg::FavAdd(f.clone())))));
     }
     let mut chosen = column![].spacing(1);
     for (n, f) in app.desk.favorites.iter().enumerate() {
@@ -1359,7 +1359,7 @@ pub fn templates(app: &App) -> Element<'_, Message> {
         let id = tpl["id"].as_i64().unwrap_or(0);
         let on = Some(id) == cur_id;
         names = names.push(button(row![text(tpl["name"].as_str().unwrap_or("").to_string()).size(13), ui::hspace(), text(if tpl["is_default"].as_i64() == Some(1) { "✓" } else { "" }).size(13)])
-            .style(theme::nav_item(on)).padding([6, 10]).width(Fill).on_press(Message::Desk(Msg::TplPick(id))));
+            .style(theme::list_item(on)).padding([6, 10]).width(Fill).on_press(Message::Desk(Msg::TplPick(id))));
     }
     if cur.as_ref().is_some_and(|t| t["id"].is_null()) { names = names.push(container(text(cur.as_ref().unwrap()["name"].as_str().unwrap_or("").to_string()).size(13).font(BOLD)).padding([6, 10])); }
     let left = container(column![scrollable(names).height(Fill).style(theme::scroll),
@@ -1382,7 +1382,7 @@ pub fn templates(app: &App) -> Element<'_, Message> {
         row![text("Description").size(11).font(BOLD).color(hexc(0x555555)), ui::hspace(), text("Amount").size(11).font(BOLD).color(hexc(0x555555))],
         row![text("Consulting services").size(12).color(hexc(0x222222)), ui::hspace(), text("1,250.00").size(12).color(hexc(0x222222))],
         text(if v("terms").is_empty() { "Thank you for your business.".to_string() } else { v("terms") }).size(11).color(hexc(0x666666)),
-    ].spacing(8)).padding(18).width(420).style(|_: &iced::Theme| container::Style { background: Some(iced::Background::Color(iced::Color::WHITE)), border: iced::Border { radius: 4.0.into(), ..Default::default() }, ..Default::default() });
+    ].spacing(8)).padding(18).width(420).style(|_: &iced::Theme| container::Style { background: Some(iced::Background::Color(iced::Color::WHITE)), border: iced::Border { radius: 4.0.into(), width: 1.0, color: hexc(0xc8ccd2) }, ..Default::default() });
     let form = column![
         row![input("TEMPLATE NAME", "name", v("name"), 260.0), input("COLOUR (HEX)", "accent", v("accent"), 120.0),
             container(Space::new()).width(24).height(24).style(move |_: &iced::Theme| container::Style { background: Some(iced::Background::Color(accent)), border: iced::Border { radius: 4.0.into(), ..Default::default() }, ..Default::default() })].spacing(14).align_y(Alignment::End),
@@ -2160,7 +2160,7 @@ pub fn report_center(app: &App) -> Element<'_, Message> {
     let mut left = column![].spacing(1);
     for c in REPORT_CATS {
         let on = c == cat;
-        left = left.push(button(text(c).size(13).font(if on { BOLD } else { iced::Font::DEFAULT })).style(theme::nav_item(on)).padding([6, 10]).width(Fill).on_press(Message::Desk(Msg::ReportCat(c))));
+        left = left.push(button(text(c).size(13).font(if on { BOLD } else { iced::Font::DEFAULT })).style(theme::list_item(on)).padding([6, 10]).width(Fill).on_press(Message::Desk(Msg::ReportCat(c))));
     }
     let mut right = column![text(cat).size(18).font(BOLD)].spacing(8);
     let mut any = false;
@@ -2376,7 +2376,7 @@ fn center_transactions(app: &App, customers: bool) -> Element<'_, Message> {
     let mut list = column![].spacing(1);
     for ty in types {
         let on = sel == Some(*ty);
-        list = list.push(button(text(*ty).size(13).font(if on { BOLD } else { iced::Font::DEFAULT })).style(theme::nav_item(on)).padding([5, 10]).width(Fill).on_press(Message::Desk(Msg::TxType(Some(ty)))));
+        list = list.push(button(text(*ty).size(13).font(if on { BOLD } else { iced::Font::DEFAULT })).style(theme::list_item(on)).padding([5, 10]).width(Fill).on_press(Message::Desk(Msg::TxType(Some(ty)))));
     }
     let left = container(column![tabs_row(customers, true), list].spacing(8)).padding(6).width(340).height(Fill).style(theme::card);
     let right: Element<Message> = match sel {

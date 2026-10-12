@@ -193,6 +193,14 @@ pub fn nav_item(active: bool) -> impl Fn(&Theme, button::Status) -> button::Styl
         button::Style { background: bg, text_color: if active { k.nav_text } else { k.nav_muted }, border: Border { radius: radius(6.0), ..Default::default() }, shadow: Shadow::default(), snap: true }
     }
 }
+/// A selectable row in a list inside the page (not the sidebar): readable in light and dark.
+pub fn list_item(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, s| {
+        let k = t();
+        let bg = if active { Some(Background::Color(k.accent_soft)) } else { match s { button::Status::Hovered | button::Status::Pressed => Some(Background::Color(k.hover)), _ => None } };
+        button::Style { background: bg, text_color: k.text, border: Border { radius: radius(6.0), ..Default::default() }, shadow: Shadow::default(), snap: true }
+    }
+}
 pub fn tab(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, s| {
         let k = t();

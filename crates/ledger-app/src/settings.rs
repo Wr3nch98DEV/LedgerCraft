@@ -369,7 +369,7 @@ fn desk_view(app: &App) -> Element<'_, Message> {
     let mut list = column![].spacing(1);
     for c in DESK_CATS {
         let on = c == cat;
-        list = list.push(button(text(c).size(13).font(if on { BOLD } else { iced::Font::DEFAULT })).style(theme::nav_item(on)).padding([5, 10]).width(Fill).on_press(Message::Settings(Msg::Cat(c))));
+        list = list.push(button(text(c).size(13).font(if on { BOLD } else { iced::Font::DEFAULT })).style(theme::list_item(on)).padding([5, 10]).width(Fill).on_press(Message::Settings(Msg::Cat(c))));
     }
     let note = |t_: &'static str| -> Element<'_, Message> { ui::card(ui::muted(t_)) };
     let body: Element<Message> = match cat {
