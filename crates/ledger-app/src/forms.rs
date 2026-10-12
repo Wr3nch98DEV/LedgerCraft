@@ -143,6 +143,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                     s.name = st("name"); s.first = st("first_name"); s.last = st("last_name"); s.email = st("email"); s.phone = st("phone"); s.address = st("postal_address");
                     s.customer = c["is_customer"].as_i64() == Some(1) || c["is_supplier"].as_i64() != Some(1);
                     s.track_1099 = c["track_1099"].as_i64() == Some(1);
+                    s.inactive = c["status"] != "ACTIVE";
                     s.price_level = c["price_level_id"].as_i64().and_then(|id| app.lk.price_levels.iter().find(|p| p["id"].as_i64() == Some(id))).map(|p| Opt { id: p["id"].as_i64().unwrap_or(0), label: p["name"].as_str().unwrap_or("").to_string() });
                     s.orig = Some(c);
                     Task::none()
@@ -251,6 +252,11 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                     // The price level is saved separately (it isn't part of the contact record).
                     let level = s.price_level.as_ref().map(|p| p.id).filter(|x| *x > 0);
                     if orig["price_level_id"].as_i64() != level && s.customer { let _ = app.be.call_now("contacts.setPriceLevel", json!({"id": id, "price_level_id": level})); }
+                    let status = if s.inactive { "ARCHIVED" } else { "ACTIVE" };
+                    if orig["status"].as_str() != Some(status) {
+                        // Refused while there are open invoices or bills.
+                        if let Err(e) = app.be.call_now("contacts.setStatus", json!({"id": id, "status": status})) { app.form = Some(s); return app.toast(e, true); }
+                    }
                     if s.track_1099 != (orig["track_1099"].as_i64() == Some(1)) && !s.customer { let _ = app.be.call_now("contacts.set1099", json!({"id": id, "on": s.track_1099})); }
                     ("contacts.update", json!({"id": id, "contact": merged_contact(&orig, &s)}))
                 }

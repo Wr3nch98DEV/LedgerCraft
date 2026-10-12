@@ -2729,3 +2729,25 @@ fn click_fails(app: &App, label: &str) -> bool {
     let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 1400.0), app.view());
     ui.click(label).is_err()
 }
+
+#[test]
+fn desktop_make_customer_inactive() {
+    use crate::forms::Msg as F;
+    let (mut app, dir) = desktop_app("custinactive");
+    // One with nothing outstanding can be made inactive; one with open invoices can't.
+    let list = app.be.call_now("contacts.list", json!({"filter": "customers"})).unwrap();
+    let free = list.as_array().unwrap().iter().find(|c| c["receivable"] == 0).unwrap()["id"].as_i64().unwrap();
+    let owing = list.as_array().unwrap().iter().find(|c| c["receivable"].as_i64().unwrap_or(0) > 0).unwrap()["id"].as_i64().unwrap();
+    let t = app.update(Message::Nav(Route::EditContact(owing))); settle(&mut app, t);
+    let _ = app.update(Message::Form(F::Inactive(true)));
+    let _ = app.update(Message::Form(F::Save));
+    assert!(app.toasts.iter().any(|t| t.2), "refused with open invoices");
+    app.toasts.clear();
+    let t = app.update(Message::Nav(Route::EditContact(free))); settle(&mut app, t);
+    let _ = app.update(Message::Form(F::Inactive(true)));
+    press(&mut app, "OK");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let active = app.be.call_now("contacts.list", json!({"filter": "customers"})).unwrap();
+    assert!(active.as_array().unwrap().iter().all(|c| c["id"].as_i64() != Some(free)), "left the Active Customers list");
+    let _ = std::fs::remove_dir_all(dir);
+}

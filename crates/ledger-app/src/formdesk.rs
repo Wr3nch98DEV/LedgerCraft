@@ -62,6 +62,9 @@ fn contact<'a>(app: &'a App, s: &'a State, customer: bool) -> Element<'a, Messag
         opts.extend(app.lk.price_levels.iter().map(|p| Opt { id: p["id"].as_i64().unwrap_or(0), label: p["name"].as_str().unwrap_or("").to_string() }));
         fields = fields.push(column![label("Price Level"), pick_list(opts, s.price_level.clone(), |o| Message::Form(Msg::PriceLevel(o))).placeholder("(standard prices)").padding([5, 7]).text_size(13).style(theme::pick).width(240)].spacing(3));
     }
+    if s.orig.is_some() {
+        fields = fields.push(checkbox(s.inactive).label(if customer { "Customer is inactive" } else { "Vendor is inactive" }).on_toggle(|v| Message::Form(Msg::Inactive(v))).text_size(13));
+    }
     if !customer && app.country() == "US" {
         fields = fields.push(checkbox(s.track_1099).label("Vendor eligible for 1099").on_toggle(|v| Message::Form(Msg::Track1099(v))).text_size(13));
     }
