@@ -1,4 +1,4 @@
-//! Smaller forms: new customer/vendor, new product or service, journal entry.
+//! Smaller forms: new customer/vendor, new product or service, new account, journal entry, transfer.
 
 use crate::app::{App, Message, Opt, Route};
 use crate::icons::icon;
@@ -31,13 +31,16 @@ pub struct State {
     pub from: Option<Opt>,
     pub to: Option<Opt>,
     pub amount: String,
+    /// New account: QuickBooks account type name (or Xero type name) and detail type.
+    pub acct_type: Option<String>,
+    pub detail: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Msg {
     Name(String), Email(String), Phone(String), Code(String), Price(String), Cost(String),
     SaleAccount(Opt), PurchaseAccount(Opt), Tax(Opt), Service(bool),
-    Date(String), Memo(String), From(Opt), To(Opt), Amount(String), JAccount(usize, Opt), JDesc(usize, String), JDebit(usize, String), JCredit(usize, String), AddLine,
+    Date(String), Memo(String), From(Opt), To(Opt), Amount(String), AcctType(String), Detail(String), JAccount(usize, Opt), JDesc(usize, String), JDebit(usize, String), JCredit(usize, String), AddLine,
     Save, Saved(Result<Value, String>),
 }
 
@@ -50,6 +53,7 @@ pub fn open(app: &mut App) -> Task<Message> {
     let banks = app.lk.bank_opts();
     s.from = banks.first().cloned();
     s.to = banks.get(1).cloned();
+    if app.skin == Skin::QuickBooks { s.acct_type = Some("Expenses".into()); s.detail = Some("Advertising/Promotional".into()); } else { s.acct_type = Some("Expense".into()); }
     app.form = Some(s);
     app.data = Some(json!({}));
     Task::none()
@@ -73,6 +77,13 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::From(v) => { s.from = Some(v); Task::none() }
         Msg::To(v) => { s.to = Some(v); Task::none() }
         Msg::Amount(v) => { s.amount = v; Task::none() }
+        Msg::AcctType(v) => {
+            // A new QuickBooks type starts on its first detail type.
+            s.detail = crate::coa::QB_TYPES.iter().find(|t| t.name == v).map(|t| t.details[0].0.to_string());
+            s.acct_type = Some(v);
+            Task::none()
+        }
+        Msg::Detail(v) => { s.detail = Some(v); Task::none() }
         Msg::Memo(v) => { s.memo = v; Task::none() }
         Msg::JAccount(n, a) => { s.lines[n].account = Some(a); if n + 1 == s.lines.len() { s.lines.push(JLine::default()); } Task::none() }
         Msg::JDesc(n, v) => { s.lines[n].description = v; Task::none() }
@@ -92,6 +103,21 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                     let Some(date) = ui::to_iso(&s.date, style) else { app.form = Some(s); return app.toast("Check the date", true) };
                     if ui::parse_money(&s.amount).unwrap_or(0) <= 0 { app.form = Some(s); return app.toast("Enter the amount", true); }
                     ("transfers.save", json!({"from_account_id": f.id, "to_account_id": t.id, "date": date, "amount": s.amount.replace(',', ""), "reference": s.memo.trim()}))
+                }
+                Route::NewAccount => {
+                    if s.name.trim().is_empty() { app.form = Some(s); return app.toast("Enter the account name", true); }
+                    let ty = s.acct_type.clone().unwrap_or_default();
+                    let (kind, detail, card) = match app.skin {
+                        Skin::QuickBooks => {
+                            let Some(t) = crate::coa::QB_TYPES.iter().find(|t| t.name == ty) else { app.form = Some(s); return app.toast("Choose an account type", true) };
+                            let d = s.detail.clone().unwrap_or_default();
+                            let kind = t.details.iter().find(|(n, _)| *n == d).map(|(_, k)| *k).unwrap_or(t.details[0].1);
+                            (kind, d, t.credit_card)
+                        }
+                        Skin::Xero => (crate::coa::XERO_TYPES.iter().find(|(_, n)| *n == ty).map(|(k, _)| *k).unwrap_or("EXPENSE"), String::new(), false),
+                    };
+                    ("accounts.create", json!({"code": s.code.trim(), "name": s.name.trim(), "type": kind, "detail_type": detail, "description": s.memo.trim(),
+                        "tax_rate_id": s.tax.as_ref().map(|x| x.id), "bank_type": if kind == "BANK" { Some(if card { "CREDITCARD" } else { "BANK" }) } else { None }}))
                 }
                 Route::NewProduct => {
                     if s.name.trim().is_empty() { app.form = Some(s); return app.toast("Enter a name", true); }
@@ -119,6 +145,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                     let (msg, next) = match &app.route {
                         Route::NewContact(c) => ("Saved", v["id"].as_i64().map(Route::Contact).unwrap_or(if *c { Route::Customers } else { Route::Vendors })),
                         Route::NewProduct => ("Product saved", Route::Products),
+                        Route::NewAccount => ("Account created", Route::Chart),
                         Route::Transfer => ("Transfer recorded", Route::Banking(None)),
                         _ => ("Journal entry posted", Route::Report("journal-report".into())),
                     };
@@ -167,6 +194,24 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 ui::card(column![
                     row![pick("Transfer funds from", &s.from, Msg::From), pick("Transfer funds to", &s.to, Msg::To)].spacing(14),
                     row![ui::field("Transfer amount", &s.amount, |v| Message::Form(Msg::Amount(v))), ui::field("Date", &s.date, |v| Message::Form(Msg::Date(v))), ui::field("Memo", &s.memo, |v| Message::Form(Msg::Memo(v)))].spacing(14),
+                ].spacing(14)),
+                footer(s.busy),
+            ].spacing(14).into())
+        }
+        Route::NewAccount => {
+            let qb = app.skin == Skin::QuickBooks;
+            let types: Vec<String> = if qb { crate::coa::QB_TYPES.iter().map(|t| t.name.to_string()).collect() } else { crate::coa::XERO_TYPES.iter().map(|(_, n)| n.to_string()).collect() };
+            let details: Vec<String> = crate::coa::QB_TYPES.iter().find(|t| Some(t.name.to_string()) == s.acct_type).map(|t| t.details.iter().map(|(d, _)| d.to_string()).collect()).unwrap_or_default();
+            let taxes = app.lk.tax_opts();
+            let type_pick = column![ui::label("Account type"), pick_list(types, s.acct_type.clone(), |v| Message::Form(Msg::AcctType(v))).padding([7, 10]).text_size(14).style(theme::pick).width(Fill)].spacing(5).width(Fill);
+            let mut first = row![type_pick].spacing(14);
+            if qb { first = first.push(column![ui::label("Detail type"), pick_list(details, s.detail.clone(), |v| Message::Form(Msg::Detail(v))).padding([7, 10]).text_size(14).style(theme::pick).width(Fill)].spacing(5).width(Fill)); }
+            let tax = column![ui::label(if qb { "Default tax code" } else { "Tax" }), pick_list(taxes, s.tax.clone(), |x| Message::Form(Msg::Tax(x))).placeholder("None").padding([7, 10]).text_size(14).style(theme::pick).width(Fill)].spacing(5).width(Fill);
+            ui::page(ui::h1(if qb { "New account" } else { "Add new account" }), vec![], column![
+                ui::card(column![
+                    first,
+                    row![ui::field("Name", &s.name, |v| Message::Form(Msg::Name(v))), ui::field_ph(if qb { "Number" } else { "Code" }, "Leave blank to number it for you", &s.code, |v| Message::Form(Msg::Code(v)))].spacing(14),
+                    row![ui::field_ph("Description", "Optional", &s.memo, |v| Message::Form(Msg::Memo(v))), tax].spacing(14),
                 ].spacing(14)),
                 footer(s.busy),
             ].spacing(14).into())

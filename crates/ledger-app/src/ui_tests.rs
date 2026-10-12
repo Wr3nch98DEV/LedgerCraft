@@ -541,3 +541,34 @@ fn settings_users_and_email() {
     assert!(st.get("smtp_pass").is_none(), "password isn't readable");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn new_account_with_detail_type() {
+    use crate::forms::Msg as F;
+    let (mut app, dir) = demo_app("newaccount", Skin::QuickBooks);
+    let _ = app.update(Message::Nav(Route::Chart));
+    app.data = Some(app.be.call_now("accounts.list", json!({})).unwrap());
+    let _ = app.update(Message::Nav(Route::NewAccount));
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["New account", "Account type", "Detail type", "Number"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    // Credit card type → BANK account flagged as a credit card.
+    let _ = app.update(Message::Form(F::AcctType("Credit Card".into())));
+    assert_eq!(app.form.as_ref().unwrap().detail.as_deref(), Some("Credit Card"));
+    let _ = app.update(Message::Form(F::AcctType("Other Expense".into())));
+    let _ = app.update(Message::Form(F::Detail("Penalties & Settlements".into())));
+    let _ = app.update(Message::Form(F::Name("Parking fines".into())));
+    let msgs = click(&app, "Save");
+    assert!(matches!(msgs.as_slice(), [Message::Form(F::Save)]), "{msgs:?}");
+    let _ = app.update(Message::Form(F::Save));
+    assert!(app.form.as_ref().unwrap().busy, "sent to the engine");
+    // The engine call the form makes:
+    let id = app.be.call_now("accounts.create", json!({"code": "", "name": "Parking fines", "type": "OVERHEADS", "detail_type": "Penalties & Settlements", "description": "", "tax_rate_id": null, "bank_type": null})).unwrap()["id"].as_i64().unwrap();
+    let a = app.be.call_now("accounts.get", json!({"id": id})).unwrap();
+    assert_eq!((a["type"].as_str(), a["detail_type"].as_str()), (Some("OVERHEADS"), Some("Penalties & Settlements")));
+    assert!(!a["code"].as_str().unwrap().is_empty(), "numbered automatically");
+    assert_eq!(crate::coa::qb_type("OVERHEADS", ""), "Other Expense");
+    let _ = std::fs::remove_dir_all(dir);
+}

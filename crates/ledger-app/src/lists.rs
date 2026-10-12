@@ -255,22 +255,6 @@ pub fn products(app: &App) -> Element<'_, Message> {
     ui::page(ui::h1(title), vec![ui::btn_primary("New", Some(Message::Nav(Route::NewProduct)))], column![note, search_and_tabs(app, &[]), ui::table(&cols, rows, "No products or services yet.")].spacing(16).into())
 }
 
-/// QuickBooks shows a "detail type" under each account type; derived from the engine's type.
-fn detail_type(kind: &str) -> &'static str {
-    match kind {
-        "BANK" => "Checking / savings", "CURRENT" => "Other current assets", "INVENTORY" => "Inventory", "PREPAYMENT" => "Prepaid expenses", "FIXED" => "Machinery & equipment",
-        "NONCURRENT" => "Other long-term assets", "CURRLIAB" => "Other current liabilities", "TERMLIAB" | "LIABILITY" => "Long-term liabilities", "EQUITY" => "Owner's equity",
-        "REVENUE" | "SALES" => "Sales of product income", "OTHERINCOME" => "Other primary income", "DIRECTCOSTS" => "Supplies & materials - COGS", "EXPENSE" | "OVERHEADS" => "Other business expenses",
-        "DEPRECIATN" => "Depreciation", _ => "",
-    }
-}
-fn qb_type(kind: &str) -> &'static str {
-    match kind {
-        "BANK" => "Bank", "CURRENT" | "PREPAYMENT" | "INVENTORY" => "Other Current Assets", "FIXED" => "Fixed Assets", "NONCURRENT" => "Other Assets",
-        "CURRLIAB" => "Other Current Liabilities", "TERMLIAB" | "LIABILITY" => "Long Term Liabilities", "EQUITY" => "Equity",
-        "REVENUE" | "SALES" => "Income", "OTHERINCOME" => "Other Income", "DIRECTCOSTS" => "Cost of Goods Sold", "EXPENSE" | "OVERHEADS" | "DEPRECIATN" => "Expenses", _ => "Other",
-    }
-}
 
 pub fn chart(app: &App) -> Element<'_, Message> {
     if let Some(e) = loading_or_error(app, "Chart of accounts") { return e; }
@@ -285,10 +269,12 @@ pub fn chart(app: &App) -> Element<'_, Message> {
         let bal = sign * i(&a["ytd_balance"]);
         let bank_id = if kind == "BANK" { a["id"].as_i64() } else { None };
         let cells: Vec<Element<Message>> = match app.skin {
-            Skin::QuickBooks => vec![ui::cell_muted(st(a, "code")), ui::cell(st(a, "name")), ui::cell_muted(qb_type(kind)), ui::cell_muted(detail_type(kind)), ui::cell_money(bal)],
-            Skin::Xero => vec![ui::cell_muted(st(a, "code")), ui::cell(st(a, "name")), ui::cell_muted(kind.to_string()), ui::cell_muted(st(a, "tax_rate_name")), ui::cell_money(bal)],
+            Skin::QuickBooks => vec![ui::cell_muted(st(a, "code")), ui::cell(st(a, "name")), ui::cell_muted(crate::coa::qb_type(kind, st(a, "bank_type"))),
+                ui::cell_muted(crate::coa::detail_type(kind, st(a, "bank_type"), st(a, "detail_type")).to_string()), ui::cell_money(bal)],
+            Skin::Xero => vec![ui::cell_muted(st(a, "code")), ui::cell(st(a, "name")), ui::cell_muted(crate::coa::xero_type(kind)), ui::cell_muted(st(a, "tax_rate_name")), ui::cell_money(bal)],
         };
         (cells, bank_id.map(|id| Message::Nav(Route::Banking(Some(id)))))
     }).collect();
-    ui::page(ui::h1("Chart of accounts"), vec![ui::btn_primary("New", None)], ui::table(&cols, rows, "No accounts."))
+    let new = if app.skin == Skin::QuickBooks { "New" } else { "Add account" };
+    ui::page(ui::h1("Chart of accounts"), vec![ui::btn_primary(new, Some(Message::Nav(Route::NewAccount)))], ui::table(&cols, rows, "No accounts."))
 }

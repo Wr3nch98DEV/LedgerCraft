@@ -47,6 +47,7 @@ pub enum Route {
     Deposit,
     Reconcile,
     NewProduct,
+    NewAccount,
     Journal,
     Placeholder(&'static str),
 }
@@ -177,7 +178,7 @@ pub fn parse_route(s: &str) -> Option<Route> {
         "customers" => Route::Customers, "products" => Route::Products, "expenses" => Route::Expenses, "bills" => Route::Bills, "vendors" => Route::Vendors,
         "pos" => Route::PurchaseOrders, "contacts" => Route::Contacts, "contact" => Route::Contact(id(1)?), "banking" => Route::Banking(id(1)), "chart" => Route::Chart,
         "reports" => Route::Reports, "report" => Route::Report(parts.get(1)?.to_string()), "settings" => Route::Settings, "setup" => Route::Setup,
-        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
+        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
         _ => return None,
     })
 }
@@ -350,7 +351,7 @@ impl App {
             Route::Check(acc) => payments::open_spend(self, acc, true),
             Route::Deposit => payments::open_deposit(self),
             Route::Reconcile => crate::reconcile::load(self),
-            Route::NewContact(_) | Route::NewProduct | Route::Journal | Route::Transfer => forms::open(self),
+            Route::NewContact(_) | Route::NewProduct | Route::NewAccount | Route::Journal | Route::Transfer => forms::open(self),
             Route::Payroll | Route::PayRun(_) | Route::Taxes | Route::TaxReturn(_) | Route::Projects | Route::Mileage => people::load(self),
             Route::Setup => setup::load(self),
             Route::Settings => crate::settings::load(self),

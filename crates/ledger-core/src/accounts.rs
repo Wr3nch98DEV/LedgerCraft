@@ -49,6 +49,9 @@ pub struct AccountInput {
     pub bank_account_number: Option<String>,
     #[serde(default)]
     pub currency: Option<String>,
+    /// QuickBooks detail type; `None` on update keeps the current one.
+    #[serde(default)]
+    pub detail_type: Option<String>,
 }
 
 impl Ledger {
@@ -82,23 +85,40 @@ impl Ledger {
     }
 
     pub fn create_account(&self, a: &AccountInput) -> Result<i64> {
-        if a.code.trim().is_empty() || a.name.trim().is_empty() { return invalid("account code and name are required"); }
+        if a.name.trim().is_empty() { return invalid("account name is required"); }
         if a.code.len() > 10 { return invalid("account code must be 10 characters or fewer"); }
         let class = class_of(&a.kind)?;
-        if self.account_by_code(a.code.trim())?.is_some() { return invalid(format!("account code {} is already used", a.code)); }
+        // Account numbers are optional in QuickBooks: pick the next free one in the type's range.
+        let code = if a.code.trim().is_empty() { self.next_account_code(&a.kind)? } else { a.code.trim().to_string() };
+        if self.account_by_code(&code)?.is_some() { return invalid(format!("account code {code} is already used")); }
         let is_bank = a.kind == "BANK";
         self.conn.execute(
-            "INSERT INTO accounts(code, name, type, class, tax_rate_id, description, enable_payments, show_in_expense_claims, dashboard_watch, bank_type, bank_account_number, currency)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            params![a.code.trim(), a.name.trim(), a.kind, class, a.tax_rate_id, a.description, (a.enable_payments || is_bank) as i64,
+            "INSERT INTO accounts(code, name, type, class, tax_rate_id, description, enable_payments, show_in_expense_claims, dashboard_watch, bank_type, bank_account_number, currency, detail_type)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![code, a.name.trim(), a.kind, class, a.tax_rate_id, a.description, (a.enable_payments || is_bank) as i64,
                 a.show_in_expense_claims as i64, (a.dashboard_watch || is_bank) as i64,
                 if is_bank { Some(a.bank_type.clone().unwrap_or_else(|| "BANK".into())) } else { None },
-                a.bank_account_number, if is_bank { Some(a.currency.clone().unwrap_or(self.base_currency()?)) } else { None }],
+                a.bank_account_number, if is_bank { Some(a.currency.clone().unwrap_or(self.base_currency()?)) } else { None }, a.detail_type.clone().unwrap_or_default().trim()],
         )?;
         let id = self.conn.last_insert_rowid();
-        self.audit("CREATE", "account", Some(id), None, Some(json!({"code": a.code, "name": a.name, "type": a.kind})))?;
-        self.index_search("account", id, &format!("{} {}", a.code, a.name), &a.description)?;
+        self.audit("CREATE", "account", Some(id), None, Some(json!({"code": code, "name": a.name, "type": a.kind})))?;
+        self.index_search("account", id, &format!("{} {}", code, a.name), &a.description)?;
         Ok(id)
+    }
+
+    /// Next free numeric code after the highest one used by accounts of this type
+    /// (or of its class), e.g. 404 after 403 for an expense.
+    pub fn next_account_code(&self, kind: &str) -> Result<String> {
+        let class = class_of(kind)?;
+        let codes: Vec<(String, String)> = {
+            let mut st = self.conn.prepare("SELECT code, type FROM accounts WHERE class = ?1")?;
+            st.query_map([class], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?
+        };
+        let max = |same_type: bool| codes.iter().filter(|(_, t)| !same_type || t == kind).filter_map(|(c, _)| c.parse::<i64>().ok()).max();
+        let base = max(true).or_else(|| max(false)).unwrap_or(match class { "ASSET" => 1000, "LIABILITY" => 2000, "EQUITY" => 3000, "REVENUE" => 4000, _ => 6000 });
+        let mut n = base + 1;
+        while self.account_by_code(&n.to_string())?.is_some() { n += 1; }
+        Ok(n.to_string())
     }
 
     pub fn update_account(&self, id: i64, a: &AccountInput) -> Result<()> {
@@ -111,9 +131,9 @@ impl Ledger {
         if before["type"] == "BANK" && a.kind != "BANK" { return invalid("bank accounts cannot change type"); }
         self.conn.execute(
             "UPDATE accounts SET code = ?2, name = ?3, type = ?4, class = ?5, tax_rate_id = ?6, description = ?7, enable_payments = ?8,
-               show_in_expense_claims = ?9, dashboard_watch = ?10, bank_account_number = COALESCE(?11, bank_account_number) WHERE id = ?1",
+               show_in_expense_claims = ?9, dashboard_watch = ?10, bank_account_number = COALESCE(?11, bank_account_number), detail_type = COALESCE(?12, detail_type) WHERE id = ?1",
             params![id, a.code.trim(), a.name.trim(), a.kind, class, a.tax_rate_id, a.description, a.enable_payments as i64,
-                a.show_in_expense_claims as i64, a.dashboard_watch as i64, a.bank_account_number],
+                a.show_in_expense_claims as i64, a.dashboard_watch as i64, a.bank_account_number, a.detail_type.as_deref().map(str::trim)],
         )?;
         self.audit("UPDATE", "account", Some(id), Some(before), Some(json!({"code": a.code, "name": a.name, "type": a.kind})))?;
         self.index_search("account", id, &format!("{} {}", a.code, a.name), &a.description)?;

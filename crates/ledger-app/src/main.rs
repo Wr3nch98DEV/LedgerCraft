@@ -5,6 +5,7 @@
 mod app;
 mod backend;
 mod banking;
+mod coa;
 mod dashboard;
 mod doc;
 mod forms;

@@ -447,6 +447,21 @@ fn excluded_bank_lines() {
 }
 
 #[test]
+fn account_detail_types_and_auto_numbers() {
+    let l = org();
+    let id = l.create_account(&ledger_core::accounts::AccountInput { code: "".into(), name: "Google Ads".into(), kind: "EXPENSE".into(), detail_type: Some("Advertising/Promotional".into()), ..Default::default() }).unwrap();
+    let a = l.get_account(id).unwrap();
+    assert_eq!(a["detail_type"], "Advertising/Promotional");
+    let code: i64 = a["code"].as_str().unwrap().parse().expect("numbered automatically");
+    let id2 = l.create_account(&ledger_core::accounts::AccountInput { code: "".into(), name: "Trade shows".into(), kind: "EXPENSE".into(), ..Default::default() }).unwrap();
+    assert_eq!(l.get_account(id2).unwrap()["code"].as_str().unwrap().parse::<i64>().unwrap(), code + 1, "next number in sequence");
+    // Updating without a detail type keeps it.
+    l.update_account(id, &ledger_core::accounts::AccountInput { code: code.to_string(), name: "Google Ads (search)".into(), kind: "EXPENSE".into(), ..Default::default() }).unwrap();
+    assert_eq!(l.get_account(id).unwrap()["detail_type"], "Advertising/Promotional");
+    assert!(l.create_account(&ledger_core::accounts::AccountInput { code: "".into(), name: "".into(), kind: "EXPENSE".into(), ..Default::default() }).is_err());
+}
+
+#[test]
 fn reports_add_up() {
     let l = org();
     let sales = acct(&l, "200");
