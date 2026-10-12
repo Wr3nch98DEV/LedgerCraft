@@ -24,6 +24,11 @@ pub struct Line {
 
 pub struct Editor {
     pub kind: String,
+    /// Desktop grid: type-ahead boxes for each line's item and account (QuickFill), and the
+    /// (item, account) per line they were built for.
+    pub item_boxes: Vec<combo_box::State<Opt>>,
+    pub acct_boxes: Vec<combo_box::State<Opt>>,
+    pub box_sig: Vec<(Option<i64>, Option<i64>)>,
     /// Form template (branding theme); None = the default.
     pub template: Option<Opt>,
     pub id: Option<i64>,
@@ -213,7 +218,7 @@ impl Editor {
         let style = app.date_style();
         let today = ui::today_iso();
         let mut e = Editor {
-            kind: kind.to_string(), template: None, id: None, doc: None, contact: None, contact_text: String::new(),
+            kind: kind.to_string(), template: None, item_boxes: vec![], acct_boxes: vec![], box_sig: vec![], id: None, doc: None, contact: None, contact_text: String::new(),
             contacts: combo_box::State::new(app.lk.contact_opts(sales(kind))),
             date: ui::date(&today, style), due: if matches!(kind, "ACCREC" | "ACCPAY") { ui::date(&ui::add_days_iso(&today, 14), style) } else { String::new() },
             reference: String::new(), number: String::new(),
@@ -350,6 +355,20 @@ fn fill_from(app: &App, e: &mut Editor, d: &Value) {
     e.pay_amount = if due_amt > 0 { ui::plain(due_amt) } else { String::new() };
     e.doc = Some(d.clone());
     e.editing = false;
+}
+
+/// Keep the grid's type-ahead boxes in step with the lines (rebuilt when lines or their
+/// items/accounts change, so each box shows its line's choice).
+pub fn sync_boxes(app: &mut App) {
+    if !app.desktop() { return; }
+    let items = app.lk.item_opts();
+    let accts = app.lk.account_opts(|a| a["type"] != "BANK");
+    let Some(e) = app.doc.as_mut() else { return };
+    let sig: Vec<(Option<i64>, Option<i64>)> = e.lines.iter().map(|l| (l.item.as_ref().map(|o| o.id), l.account.as_ref().map(|o| o.id))).collect();
+    if sig == e.box_sig && e.item_boxes.len() == e.lines.len() { return; }
+    e.item_boxes = e.lines.iter().map(|l| combo_box::State::with_selection(items.clone(), l.item.as_ref())).collect();
+    e.acct_boxes = e.lines.iter().map(|l| combo_box::State::with_selection(accts.clone(), l.account.as_ref())).collect();
+    e.box_sig = sig;
 }
 
 pub fn update(app: &mut App, m: Msg) -> Task<Message> {

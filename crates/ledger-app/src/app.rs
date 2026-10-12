@@ -669,7 +669,7 @@ impl App {
             Message::ListTab(t) => { self.list_tab = t; self.load() }
             Message::DropToast(id) => { self.toasts.retain(|t| t.0 != id); Task::none() }
             Message::Key(ev) => self.on_key(ev),
-            Message::Doc(m) => doc::update(self, m),
+            Message::Doc(m) => { let t = doc::update(self, m); doc::sync_boxes(self); t }
             Message::Pay(m) => payments::update(self, m),
             Message::Bank(m) => banking::update(self, m),
             Message::Report(m) => reports::update(self, m),

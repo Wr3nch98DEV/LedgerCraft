@@ -2548,3 +2548,19 @@ fn desktop_menu_arrow_keys() {
     assert_eq!(app.menu, Some("Help"));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+#[ignore]
+fn render_invoice_quickfill() {
+    use crate::doc::Msg as D;
+    let (mut app, dir) = desktop_app("quickfill-shot");
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None })); settle(&mut app, t);
+    let item = app.lk.item_opts()[0].clone();
+    for m in [D::Contact(app.lk.contact_opts(true)[0].clone()), D::Item(0, item)] { let t = app.update(Message::Doc(m)); settle(&mut app, t); }
+    assert_eq!(app.doc.as_ref().unwrap().item_boxes.len(), app.doc.as_ref().unwrap().lines.len());
+    let _ = std::fs::remove_file(std::env::temp_dir().join("lc-route-wgpu.png"));
+    let _g = sim_lock();
+    let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
+    ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join("lc-route.png")).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}

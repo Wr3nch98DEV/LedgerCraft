@@ -173,18 +173,26 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
                 if right { ti.align_x(iced::alignment::Horizontal::Right).into() } else { ti.into() }
             } else if right { ui::num(val.to_string()) } else { ui::cell(val.to_string()) }
         };
+        // Item and Account columns take typing (QuickFill); other lists are drop-downs.
+        let quick = |boxes: &'a Vec<combo_box::State<Opt>>, opts: &Vec<Opt>, sel: &Option<Opt>, f: fn(usize, Opt) -> Msg| -> Element<'a, Message> {
+            match boxes.get(n) {
+                Some(st) if editable => combo_box(st, "", sel.as_ref(), move |o| Message::Doc(f(n, o))).padding([4, 5]).size(13).input_style(theme::cell_input).width(Fill).into(),
+                _ if editable => pick_list(opts.clone(), sel.clone(), move |o| Message::Doc(f(n, o))).padding([4, 5]).text_size(13).style(theme::pick).width(Fill).into(),
+                _ => ui::cell(sel.as_ref().map(|o| o.label.clone()).unwrap_or_default()),
+            }
+        };
         let pick = |opts: &Vec<Opt>, sel: &Option<Opt>, f: fn(usize, Opt) -> Msg| -> Element<'_, Message> {
             if editable { pick_list(opts.clone(), sel.clone(), move |o| Message::Doc(f(n, o))).padding([4, 5]).text_size(13).style(theme::pick).width(Fill).into() }
             else { ui::cell(sel.as_ref().map(|o| o.label.clone()).unwrap_or_default()) }
         };
         let del: Element<Message> = if editable { button(icon("trash", 13.0, k.faint)).style(theme::ghost).padding(3).on_press(Message::Doc(Msg::RemoveLine(n))).into() } else { Space::new().into() };
         let cells: Vec<Element<Message>> = if !bills {
-            vec![pick(&items, &l.item, Msg::Item), input(&l.description, Msg::Desc, false), input(&l.qty, Msg::Qty, true), input(&l.price, Msg::Price, true), ui::num(ui::money(amount)), pick(&taxes, &l.tax, Msg::Tax), del]
+            vec![quick(&e.item_boxes, &items, &l.item, Msg::Item), input(&l.description, Msg::Desc, false), input(&l.qty, Msg::Qty, true), input(&l.price, Msg::Price, true), ui::num(ui::money(amount)), pick(&taxes, &l.tax, Msg::Tax), del]
         } else if e.items_tab {
-            vec![pick(&items, &l.item, Msg::Item), input(&l.description, Msg::Desc, false), input(&l.qty, Msg::Qty, true), input(&l.price, Msg::Price, true), ui::num(ui::money(amount)), del]
+            vec![quick(&e.item_boxes, &items, &l.item, Msg::Item), input(&l.description, Msg::Desc, false), input(&l.qty, Msg::Qty, true), input(&l.price, Msg::Price, true), ui::num(ui::money(amount)), del]
         } else {
             let amt = if parse_e4(&l.qty).unwrap_or(0) == 10000 { l.price.clone() } else { ui::plain(amount) };
-            vec![pick(&accounts, &l.account, Msg::Account), input(&amt, Msg::Amount, true), input(&l.description, Msg::Desc, false), pick(&taxes, &l.tax, Msg::Tax), del]
+            vec![quick(&e.acct_boxes, &accounts, &l.account, Msg::Account), input(&amt, Msg::Amount, true), input(&l.description, Msg::Desc, false), pick(&taxes, &l.tax, Msg::Tax), del]
         };
         let r = row(cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into())).spacing(6).align_y(Alignment::Center).padding([2, 8]);
         grid = grid.push(column![r, ui::hr()]);
