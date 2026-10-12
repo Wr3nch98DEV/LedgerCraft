@@ -8,21 +8,33 @@ use serde_json::Value;
 
 pub const CHARGE: &str = "DELAYEDCHARGE";
 pub const CREDIT: &str = "DELAYEDCREDIT";
+pub const SALES_ORDER: &str = "SALESORDER";
 
 impl Ledger {
     /// Create or update a delayed charge (`credit = false`) or delayed credit.
     pub fn save_delayed(&self, id: Option<i64>, input: &DocInput, credit: bool) -> Result<i64> {
+        self.save_quote_variant(id, input, if credit { CREDIT } else { CHARGE })
+    }
+
+    /// Create or update a sales order (QuickBooks Desktop Enterprise): an open, non-posting order
+    /// that becomes an invoice later.
+    pub fn save_sales_order(&self, id: Option<i64>, input: &DocInput) -> Result<i64> {
+        self.save_quote_variant(id, input, SALES_ORDER)
+    }
+
+    /// Non-posting documents stored as quotes with a subtype; open ("SENT") until invoiced.
+    fn save_quote_variant(&self, id: Option<i64>, input: &DocInput, subtype: &str) -> Result<i64> {
         if let Some(id) = id {
             let (sub, status): (String, String) = self.conn.query_row("SELECT subtype, status FROM documents WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))?;
-            if !sub.starts_with("DELAYED") { return invalid("not a delayed charge or credit"); }
-            if status == "INVOICED" { return invalid("this has already been added to an invoice"); }
+            if sub != subtype { return invalid("that document is a different kind"); }
+            if status == "INVOICED" { return invalid("this has already been invoiced"); }
         }
         let mut d = input.clone();
         d.kind = "QUOTE".into();
         d.status = Some("SENT".into());
         self.atomic(|| {
             let id = self.save_document(id, &d)?;
-            self.conn.execute("UPDATE documents SET subtype = ?2 WHERE id = ?1", rusqlite::params![id, if credit { CREDIT } else { CHARGE }])?;
+            self.conn.execute("UPDATE documents SET subtype = ?2 WHERE id = ?1", rusqlite::params![id, subtype])?;
             Ok(id)
         })
     }

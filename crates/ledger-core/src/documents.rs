@@ -466,9 +466,10 @@ impl Ledger {
     /// List documents of a type, filtered by a status tab, with per-tab counts.
     pub fn list_documents(&self, kind: &str, tab: &str, q: &str, contact_id: Option<i64>, limit: i64, offset: i64) -> Result<Value> {
         let kinds: Vec<&str> = match kind { "CREDIT_SALES" => vec!["ACCRECCREDIT"], "CREDIT_PURCHASES" => vec!["ACCPAYCREDIT"],
-            "SALES" => vec!["ACCREC", "ACCRECCREDIT"], "PURCHASES" => vec!["ACCPAY", "ACCPAYCREDIT"], "DELAYED" => vec!["QUOTE"], k => vec![k] };
-        // Delayed charges/credits are stored as quotes with a subtype; they have their own list.
-        let delayed = match kind { "DELAYED" => 1, "QUOTE" => 0, _ => -1 };
+            "SALES" => vec!["ACCREC", "ACCRECCREDIT"], "PURCHASES" => vec!["ACCPAY", "ACCPAYCREDIT"], "DELAYED" | "SALESORDER" => vec!["QUOTE"], k => vec![k] };
+        // Delayed charges/credits and sales orders are stored as quotes with a subtype; each has its
+        // own list. The subtype filter: '*' = any, '' = plain quotes only, else a LIKE pattern.
+        let delayed = match kind { "DELAYED" => "DELAYED%", "SALESORDER" => "SALESORDER", "QUOTE" => "", _ => "*" };
         let k1 = kinds[0]; let k2 = *kinds.get(1).unwrap_or(&kinds[0]);
         let like = format!("%{}%", q.trim());
         let rows = util::query_json(&self.conn,
@@ -477,7 +478,7 @@ impl Ledger {
                (d.status = 'AUTHORISED' AND d.due_date < date('now','localtime')) AS overdue,
                (SELECT MAX(p.date) FROM payments p WHERE p.document_id = d.id AND p.status <> 'DELETED') AS paid_date
              FROM documents d JOIN contacts c ON c.id = d.contact_id
-             WHERE d.type IN (?1, ?2) AND (?6 IS NULL OR d.contact_id = ?6) AND (?8 = -1 OR (d.subtype LIKE 'DELAYED%') = (?8 = 1))
+             WHERE d.type IN (?1, ?2) AND (?6 IS NULL OR d.contact_id = ?6) AND (?8 = '*' OR (?8 = '' AND d.subtype = '') OR (?8 <> '' AND d.subtype LIKE ?8))
                AND (?3 = 'all' AND d.status <> 'DELETED' OR ?3 = 'overdue' AND d.status = 'AUTHORISED' AND d.due_date < date('now','localtime')
                     OR ?3 = 'awaiting' AND d.status = 'AUTHORISED' OR d.status = upper(?3))
                AND (?4 = '%%' OR d.number LIKE ?4 OR d.reference LIKE ?4 OR c.name LIKE ?4 OR printf('%.2f', d.total / 100.0) LIKE ?4)
@@ -499,7 +500,7 @@ impl Ledger {
                COALESCE(SUM(CASE WHEN status = 'SUBMITTED' THEN total END), 0) AS submitted_total,
                COALESCE(SUM(CASE WHEN status = 'AUTHORISED' THEN base_total * (total - amount_paid - amount_credited) / MAX(total, 1) END), 0) AS awaiting_total,
                COALESCE(SUM(CASE WHEN status = 'AUTHORISED' AND due_date < date('now','localtime') THEN base_total * (total - amount_paid - amount_credited) / MAX(total, 1) END), 0) AS overdue_total
-             FROM documents WHERE type IN (?1, ?2) AND (?3 IS NULL OR contact_id = ?3) AND (?4 = -1 OR (subtype LIKE 'DELAYED%') = (?4 = 1))", params![k1, k2, contact_id, delayed])?;
+             FROM documents WHERE type IN (?1, ?2) AND (?3 IS NULL OR contact_id = ?3) AND (?4 = '*' OR (?4 = '' AND subtype = '') OR (?4 <> '' AND subtype LIKE ?4))", params![k1, k2, contact_id, delayed])?;
         Ok(json!({"rows": rows, "counts": counts}))
     }
 

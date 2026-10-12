@@ -4,7 +4,7 @@
 //! header with CUSTOMER:JOB / BILL TO, line grid, totals block and Save & Close / Save & New.
 
 use crate::app::{App, Message, Opt, Route};
-use crate::doc::{Editor, Msg, delayed, ledger_doc, line_cents, parse_e4, sales};
+use crate::doc::{Editor, Msg, ledger_doc, line_cents, parse_e4, sales};
 use crate::icons::icon;
 use crate::theme::{self, t};
 use crate::ui::{self, BOLD};
@@ -16,7 +16,7 @@ fn form_name(e: &Editor) -> &'static str {
     let receipt = e.kind == "SALESRECEIPT" || e.doc.as_ref().map(|d| d["subtype"] == "RECEIPT").unwrap_or(false);
     match e.kind.as_str() {
         _ if receipt => "Sales Receipt",
-        "ACCREC" => "Invoice", "QUOTE" => "Estimate", "ACCRECCREDIT" => "Credit Memo", "DELAYEDCHARGE" => "Statement Charge", "DELAYEDCREDIT" => "Statement Credit",
+        "ACCREC" => "Invoice", "QUOTE" => "Estimate", "ACCRECCREDIT" => "Credit Memo", "DELAYEDCHARGE" => "Statement Charge", "DELAYEDCREDIT" => "Statement Credit", "SALESORDER" => "Sales Order",
         "ACCPAY" => "Bill", "ACCPAYCREDIT" => "Credit", "PO" => "Purchase Order", _ => "Transaction",
     }
 }
@@ -79,7 +79,7 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
     if !editable && saved && matches!(status, "AUTHORISED") && !(e.doc.as_ref().map(|d| d["amount_paid"].as_i64().unwrap_or(0) != 0 || d["amount_credited"].as_i64().unwrap_or(0) != 0).unwrap_or(false)) {
         ribbon = ribbon.push(rib("swap", "Edit", m(Msg::Edit)));
     }
-    if delayed(&e.kind) && saved && status == "SENT" && !editable { ribbon = ribbon.push(rib("swap", "Edit", m(Msg::Edit))); }
+    if crate::doc::quote_variant(&e.kind) && saved && status == "SENT" && !editable { ribbon = ribbon.push(rib("swap", "Edit", m(Msg::Edit))); }
     ribbon = ribbon.push(container(Space::new()).width(1).height(36).style(theme::rule));
     // Apply Credits (invoice/bill) or apply the credit (credit memo/vendor credit), once saved and open.
     let can_apply = saved && status == "AUTHORISED" && e.doc.as_ref().and_then(|d| d["amount_due"].as_i64()).unwrap_or(0) > 0 && crate::doc::apply_other(&e.kind).is_some();
@@ -88,7 +88,7 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
     if e.kind.ends_with("CREDIT") { ribbon = ribbon.push(rib("check-write", if is_sales { "Give Refund" } else { "Receive Refund" }, if can_apply { m(Msg::RefundOpen) } else { None })); }
     match e.kind.as_str() {
         "ACCREC" => { ribbon = ribbon.push(rib("receive", "Receive Payments", Some(Message::Nav(Route::ReceivePayment(e.contact.as_ref().map(|c| c.id)))))); }
-        "QUOTE" => { ribbon = ribbon.push(rib("sales", "Create Invoice", if saved && matches!(status, "SENT" | "ACCEPTED" | "DRAFT") { m(Msg::Action("to_invoice")) } else { None })); }
+        "QUOTE" | "SALESORDER" => { ribbon = ribbon.push(rib("sales", "Create Invoice", if saved && matches!(status, "SENT" | "ACCEPTED" | "DRAFT") { m(Msg::Action("to_invoice")) } else { None })); }
         "PO" => { ribbon = ribbon.push(rib("expenses", "Enter Bill", if saved && status == "AUTHORISED" { m(Msg::Action("to_bill")) } else { None })); }
         "ACCPAY" => { ribbon = ribbon.push(rib("check-write", "Pay Bills", Some(Message::Nav(Route::PayBills)))); }
         _ => {}
@@ -113,7 +113,7 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
     let title = row![text(form_name(e)).size(30).font(BOLD)].spacing(12).align_y(Alignment::Center);
     let status_label = if status.is_empty() { "" } else { crate::vocab::status(app.skin, &e.kind, status, e.doc.as_ref().map(|d| d["overdue"].as_i64() == Some(1)).unwrap_or(false)) };
     let title = if status_label.is_empty() || status_label == "—" { title } else { title.push(ui::chip(&status_label.to_uppercase(), crate::lists::status_color(status_label))) };
-    let number_label = match e.kind.as_str() { "ACCREC" => "Invoice #", "QUOTE" => "Estimate No.", "ACCRECCREDIT" => "Credit No.", "SALESRECEIPT" => "Sale No.", "PO" => "P.O. No.", "ACCPAY" | "ACCPAYCREDIT" => "Ref. No.", _ => "No." };
+    let number_label = match e.kind.as_str() { "ACCREC" => "Invoice #", "QUOTE" => "Estimate No.", "ACCRECCREDIT" => "Credit No.", "SALESRECEIPT" => "Sale No.", "SALESORDER" => "S.O. No.", "PO" => "P.O. No.", "ACCPAY" | "ACCPAYCREDIT" => "Ref. No.", _ => "No." };
     let header: Element<Message> = if is_sales {
         let mut right = column![row![field(editable, "Date", &e.date, 120.0, Msg::Date), field(editable, number_label, &e.number, 110.0, Msg::Number)].spacing(10)].spacing(8);
         match e.kind.as_str() {

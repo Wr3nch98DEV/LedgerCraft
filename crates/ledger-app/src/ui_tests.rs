@@ -1502,3 +1502,39 @@ fn help_window_and_alt_t() {
     assert_ne!(app.dark, dark, "Alt+T toggles light/dark");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_sales_orders() {
+    use crate::doc::Msg as D;
+    let (mut app, dir) = desktop_app("salesorder");
+    let _ = app.update(Message::Nav(Route::Doc { kind: "SALESORDER".into(), id: None }));
+    assert_eq!(crate::desktop::title(&app, &app.route.clone()), "Create Sales Orders");
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["Sales Order", "S.O. NO.", "Save & Close"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    let _ = app.update(Message::Doc(D::Contact(cust)));
+    let _ = app.update(Message::Doc(D::Desc(0, "40 branded mugs".into())));
+    let _ = app.update(Message::Doc(D::Price(0, "640".into())));
+    let p = app.doc.as_ref().unwrap().payload(&app, "SENT").unwrap();
+    assert_eq!(p["doc"]["type"], "QUOTE");
+    let so = app.be.call_now("docs.saveSalesOrder", p).unwrap()["id"].as_i64().unwrap();
+    // Income Tracker: in the Sales Orders box, not Estimates.
+    let _ = app.update(Message::Nav(Route::AllSales));
+    let mut rows = vec![];
+    for k in ["SALES", "QUOTE", "SALESORDER", "DELAYED"] { rows.extend(app.be.call_now("docs.list", json!({"type": k, "limit": 1000})).unwrap()["rows"].as_array().cloned().unwrap()); }
+    app.data = Some(json!({"rows": rows}));
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        assert!(ui.find("1 SALES ORDERS").is_ok());
+    }
+    // Create Invoice from the order closes it.
+    let inv = app.be.call_now("docs.copy", json!({"id": so, "to": "ACCREC"})).unwrap()["id"].as_i64().unwrap();
+    assert!(inv > 0);
+    let d = app.be.call_now("docs.get", json!({"id": so})).unwrap();
+    assert_eq!(crate::vocab::status(Skin::QuickBooks, "SALESORDER", d["status"].as_str().unwrap(), false), "Closed");
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -381,7 +381,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
             "ACCREC" => "Create Invoices", "QUOTE" => "Create Estimates", "ACCRECCREDIT" => "Create Credit Memos/Refunds", "SALESRECEIPT" => "Enter Sales Receipts",
-            "ACCPAY" => "Enter Bills", "ACCPAYCREDIT" => "Enter Bills (Credit)", "PO" => "Create Purchase Orders", "DELAYEDCHARGE" | "DELAYEDCREDIT" => "Enter Statement Charges", _ => "Transaction",
+            "ACCPAY" => "Enter Bills", "ACCPAYCREDIT" => "Enter Bills (Credit)", "PO" => "Create Purchase Orders", "DELAYEDCHARGE" | "DELAYEDCREDIT" => "Enter Statement Charges", "SALESORDER" => "Create Sales Orders", _ => "Transaction",
         }.into(),
         Route::ReceivePayment(_) => "Receive Payments".into(),
         Route::PayBills => "Pay Bills".into(),
@@ -436,7 +436,7 @@ fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Messag
             e("Make General Journal Entries…", "", nav(Route::Journal)), e("Enter Vehicle Mileage…", "", nav(Route::Mileage)), e("Calendar", "", nav(Route::Calendar)), e("Documents", "", None)],
         "Inventory" => vec![e("Inventory Center", "", nav(Route::Products)), e("Item List", "", nav(Route::Products)), sep(), e("Create Purchase Orders", "", doc_new("PO")),
             e("Purchase Orders List", "", nav(Route::PurchaseOrders)), e("Receive Items", "", Some(Message::ReceiveItems)), e("Enter Bills Against Inventory", "", nav(Route::PurchaseOrders)), e("Adjust Quantity/Value on Hand…", "", nav(Route::AdjustInventory))],
-        "Customers" => vec![e("Customer Center", "Ctrl+J", nav(Route::Customers)), sep(), e("Create Estimates", "", doc_new("QUOTE")), e("Create Sales Orders", "", None),
+        "Customers" => vec![e("Customer Center", "Ctrl+J", nav(Route::Customers)), sep(), e("Create Estimates", "", doc_new("QUOTE")), e("Create Sales Orders", "", doc_new("SALESORDER")),
             e("Create Invoices", "Ctrl+I", doc_new("ACCREC")), e("Enter Sales Receipts", "", doc_new("SALESRECEIPT")), e("Enter Statement Charges", "", doc_new("DELAYEDCHARGE")),
             e("Create Statements…", "", nav(Route::Statements)), e("Assess Finance Charges…", "", None), sep(), e("Receive Payments", "", nav(Route::ReceivePayment(None))),
             e("Create Credit Memos/Refunds", "", doc_new("ACCRECCREDIT")), sep(), e("Income Tracker", "", nav(Route::AllSales)), e("Item List", "", nav(Route::Products))],
@@ -999,7 +999,7 @@ pub fn load_tracker(app: &mut App, sales: bool) -> Task<Message> {
     let g = app.page_gen;
     Task::perform(async move {
         tokio::task::spawn_blocking(move || -> Result<Value, String> {
-            let kinds: &[&str] = if sales { &["SALES", "QUOTE", "DELAYED"] } else { &["ACCPAY", "ACCPAYCREDIT", "PO"] };
+            let kinds: &[&str] = if sales { &["SALES", "QUOTE", "SALESORDER", "DELAYED"] } else { &["ACCPAY", "ACCPAYCREDIT", "PO"] };
             let mut rows = vec![];
             for k in kinds { rows.extend(be.call_now("docs.list", serde_json::json!({"type": k, "limit": 1000}))?["rows"].as_array().cloned().unwrap_or_default()); }
             rows.retain(|r| !matches!(r["status"].as_str(), Some("DELETED")));
@@ -1014,7 +1014,8 @@ fn tracker_bucket(r: &Value, since: &str) -> &'static str {
     let kind = r["type"].as_str().unwrap_or("");
     let st = r["status"].as_str().unwrap_or("");
     match (kind, st) {
-        ("QUOTE", "SENT" | "DRAFT" | "ACCEPTED") if !r["subtype"].as_str().unwrap_or("").starts_with("DELAYED") => "estimates",
+        ("QUOTE", "SENT") if r["subtype"] == "SALESORDER" => "orders",
+        ("QUOTE", "SENT" | "DRAFT" | "ACCEPTED") if r["subtype"].as_str().unwrap_or("").is_empty() => "estimates",
         ("PO", "AUTHORISED" | "DRAFT" | "SUBMITTED") => "estimates",
         ("ACCREC" | "ACCPAY", "AUTHORISED") if r["overdue"].as_i64() == Some(1) => "overdue",
         ("ACCREC" | "ACCPAY", "AUTHORISED" | "DRAFT" | "SUBMITTED") => "open",
@@ -1030,11 +1031,11 @@ pub fn tracker(app: &App, sales: bool) -> Element<'_, Message> {
     let rows = d["rows"].as_array().cloned().unwrap_or_default();
     let since = ui::add_days_iso(&ui::today_iso(), -30);
     let sum = |b: &str| -> (usize, i64) {
-        rows.iter().filter(|r| in_box(r, &since, b)).fold((0, 0), |(n, s), r| (n + 1, s + if b == "paid" { r["total"].as_i64().unwrap_or(0) } else if b == "estimates" { r["total"].as_i64().unwrap_or(0) } else { r["amount_due"].as_i64().unwrap_or(0) }))
+        rows.iter().filter(|r| in_box(r, &since, b)).fold((0, 0), |(n, s), r| (n + 1, s + if matches!(b, "paid" | "estimates" | "orders") { r["total"].as_i64().unwrap_or(0) } else { r["amount_due"].as_i64().unwrap_or(0) }))
     };
     let filter = if app.desk.tracker.is_empty() { "all" } else { app.desk.tracker };
     let boxes: Vec<(&'static str, &'static str, iced::Color)> = if sales {
-        vec![("estimates", "ESTIMATES", hexc(0x2f6fb5)), ("open", "OPEN INVOICES", hexc(0x7a52b0)), ("overdue", "OVERDUE", hexc(0xd7502b)), ("paid", "PAID LAST 30 DAYS", hexc(0x3c9a3e))]
+        vec![("estimates", "ESTIMATES", hexc(0x2f6fb5)), ("orders", "SALES ORDERS", hexc(0x1f8a9a)), ("open", "OPEN INVOICES", hexc(0x7a52b0)), ("overdue", "OVERDUE", hexc(0xd7502b)), ("paid", "PAID LAST 30 DAYS", hexc(0x3c9a3e))]
     } else {
         vec![("estimates", "PURCHASE ORDERS", hexc(0x2f6fb5)), ("open", "OPEN BILLS", hexc(0x7a52b0)), ("overdue", "OVERDUE", hexc(0xd7502b)), ("paid", "PAID LAST 30 DAYS", hexc(0x3c9a3e))]
     };
@@ -1055,14 +1056,14 @@ pub fn tracker(app: &App, sales: bool) -> Element<'_, Message> {
     let rows_el: Vec<(Vec<Element<Message>>, Option<Message>)> = shown.iter().map(|r| {
         let kind = r["type"].as_str().unwrap_or("");
         let sub = r["subtype"].as_str().unwrap_or("");
-        let route_kind = if sub.starts_with("DELAYED") { sub.to_string() } else { kind.to_string() };
-        let status = crate::vocab::status(app.skin, if sub.starts_with("DELAYED") { sub } else { kind }, r["status"].as_str().unwrap_or(""), r["overdue"].as_i64() == Some(1));
+        let route_kind = if crate::doc::quote_variant(sub) { sub.to_string() } else { kind.to_string() };
+        let status = crate::vocab::status(app.skin, if crate::doc::quote_variant(sub) { sub } else { kind }, r["status"].as_str().unwrap_or(""), r["overdue"].as_i64() == Some(1));
         let open = r["amount_due"].as_i64().unwrap_or(0);
         let cid = r["contact_id"].as_i64();
         let action: Element<Message> = match kind {
             "ACCREC" if open > 0 && r["status"] == "AUTHORISED" => ui::link("Receive Payment", Message::Nav(Route::ReceivePayment(cid))),
             "ACCPAY" if open > 0 && r["status"] == "AUTHORISED" => ui::link("Pay Bill", Message::Nav(Route::PayBills)),
-            "QUOTE" if bucket_is(r, &since, "estimates") => ui::link("Create Invoice", Message::Nav(Route::Doc { kind: route_kind.clone(), id: r["id"].as_i64() })),
+            "QUOTE" if bucket_is(r, &since, "estimates") || bucket_is(r, &since, "orders") => ui::link("Create Invoice", Message::Nav(Route::Doc { kind: route_kind.clone(), id: r["id"].as_i64() })),
             _ => Space::new().into(),
         };
         (vec![ui::cell(r["contact_name"].as_str().unwrap_or("").to_string()), ui::cell_muted(type_name(kind, sub)), ui::cell(r["number"].as_str().unwrap_or("").to_string()),
@@ -1075,7 +1076,7 @@ pub fn tracker(app: &App, sales: bool) -> Element<'_, Message> {
         text(if sales { "CUSTOMER:JOB" } else { "VENDOR" }).size(11).font(BOLD).color(k.info),
         text_input("All", &app.list_q).on_input(Message::ListQuery).padding([4, 7]).size(13).style(theme::input).width(220),
         text("STATUS").size(11).font(BOLD).color(k.info),
-        text(match filter { "estimates" => if sales { "Estimates" } else { "Purchase Orders" }, "open" => "Open", "overdue" => "Overdue", "paid" => "Paid", _ => "All" }).size(13),
+        text(match filter { "estimates" => if sales { "Estimates" } else { "Purchase Orders" }, "orders" => "Sales Orders", "open" => "Open", "overdue" => "Overdue", "paid" => "Paid", _ => "All" }).size(13),
         ui::hspace(),
         if filter != "all" { ui::btn("Clear Filter", Some(Message::Desk(Msg::Tracker(filter)))) } else { Space::new().into() },
     ].spacing(10).align_y(Alignment::Center);
@@ -1321,13 +1322,13 @@ pub fn register(app: &App) -> Element<'_, Message> {
 
 // ---------------- Customer / Vendor Center ----------------
 
-const CUSTOMER_TX: [&str; 5] = ["Estimates", "Invoices", "Statement Charges", "Sales Receipts", "Credit Memos"];
+const CUSTOMER_TX: [&str; 6] = ["Estimates", "Sales Orders", "Invoices", "Statement Charges", "Sales Receipts", "Credit Memos"];
 const VENDOR_TX: [&str; 3] = ["Purchase Orders", "Bills", "Vendor Credits"];
 
 /// Engine list type for a Transactions-tab entry, and whether to keep only (or drop) sales receipts.
 fn tx_kind(t: &str) -> (&'static str, Option<bool>) {
     match t {
-        "Estimates" => ("QUOTE", None), "Statement Charges" => ("DELAYED", None), "Sales Receipts" => ("ACCREC", Some(true)), "Invoices" => ("ACCREC", Some(false)),
+        "Estimates" => ("QUOTE", None), "Sales Orders" => ("SALESORDER", None), "Statement Charges" => ("DELAYED", None), "Sales Receipts" => ("ACCREC", Some(true)), "Invoices" => ("ACCREC", Some(false)),
         "Credit Memos" => ("ACCRECCREDIT", None), "Purchase Orders" => ("PO", None), "Bills" => ("ACCPAY", None), _ => ("ACCPAYCREDIT", None),
     }
 }
@@ -1348,8 +1349,8 @@ fn center_transactions(app: &App, customers: bool) -> Element<'_, Message> {
             let rows: Vec<(Vec<Element<Message>>, Option<Message>)> = app.desk.tx_rows.iter().map(|r| {
                 let kind = r["type"].as_str().unwrap_or("");
                 let sub = r["subtype"].as_str().unwrap_or("");
-                let route_kind = if sub.starts_with("DELAYED") { sub.to_string() } else { kind.to_string() };
-                let st = crate::vocab::status(app.skin, if sub.starts_with("DELAYED") { sub } else { kind }, r["status"].as_str().unwrap_or(""), r["overdue"].as_i64() == Some(1));
+                let route_kind = if crate::doc::quote_variant(sub) { sub.to_string() } else { kind.to_string() };
+                let st = crate::vocab::status(app.skin, if crate::doc::quote_variant(sub) { sub } else { kind }, r["status"].as_str().unwrap_or(""), r["overdue"].as_i64() == Some(1));
                 (vec![ui::cell(r["contact_name"].as_str().unwrap_or("").to_string()), ui::cell(r["number"].as_str().unwrap_or("").to_string()), ui::cell(app.d(r["date"].as_str().unwrap_or(""))),
                     ui::cell_muted(app.d(r["due_date"].as_str().unwrap_or(""))), ui::cell_money(r["total"].as_i64().unwrap_or(0)), ui::cell_money(r["amount_due"].as_i64().unwrap_or(0)),
                     text(st).size(13).color(crate::lists::status_color(st)).into()],
@@ -1381,7 +1382,7 @@ fn tabs_row(customers: bool, tx: bool) -> Element<'static, Message> {
 
 fn type_name(kind: &str, sub: &str) -> &'static str {
     match (kind, sub) {
-        (_, "RECEIPT") => "Sales Receipt", (_, "DELAYEDCHARGE") => "Statement Charge", (_, "DELAYEDCREDIT") => "Statement Credit",
+        (_, "RECEIPT") => "Sales Receipt", (_, "DELAYEDCHARGE") => "Statement Charge", (_, "DELAYEDCREDIT") => "Statement Credit", (_, "SALESORDER") => "Sales Order",
         ("ACCREC", _) => "Invoice", ("ACCRECCREDIT", _) => "Credit Memo", ("QUOTE", _) => "Estimate", ("ACCPAY", _) => "Bill", ("ACCPAYCREDIT", _) => "Credit", ("PO", _) => "Purchase Order", _ => "Transaction",
     }
 }
@@ -1444,9 +1445,9 @@ pub fn center(app: &App, customers: bool) -> Element<'_, Message> {
             let rows: Vec<(Vec<Element<Message>>, Option<Message>)> = d["rows"].as_array().cloned().unwrap_or_default().iter().map(|r| {
                 let kind = r["type"].as_str().unwrap_or("");
                 let sub = r["subtype"].as_str().unwrap_or("");
-                let route_kind = if sub.starts_with("DELAYED") { sub.to_string() } else { kind.to_string() };
+                let route_kind = if crate::doc::quote_variant(sub) { sub.to_string() } else { kind.to_string() };
                 (vec![ui::cell(type_name(kind, sub)), ui::cell_muted(r["number"].as_str().unwrap_or("").to_string()), ui::cell(app.d(r["date"].as_str().unwrap_or(""))),
-                    ui::cell_muted(crate::vocab::status(app.skin, if sub.starts_with("DELAYED") { sub } else { kind }, r["status"].as_str().unwrap_or(""), r["overdue"].as_i64() == Some(1))),
+                    ui::cell_muted(crate::vocab::status(app.skin, if crate::doc::quote_variant(sub) { sub } else { kind }, r["status"].as_str().unwrap_or(""), r["overdue"].as_i64() == Some(1))),
                     ui::cell_money(r["amount_due"].as_i64().unwrap_or(0)), ui::cell_money(r["total"].as_i64().unwrap_or(0))],
                  Some(Message::Nav(Route::Doc { kind: route_kind, id: r["id"].as_i64() })))
             }).collect();

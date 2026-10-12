@@ -146,12 +146,14 @@ pub fn memo_schedule(f: &str) -> (&'static str, i64) {
     match f { "Weekly" => ("WEEKLY", 1), "Every two weeks" => ("WEEKLY", 2), "Quarterly" => ("MONTHLY", 3), "Annually" => ("MONTHLY", 12), _ => ("MONTHLY", 1) }
 }
 
-pub(crate) fn sales(kind: &str) -> bool { matches!(kind, "ACCREC" | "QUOTE" | "ACCRECCREDIT" | "SALESRECEIPT" | "DELAYEDCHARGE" | "DELAYEDCREDIT") }
+pub(crate) fn sales(kind: &str) -> bool { matches!(kind, "ACCREC" | "QUOTE" | "ACCRECCREDIT" | "SALESRECEIPT" | "DELAYEDCHARGE" | "DELAYEDCREDIT" | "SALESORDER") }
 pub(crate) fn delayed(kind: &str) -> bool { matches!(kind, "DELAYEDCHARGE" | "DELAYEDCREDIT") }
+/// Non-posting documents stored as quotes with a subtype (delayed charges/credits, sales orders).
+pub(crate) fn quote_variant(kind: &str) -> bool { delayed(kind) || kind == "SALESORDER" }
 pub(crate) fn ledger_doc(kind: &str) -> bool { matches!(kind, "ACCREC" | "ACCPAY" | "ACCRECCREDIT" | "ACCPAYCREDIT") }
 
 pub fn title_for(app: &App, kind: &str) -> &'static str {
-    match kind { "SALESRECEIPT" => "Sales receipt", "DELAYEDCHARGE" => "Delayed charge", "DELAYEDCREDIT" => "Delayed credit", "ACCREC" => app.term("invoice"), "QUOTE" => app.term("quote"), "ACCRECCREDIT" => app.term("credit_note"), "ACCPAY" => app.term("bill"), "ACCPAYCREDIT" => app.term("supplier_credit"), "PO" => app.term("po"), _ => "Document" }
+    match kind { "SALESRECEIPT" => "Sales receipt", "DELAYEDCHARGE" => "Delayed charge", "DELAYEDCREDIT" => "Delayed credit", "SALESORDER" => "Sales order", "ACCREC" => app.term("invoice"), "QUOTE" => app.term("quote"), "ACCRECCREDIT" => app.term("credit_note"), "ACCPAY" => app.term("bill"), "ACCPAYCREDIT" => app.term("supplier_credit"), "PO" => app.term("po"), _ => "Document" }
 }
 
 fn fmt_e4(v: i64) -> String {
@@ -198,7 +200,7 @@ impl Editor {
     }
 
     pub fn editable(&self) -> bool {
-        if delayed(&self.kind) { return self.doc.as_ref().map(|d| d["status"] == "SENT" && self.editing).unwrap_or(true); }
+        if quote_variant(&self.kind) { return self.doc.as_ref().map(|d| d["status"] == "SENT" && self.editing).unwrap_or(true); }
         match self.doc.as_ref().and_then(|d| d["status"].as_str()) { None | Some("DRAFT") | Some("SUBMITTED") => true, Some("AUTHORISED") | Some("SENT") => self.editing, _ => false }
     }
 
@@ -236,7 +238,7 @@ impl Editor {
                 "account_id": l.account.as_ref().map(|a| a.id), "tax_rate_id": l.tax.as_ref().map(|t| t.id)}));
         }
         if lines.is_empty() { return Err("Add at least one line".into()); }
-        let kind = match self.kind.as_str() { "SALESRECEIPT" => "ACCREC", k if delayed(k) => "QUOTE", k => k };
+        let kind = match self.kind.as_str() { "SALESRECEIPT" => "ACCREC", k if quote_variant(k) => "QUOTE", k => k };
         let mut doc = json!({"type": kind, "date": date, "due_date": due, "reference": self.reference, "line_amount_type": self.lat, "terms": self.terms, "lines": lines, "status": status});
         if self.kind == "QUOTE" { doc["expiry_date"] = doc["due_date"].take(); }
         if self.kind == "PO" { doc["delivery_date"] = doc["due_date"].take(); }
@@ -302,7 +304,7 @@ fn line_from(app: &App, taxes: &[Opt], l: &Value, negate: bool) -> Line {
 
 fn fill_from(app: &App, e: &mut Editor, d: &Value) {
     let style = app.date_style();
-    e.kind = match d["subtype"].as_str() { Some(s) if delayed(s) => s, _ => d["type"].as_str().unwrap_or(&e.kind) }.to_string();
+    e.kind = match d["subtype"].as_str() { Some(s) if quote_variant(s) => s, _ => d["type"].as_str().unwrap_or(&e.kind) }.to_string();
     e.contact = d["contact_id"].as_i64().map(|id| Opt { id, label: d["contact_name"].as_str().unwrap_or("").to_string() });
     e.contacts = combo_box::State::with_selection(app.lk.contact_opts(sales(&e.kind)), e.contact.as_ref());
     e.date = ui::date(d["date"].as_str().unwrap_or(""), style);
@@ -613,6 +615,12 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
 fn save(app: &mut App, e: &mut Editor, approve: bool, new_after: bool) -> Task<Message> {
     if e.busy { return Task::none(); }
     let status = if approve { "AUTHORISED" } else { "DRAFT" };
+    if e.kind == "SALESORDER" {
+        return match e.payload(app, "SENT") {
+            Ok(p) => { e.busy = true; e.error = None; app.be.call("docs.saveSalesOrder", p, move |r| Message::Doc(Msg::Saved(r, new_after))) }
+            Err(err) => { e.error = Some(err.clone()); app.toast(err, true) }
+        };
+    }
     if delayed(&e.kind) {
         return match e.payload(app, "SENT") {
             Ok(p) => { e.busy = true; e.error = None; app.be.call("docs.saveDelayed", p, move |r| Message::Doc(Msg::Saved(r, new_after))) }

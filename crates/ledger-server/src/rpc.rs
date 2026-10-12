@@ -229,6 +229,7 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
             Ok(json!({"id": l.create_sales_tax_rate(s(p, "name"), &parts)?}))
         }
         "contacts.set1099" => { need("contacts:write")?; l.set_track_1099(id(p)?, p["on"].as_bool().unwrap_or(true))?; ok() }
+        "docs.saveSalesOrder" => { need("sales:write")?; Ok(json!({"id": l.save_sales_order(oi(p, "id"), &de::<DocInput>(&p["doc"])?)?})) }
         "docs.saveDelayed" => { need("sales:write")?; Ok(json!({"id": l.save_delayed(oi(p, "id"), &de::<DocInput>(&p["doc"])?, p["credit"].as_bool().unwrap_or(false))?})) }
         "docs.openDelayed" => { need("sales:read")?; Ok(json!(l.open_delayed(i(p, "contact_id")?)?)) }
         "docs.setStatus" => { let d = l.get_document(id(p)?)?; need(doc_perm(&d, true))?; l.set_document_status(id(p)?, s(p, "status"))?; ok() }

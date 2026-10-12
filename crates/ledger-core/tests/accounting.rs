@@ -540,6 +540,24 @@ fn sales_tax_by_agency() {
 }
 
 #[test]
+fn sales_orders() {
+    let l = org();
+    let sales = acct(&l, "200");
+    let doc = DocInput { contact_name: Some("Acme".into()), date: "2026-07-01".into(), line_amount_type: Some("NOTAX".into()), lines: vec![line(sales, None, "4", "250")], ..Default::default() };
+    let so = l.save_sales_order(None, &doc).unwrap();
+    assert_eq!(bal(&l, sales), 0, "sales orders post nothing");
+    assert_eq!(l.get_document(so).unwrap()["subtype"], "SALESORDER");
+    let list = |k: &str| l.list_documents(k, "all", "", None, 50, 0).unwrap()["rows"].as_array().unwrap().len();
+    assert_eq!((list("SALESORDER"), list("QUOTE"), list("DELAYED")), (1, 0, 0), "each variant in its own list");
+    // Convert to an invoice; the order closes.
+    let inv = l.copy_document(so, "ACCREC", Some("2026-07-10")).unwrap();
+    assert_eq!(l.get_document(inv).unwrap()["total"], 100000);
+    assert_eq!(l.get_document(so).unwrap()["status"], "INVOICED");
+    assert!(l.save_sales_order(Some(so), &doc).is_err(), "invoiced orders can't be edited");
+    assert!(l.save_delayed(Some(so), &doc, false).is_err(), "kinds can't be mixed");
+}
+
+#[test]
 fn reports_add_up() {
     let l = org();
     let sales = acct(&l, "200");
