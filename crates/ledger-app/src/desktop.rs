@@ -56,6 +56,8 @@ pub struct State {
     pub one_window: bool,
     /// Favorites menu: "Menu ▸ Item" entries, in order.
     pub favorites: Vec<String>,
+    /// Customer Center: jobs (projects) shown under their customers.
+    pub jobs: Vec<Value>,
     /// Build Assemblies: the assembly, its components/builds (from items.components), quantity, date, memo,
     /// and the component list being edited (item, quantity per assembly).
     pub ba_item: Option<crate::app::Opt>,
@@ -120,7 +122,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), JobsLoaded(crate::backend::Reply), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
     /// Remember the Desktop view choices (One Window, icon bar pane).
@@ -296,6 +298,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                 Err(e) => Message::Failed(e),
             })
         }
+        Msg::JobsLoaded(r) => { if let Ok(v) = r { app.desk.jobs = v["projects"].as_array().or(v.as_array()).cloned().unwrap_or_default(); } Task::none() }
         Msg::OpenPrefs(cat) => { app.settings.cat = Some(cat); app.go(Route::Settings) }
         Msg::FavAdd(f) => { if !app.desk.favorites.contains(&f) { app.desk.favorites.push(f); app.save_desk_prefs(); } Task::none() }
         Msg::FavRemove(n) => { if n < app.desk.favorites.len() { app.desk.favorites.remove(n); app.save_desk_prefs(); } Task::none() }
@@ -2449,6 +2452,17 @@ pub fn center(app: &App, customers: bool) -> Element<'_, Message> {
             .style(move |_, s| button::Style { background: if on { Some(iced::Background::Color(k.accent_soft)) } else if matches!(s, button::Status::Hovered) { Some(iced::Background::Color(k.hover)) } else { None },
                 text_color: k.text, border: iced::Border::default(), shadow: Default::default(), snap: true })
             .on_press(Message::Desk(Msg::Select(id))));
+        if customers {
+            for j in app.desk.jobs.iter().filter(|j| j["contact_id"].as_i64() == Some(id)) {
+                let closed = j["status"] != "INPROGRESS";
+                let label = text(format!("◦ {}", j["name"].as_str().unwrap_or(""))).size(12).color(if closed { k.faint } else { k.muted }).width(Fill);
+                let state = text(if closed { "Closed" } else { "" }).size(11).color(k.faint);
+                names = names.push(button(row![Space::new().width(14), label, state].spacing(6)).padding([2, 10]).width(Fill)
+                    .style(move |_, s| button::Style { background: if matches!(s, button::Status::Hovered) { Some(iced::Background::Color(k.hover)) } else { None },
+                        text_color: k.text, border: iced::Border::default(), shadow: Default::default(), snap: true })
+                    .on_press(Message::Desk(Msg::Select(id))));
+            }
+        }
     }
     if app.desk.tx_type.is_some() {
         return column![toolbar, center_transactions(app, customers)].spacing(10).padding(12).height(Fill).into();

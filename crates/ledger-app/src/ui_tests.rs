@@ -2427,3 +2427,14 @@ fn invoice_template_choice_is_saved() {
     assert_eq!(app.be.call_now("docs.get", json!({"id": id})).unwrap()["branding_theme_id"], std_id);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_customer_center_lists_jobs() {
+    let (mut app, dir) = desktop_app("jobs");
+    let t = app.update(Message::Nav(Route::Customers)); settle(&mut app, t);
+    assert!(!app.desk.jobs.is_empty(), "demo projects load as jobs");
+    let job = app.desk.jobs[0]["name"].as_str().unwrap().to_string();
+    let msgs = click(&app, &format!("◦ {job}"));
+    assert!(matches!(msgs.first(), Some(Message::Desk(crate::desktop::Msg::Select(_)))), "{msgs:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}

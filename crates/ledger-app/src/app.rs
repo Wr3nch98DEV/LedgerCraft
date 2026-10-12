@@ -472,6 +472,12 @@ impl App {
             Route::Bills => call("docs.list", json!({"type": "ACCPAY", "tab": self.list_tab, "q": self.list_q, "limit": 300})),
             Route::Expenses => crate::lists::load_expenses(self),
             Route::PurchaseOrders => call("docs.list", json!({"type": "PO", "tab": self.list_tab, "q": self.list_q, "limit": 300})),
+            Route::Customers if self.desktop() => {
+                // Customer:Job — the jobs (projects) are listed under each customer.
+                let t1 = call("contacts.list", json!({"filter": "customers", "q": self.list_q}));
+                let t2 = self.be.call("projects.list", json!({"status": "ALL"}), |r| Message::Desk(crate::desktop::Msg::JobsLoaded(r)));
+                Task::batch([t1, t2])
+            }
             Route::Customers => call("contacts.list", json!({"filter": "customers", "q": self.list_q})),
             Route::Vendors => call("contacts.list", json!({"filter": "suppliers", "q": self.list_q})),
             Route::Contacts => call("contacts.list", json!({"filter": self.list_tab, "q": self.list_q})),
