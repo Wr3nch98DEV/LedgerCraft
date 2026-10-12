@@ -892,3 +892,41 @@ fn desktop_check_register() {
     assert_eq!(crate::desktop::title(&app, &Route::Register(None)), banks[0]["name"].as_str().unwrap(), "window titled with the account");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+fn desktop_rec_session(tag: &str) -> (App, std::path::PathBuf) {
+    let (mut app, dir) = desktop_app(tag);
+    let _ = app.update(Message::Nav(Route::Reconcile));
+    let acc = app.rec.account.as_ref().unwrap().id;
+    let s = app.be.call_now("tickoff.start", json!({"account_id": acc, "statement_date": crate::ui::today_iso(), "ending_balance": 2_000_000})).unwrap();
+    app.rec.session = Some(s);
+    (app, dir)
+}
+
+#[test]
+fn desktop_reconcile_two_columns() {
+    use crate::reconcile::Msg as R;
+    let (mut app, dir) = desktop_rec_session("deskrec");
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["Checks and Payments", "Deposits and Other Credits", "Mark All", "Unmark All", "Leave", "Reconcile Now", "Difference"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    let msgs = click(&app, "Mark All");
+    assert!(matches!(msgs.as_slice(), [Message::Rec(R::TickAll(true))]), "{msgs:?}");
+    let _ = app.update(Message::Rec(R::TickAll(true)));
+    let s = app.rec.session.as_ref().unwrap();
+    assert!(s["items"].as_array().unwrap().iter().all(|i| i["cleared"] == true), "everything ticked");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Renders the Desktop reconcile window to `%TEMP%\lc-deskrec-wgpu.png` (run with --ignored).
+#[test]
+#[ignore]
+fn render_desktop_reconcile() {
+    let (app, dir) = desktop_rec_session("deskrec-shot");
+    let _ = std::fs::remove_file(std::env::temp_dir().join("lc-deskrec-wgpu.png"));
+    let _g = sim_lock();
+    let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
+    ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join("lc-deskrec.png")).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
