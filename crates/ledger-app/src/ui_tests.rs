@@ -962,3 +962,18 @@ fn desktop_lists_and_report_window() {
     assert!(app.report.hide_header);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_report_center() {
+    let (mut app, dir) = desktop_app("deskrc");
+    let _ = app.update(Message::Nav(Route::Reports));
+    app.data = Some(app.be.call_now("reports.catalogue", json!({})).unwrap());
+    let msgs = click(&app, "Vendors & Payables");
+    assert!(matches!(msgs.as_slice(), [Message::Desk(crate::desktop::Msg::ReportCat("Vendors & Payables"))]), "{msgs:?}");
+    let _ = app.update(Message::Desk(crate::desktop::Msg::ReportCat("Vendors & Payables")));
+    let _g = sim_lock();
+    let mut ui = simulator(app.view());
+    for t in ["A/P Aging Summary", "1099 Contractor Summary", "Standard", "Memorized"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    drop(ui);
+    let _ = std::fs::remove_dir_all(dir);
+}

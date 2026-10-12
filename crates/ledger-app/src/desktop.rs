@@ -35,10 +35,12 @@ pub struct State {
     /// Customer/Vendor Center: selected name and its details + transactions.
     pub sel: Option<i64>,
     pub detail: Option<Value>,
+    /// Report Center category.
+    pub report_cat: Option<&'static str>,
 }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str) }
 
 impl App {
     /// Keep the current screen's unsaved state with its window.
@@ -115,6 +117,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                 }).await.unwrap_or_else(|e| Err(e.to_string()))
             }, move |r| Message::Desk(Msg::Detail(id, r)))
         }
+        Msg::ReportCat(c) => { app.desk.report_cat = Some(c); Task::none() }
         Msg::Detail(id, r) => {
             if app.desk.sel == Some(id) { app.desk.detail = r.ok(); }
             Task::none()
@@ -385,6 +388,63 @@ pub fn frame<'a>(app: &'a App, content: Element<'a, Message>) -> Element<'a, Mes
         layers = layers.push(container(opaque(container(list).padding(8).width(400).style(theme::menu))).padding(Padding { top: 72.0, left: 8.0, ..Padding::ZERO }));
     }
     layers.into()
+}
+
+// ---------------- Report Center ----------------
+
+const REPORT_CATS: [&str; 11] = ["Company & Financial", "Customers & Receivables", "Sales", "Jobs, Time & Mileage", "Vendors & Payables", "Purchases", "Inventory",
+    "Employees & Payroll", "Banking", "Accountant & Taxes", "Budgets & Forecasts"];
+
+/// The Report Center category a report sits in (as in QuickBooks Desktop).
+fn report_cat(key: &str) -> &'static str {
+    match key {
+        "profit-and-loss" | "balance-sheet" | "cash-flow-statement" | "executive-summary" | "cash-summary" | "income-by-contact" => "Company & Financial",
+        "aged-receivables" | "receivable-invoice-detail" | "contact-transactions" => "Customers & Receivables",
+        "sales-by-contact" | "sales-by-item" => "Sales",
+        "project-profitability" | "expense-claims" => "Jobs, Time & Mileage",
+        "aged-payables" | "payable-invoice-detail" | "contractor-1099" | "sales-tax-by-agency" | "tax-reconciliation" => "Vendors & Payables",
+        "purchases-by-contact" | "purchases-by-item" => "Purchases",
+        "inventory-summary" | "fixed-asset-register" | "fixed-asset-reconciliation" | "depreciation-schedule" => "Inventory",
+        "payroll-activity" | "leave-balances" => "Employees & Payroll",
+        "bank-summary" | "bank-reconciliation" => "Banking",
+        "budget-summary" | "budget-variance" => "Budgets & Forecasts",
+        _ => "Accountant & Taxes",
+    }
+}
+
+/// Reports ▸ Report Center.
+pub fn report_center(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let us = app.country() == "US";
+    let cat = app.desk.report_cat.unwrap_or("Company & Financial");
+    let mut left = column![].spacing(1);
+    for c in REPORT_CATS {
+        let on = c == cat;
+        left = left.push(button(text(c).size(13).font(if on { BOLD } else { iced::Font::DEFAULT })).style(theme::nav_item(on)).padding([6, 10]).width(Fill).on_press(Message::Desk(Msg::ReportCat(c))));
+    }
+    let mut right = column![text(cat).size(18).font(BOLD)].spacing(8);
+    let mut any = false;
+    for r in d.as_array().cloned().unwrap_or_default() {
+        let key = r["key"].as_str().unwrap_or("").to_string();
+        if report_cat(&key) != cat || (!us && matches!(key.as_str(), "contractor-1099" | "sales-tax-by-agency")) || key == "bank-reconciliation" { continue; }
+        any = true;
+        let title = title(app, &Route::Report(key.clone()));
+        let title = if title == "Report" { r["title"].as_str().unwrap_or("").to_string() } else { title };
+        right = right.push(container(row![
+            column![text(title).size(14).font(BOLD), text(r["description"].as_str().unwrap_or("").to_string()).size(12).color(k.muted)].spacing(2).width(Fill),
+            ui::btn("Run", Some(Message::Nav(Route::Report(key)))),
+        ].spacing(10).align_y(Alignment::Center)).padding([8, 12]).width(Fill).style(theme::card));
+    }
+    if !any { right = right.push(ui::muted("No reports in this category yet.")); }
+    let tabs = row![text("Standard").size(13).font(BOLD), text("Memorized").size(13).color(k.faint), text("Favorites").size(13).color(k.faint), text("Recent").size(13).color(k.faint), text("Contributed").size(13).color(k.faint)].spacing(20);
+    column![
+        tabs,
+        row![
+            container(scrollable(left).style(theme::scroll)).width(230).height(Fill).padding(6).style(theme::card),
+            scrollable(right.width(Fill)).style(theme::scroll).height(Fill),
+        ].spacing(12).height(Fill),
+    ].spacing(10).padding(12).height(Fill).into()
 }
 
 // ---------------- Lists ----------------

@@ -88,6 +88,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::Chart if app.desktop() => crate::desktop::chart(app),
         Route::Chart => lists::chart(app),
         Route::Banking(_) => banking::view(app),
+        Route::Reports if app.desktop() => crate::desktop::report_center(app),
         Route::Reports => reports::centre(app),
         Route::Report(_) => reports::view(app),
         Route::Settings => settings::view(app),
