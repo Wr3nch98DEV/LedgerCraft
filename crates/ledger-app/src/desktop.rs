@@ -47,10 +47,19 @@ pub struct State {
     pub stmt_one: Option<crate::app::Opt>,
     pub stmt_date: String,
     pub stmt_busy: bool,
+    /// Register: the blank entry row at the bottom.
+    pub reg: RegEntry,
 }
 
+/// A transaction typed straight into the register.
+#[derive(Default, Clone)]
+pub struct RegEntry { pub date: String, pub number: String, pub payee: String, pub account: Option<crate::app::Opt>, pub payment: String, pub deposit: String, pub memo: String, pub busy: bool }
+
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str) }
+pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
+
+#[derive(Debug, Clone)]
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply) }
 
 impl App {
     /// Keep the current screen's unsaved state with its window.
@@ -128,6 +137,47 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, move |r| Message::Desk(Msg::Detail(id, r)))
         }
         Msg::ReportCat(c) => { app.desk.report_cat = Some(c); Task::none() }
+        Msg::Reg(f, v) => {
+            let r = &mut app.desk.reg;
+            match f { RegField::Date => r.date = v, RegField::Number => r.number = v, RegField::Payee => r.payee = v, RegField::Memo => r.memo = v,
+                // Payment and Deposit are either/or, as in the register.
+                RegField::Payment => { r.payment = v; if !r.payment.trim().is_empty() { r.deposit.clear(); } }
+                RegField::Deposit => { r.deposit = v; if !r.deposit.trim().is_empty() { r.payment.clear(); } } }
+            Task::none()
+        }
+        Msg::RegAccount(a) => { app.desk.reg.account = Some(a); Task::none() }
+        Msg::RegRecord => {
+            let Some(bank) = app.data.as_ref().and_then(|d| d["account"].as_i64()) else { return Task::none() };
+            let r = app.desk.reg.clone();
+            let date_in = if r.date.trim().is_empty() { app.d(&ui::today_iso()) } else { r.date.clone() };
+            let Some(date) = ui::to_iso(&date_in, app.date_style()) else { return app.toast("Check the date", true) };
+            let Some(acc) = r.account.clone() else { return app.toast("Choose the account (category) for this transaction", true) };
+            let pay = ui::parse_money(&r.payment).unwrap_or(0);
+            let dep = ui::parse_money(&r.deposit).unwrap_or(0);
+            if pay <= 0 && dep <= 0 { return app.toast("Enter a payment or a deposit amount", true); }
+            let amount = if pay > 0 { r.payment.replace(',', "") } else { r.deposit.replace(',', "") };
+            let tax = app.lk.accounts.iter().find(|a| a["id"].as_i64() == Some(acc.id)).and_then(|a| a["tax_rate_id"].as_i64());
+            let mut tx = serde_json::json!({"type": if pay > 0 { "SPEND" } else { "RECEIVE" }, "account_id": bank, "date": date, "reference": r.memo.trim(), "line_amount_type": "INCLUSIVE",
+                "lines": [{"account_id": acc.id, "description": r.memo.trim(), "amount": amount, "tax_rate_id": tax}]});
+            // A number on a payment makes it a check.
+            if pay > 0 && !r.number.trim().is_empty() && r.number.trim().chars().all(|c| c.is_ascii_digit()) { tx["subtype"] = serde_json::json!("CHECK"); tx["check_number"] = serde_json::json!(r.number.trim()); }
+            else if !r.number.trim().is_empty() { tx["reference"] = serde_json::json!(r.number.trim()); }
+            if !r.payee.trim().is_empty() { tx["contact_name"] = serde_json::json!(r.payee.trim()); }
+            app.desk.reg.busy = true;
+            app.be.call("banktx.save", serde_json::json!({"tx": tx}), |r| Message::Desk(Msg::RegSaved(r)))
+        }
+        Msg::RegSaved(r) => {
+            app.desk.reg.busy = false;
+            match r {
+                Ok(_) => {
+                    let date = app.desk.reg.date.clone();
+                    app.desk.reg = RegEntry { date, ..Default::default() };
+                    let t1 = app.toast("Recorded", false);
+                    Task::batch([t1, app.load(), app.load_lookups()])
+                }
+                Err(e) => app.toast(e, true),
+            }
+        }
         Msg::MemDelete(id) => app.be.call("repeating.setStatus", serde_json::json!({"id": id, "status": "DELETED"}), |r| Message::Desk(Msg::MemDone(r, "deleted"))),
         Msg::MemRun => app.be.call("repeating.run", serde_json::json!({}), |r| Message::Desk(Msg::MemDone(r, "run"))),
         Msg::MemDone(r, what) => match r {
@@ -951,9 +1001,13 @@ pub fn register(app: &App) -> Element<'_, Message> {
         container(if *r { tx.align_x(iced::alignment::Horizontal::Right).width(Fill) } else { tx.width(Fill) }).width(Length::FillPortion(*w)).into()
     })).spacing(6).padding([6, 10])).style(theme::header_row).width(Fill);
     let mut list = column![].spacing(0);
-    let mut bal = d["balance"].as_i64().unwrap_or(0);
-    for (n, r) in d["rows"].as_array().cloned().unwrap_or_default().iter().enumerate() {
+    // Oldest first, as in QuickBooks Desktop, with the running balance after each line.
+    let mut rows: Vec<Value> = d["rows"].as_array().cloned().unwrap_or_default();
+    rows.reverse();
+    let mut bal = d["balance"].as_i64().unwrap_or(0) - rows.iter().map(|r| r["amount"].as_i64().unwrap_or(0)).sum::<i64>();
+    for (n, r) in rows.iter().enumerate() {
         let amt = r["amount"].as_i64().unwrap_or(0);
+        bal += amt;
         let desc = r["description"].as_str().unwrap_or("");
         let number = if let Some(no) = desc.strip_prefix("Check ") { no.to_string() } else { r["reference"].as_str().unwrap_or("").to_string() };
         let kind = match r["kind"].as_str().unwrap_or("") { "payment" if amt > 0 => "PMT", "payment" => "BILLPMT", "deposit" => "DEP", "transfer_from" | "transfer_to" => "TRANSFR", _ if desc.starts_with("Check") => "CHK", _ if amt > 0 => "DEP", _ => "EXP" };
@@ -967,7 +1021,6 @@ pub fn register(app: &App) -> Element<'_, Message> {
             if amt > 0 { ui::cell_money(amt) } else { Space::new().into() },
             text(ui::money(bal)).size(13).color(if bal < 0 { k.bad } else { k.text }).align_x(iced::alignment::Horizontal::Right).width(Fill).into(),
         ];
-        bal -= amt;
         let msg = r["document_id"].as_i64().map(|id| Message::Nav(Route::Doc { kind: if amt > 0 { "ACCREC".into() } else { "ACCPAY".into() }, id: Some(id) }));
         let rr = row(cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into())).spacing(6).align_y(Alignment::Center).padding([4, 10]);
         let shade = n % 2 == 1;
@@ -984,9 +1037,28 @@ pub fn register(app: &App) -> Element<'_, Message> {
         ui::btn("Reconcile", nav(Route::Reconcile)),
     ].spacing(10).align_y(Alignment::Center);
     let ending = row![ui::hspace(), text("ENDING BALANCE").size(12).font(BOLD).color(k.info), text(ui::money(d["balance"].as_i64().unwrap_or(0))).size(15).font(BOLD)].spacing(14).align_y(Alignment::Center);
+    // The blank row for typing a new transaction straight into the register.
+    let r = &app.desk.reg;
+    let accounts = app.lk.account_opts(|a| a["type"] != "BANK");
+    let inp = |v: &str, ph: &str, f: RegField, right: bool| -> Element<'_, Message> {
+        let ti = text_input(ph, v).on_input(move |s| Message::Desk(Msg::Reg(f.clone(), s))).on_submit(Message::Desk(Msg::RegRecord)).padding([4, 6]).size(13).style(theme::cell_input);
+        if right { ti.align_x(iced::alignment::Horizontal::Right).into() } else { ti.into() }
+    };
+    let entry_cells: Vec<Element<Message>> = vec![
+        inp(&r.date, &app.d(&ui::today_iso()), RegField::Date, false),
+        inp(&r.number, "Number", RegField::Number, false),
+        column![inp(&r.payee, "Payee", RegField::Payee, false), pick_list(accounts, r.account.clone(), |a| Message::Desk(Msg::RegAccount(a))).placeholder("Account").padding([3, 6]).text_size(12).style(theme::pick).width(Fill)].spacing(2).into(),
+        inp(&r.memo, "Memo", RegField::Memo, false),
+        inp(&r.payment, "", RegField::Payment, true),
+        Space::new().into(),
+        inp(&r.deposit, "", RegField::Deposit, true),
+        ui::btn_primary("Record", if r.busy { None } else { Some(Message::Desk(Msg::RegRecord)) }),
+    ];
+    let entry = container(row(entry_cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into())).spacing(6).align_y(Alignment::Center).padding([6, 10]))
+        .style(theme::accent_soft).width(Fill);
     column![
         top,
-        container(column![head, scrollable(list).style(theme::scroll).height(Fill)]).style(theme::card).width(Fill).height(Fill).clip(true),
+        container(column![head, scrollable(list).anchor_bottom().style(theme::scroll).height(Fill), entry]).style(theme::card).width(Fill).height(Fill).clip(true),
         ending,
     ].spacing(10).padding(12).height(Fill).into()
 }

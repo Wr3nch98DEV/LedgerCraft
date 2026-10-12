@@ -1277,3 +1277,38 @@ fn desktop_give_refund() {
     assert_eq!(app.be.call_now("docs.get", json!({"id": cm})).unwrap()["status"], "PAID");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_register_entry_row() {
+    use crate::desktop::{Msg as W, RegField as F};
+    let (mut app, dir) = desktop_app("regentry");
+    let _ = app.update(Message::Nav(Route::Register(None)));
+    let banks = app.be.call_now("accounts.bank", json!({})).unwrap();
+    let acc = banks[0]["id"].as_i64().unwrap();
+    app.data = Some(json!({"banks": banks, "account": acc, "balance": banks[0]["ledger_balance_fx"], "rows": app.be.call_now("bank.transactions", json!({"id": acc})).unwrap()}));
+    // Missing account → refused before reaching the engine.
+    let _ = app.update(Message::Desk(W::Reg(F::Payment, "45.50".into())));
+    let _ = app.update(Message::Desk(W::RegRecord));
+    assert!(app.toasts.iter().any(|t| t.2) && !app.desk.reg.busy);
+    // Payment and deposit are either/or.
+    let _ = app.update(Message::Desk(W::Reg(F::Deposit, "10".into())));
+    assert!(app.desk.reg.payment.is_empty());
+    let _ = app.update(Message::Desk(W::Reg(F::Payment, "45.50".into())));
+    assert!(app.desk.reg.deposit.is_empty());
+    let expense = app.lk.account_opts(|a| a["code"] == "429").into_iter().next().unwrap();
+    let _ = app.update(Message::Desk(W::RegAccount(expense)));
+    let _ = app.update(Message::Desk(W::Reg(F::Number, "1050".into())));
+    let _ = app.update(Message::Desk(W::Reg(F::Payee, "Corner Hardware".into())));
+    let _ = app.update(Message::Desk(W::RegRecord));
+    assert!(app.desk.reg.busy, "sent to the engine");
+    // What the row sends: a check (it has a number) for 45.50.
+    let tx = json!({"tx": {"type": "SPEND", "account_id": acc, "date": crate::ui::today_iso(), "reference": "", "line_amount_type": "INCLUSIVE", "subtype": "CHECK", "check_number": "1050",
+        "contact_name": "Corner Hardware", "lines": [{"account_id": app.desk.reg.account.as_ref().unwrap().id, "description": "", "amount": "45.50"}]}});
+    let r = app.be.call_now("banktx.save", tx);
+    assert!(r.is_ok(), "{r:?}");
+    let _ = app.update(Message::Desk(W::RegSaved(r)));
+    assert!(app.desk.reg.payment.is_empty() && app.desk.reg.account.is_none(), "row cleared for the next entry");
+    let rows = app.be.call_now("bank.transactions", json!({"id": acc})).unwrap();
+    assert!(rows.as_array().unwrap().iter().any(|r| r["description"] == "Check 1050"));
+    let _ = std::fs::remove_dir_all(dir);
+}
