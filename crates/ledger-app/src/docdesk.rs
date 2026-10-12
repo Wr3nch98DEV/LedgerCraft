@@ -76,7 +76,7 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
         rib("docs", "Email", if saved && is_sales && matches!(status, "AUTHORISED" | "SENT" | "PAID") { m(Msg::Send) } else { None }),
         rib("docs", "Attach File", None),
     ].spacing(2).align_y(Alignment::Center);
-    if !editable && saved && matches!(status, "AUTHORISED") && !(e.doc.as_ref().map(|d| d["amount_paid"].as_i64().unwrap_or(0) != 0).unwrap_or(false)) {
+    if !editable && saved && matches!(status, "AUTHORISED") && !(e.doc.as_ref().map(|d| d["amount_paid"].as_i64().unwrap_or(0) != 0 || d["amount_credited"].as_i64().unwrap_or(0) != 0).unwrap_or(false)) {
         ribbon = ribbon.push(rib("swap", "Edit", m(Msg::Edit)));
     }
     if delayed(&e.kind) && saved && status == "SENT" && !editable { ribbon = ribbon.push(rib("swap", "Edit", m(Msg::Edit))); }
@@ -221,7 +221,39 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
         row![memo, ui::hspace(), tot].align_y(Alignment::Start),
         buttons,
     ].spacing(12).padding(Padding { top: 12.0, left: 16.0, right: 16.0, bottom: 16.0 });
-    column![ribbon, scrollable(container(form).max_width(1250)).style(theme::scroll).height(Fill)].into()
+    column![ribbon, row![scrollable(container(form).max_width(1250)).style(theme::scroll).height(Fill).width(Fill), history_panel(app, e)]].into()
+}
+
+/// The history panel down the right of a form: summary and recent transactions for the name.
+fn history_panel<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
+    let Some(c) = &e.contact else { return Space::new().into() };
+    let k = t();
+    let info = app.lk.contacts.iter().find(|x| x["id"].as_i64() == Some(c.id));
+    let g = |key: &str| info.and_then(|x| x[key].as_str()).unwrap_or("").to_string();
+    let n = |key: &str| info.and_then(|x| x[key].as_i64()).unwrap_or(0);
+    let is_sales = sales(&e.kind);
+    let line = |l: &'static str, v: String| -> Element<'a, Message> { row![text(l).size(12).color(k.muted).width(90), text(if v.is_empty() { "—".into() } else { v }).size(12)].spacing(6).into() };
+    let mut recent = column![text("RECENT TRANSACTIONS").size(11).font(BOLD).color(k.info)].spacing(4);
+    for r in e.history.iter().filter(|r| r["id"].as_i64() != e.id).take(5) {
+        let kind = r["type"].as_str().unwrap_or("");
+        recent = recent.push(button(row![
+            column![text(format!("{} {}", match kind { "ACCREC" => "Invoice", "ACCRECCREDIT" => "Credit Memo", "ACCPAY" => "Bill", _ => "Transaction" }, r["number"].as_str().unwrap_or(""))).size(12),
+                text(app.d(r["date"].as_str().unwrap_or(""))).size(11).color(k.muted)].spacing(0).width(Fill),
+            text(ui::money(r["total"].as_i64().unwrap_or(0))).size(12),
+        ].align_y(Alignment::Center)).style(theme::ghost).padding([3, 2]).width(Fill).on_press(Message::Nav(Route::Doc { kind: kind.into(), id: r["id"].as_i64() })));
+    }
+    if e.history.iter().all(|r| r["id"].as_i64() == e.id) { recent = recent.push(text("No other transactions").size(12).color(k.faint)); }
+    container(column![
+        text(c.label.clone()).size(15).font(BOLD),
+        ui::link("Edit / QuickReport", Message::Nav(Route::Contact(c.id))),
+        text("SUMMARY").size(11).font(BOLD).color(k.info),
+        line("Phone", g("phone")),
+        line("Email", g("email")),
+        line("Open balance", ui::money(n(if is_sales { "receivable" } else { "payable" }))),
+        if is_sales { line("Overdue", ui::money(n("overdue"))) } else { Space::new().into() },
+        ui::hr(),
+        recent,
+    ].spacing(8)).padding(12).width(260).height(Fill).style(theme::soft).into()
 }
 
 /// Extras between the header and the grid: open statement charges for a new invoice.

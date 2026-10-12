@@ -1101,3 +1101,20 @@ fn desktop_doc_lists() {
     }
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_form_history_panel() {
+    use crate::doc::Msg as D;
+    let (mut app, dir) = desktop_app("deskhist");
+    let _ = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None }));
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    let _ = app.update(Message::Doc(D::Contact(cust.clone())));
+    let rows = app.be.call_now("docs.list", json!({"type": "SALES", "contact_id": cust.id, "limit": 6}));
+    let _ = app.update(Message::Doc(D::History(rows)));
+    assert!(!app.doc.as_ref().unwrap().history.is_empty());
+    let _g = sim_lock();
+    let mut ui = simulator(app.view());
+    for t in ["SUMMARY", "RECENT TRANSACTIONS", "Open balance", "Edit / QuickReport"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    drop(ui);
+    let _ = std::fs::remove_dir_all(dir);
+}

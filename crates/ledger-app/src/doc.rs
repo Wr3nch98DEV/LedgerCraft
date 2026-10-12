@@ -53,6 +53,8 @@ pub struct Editor {
     pub items_tab: bool,
     /// Desktop "Save & Close": close the window once saved.
     pub close_after: bool,
+    /// Desktop history panel: the customer's/vendor's recent transactions.
+    pub history: Vec<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -98,6 +100,8 @@ pub enum Msg {
     BillTab(bool),
     /// Desktop: save, then close the window.
     SaveClose,
+    /// Desktop history panel data.
+    History(Result<Value, String>),
     /// Desktop Expenses tab: an amount typed straight in (quantity 1).
     Amount(usize, String),
 }
@@ -162,7 +166,7 @@ impl Editor {
             lines: vec![Line { qty: "1".into(), ..Default::default() }, Line { qty: "1".into(), ..Default::default() }],
             terms: String::new(), busy: false, editing: true,
             pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false,
-            delayed: vec![], added: vec![], items_tab: false, close_after: false,
+            delayed: vec![], added: vec![], items_tab: false, close_after: false, history: vec![],
         };
         if let Some(a) = default_account(app, kind) { for l in &mut e.lines { l.account = Some(a.clone()); l.tax = default_tax(app, Some(a.id)); } }
         e
@@ -233,6 +237,13 @@ fn default_tax(app: &App, account: Option<i64>) -> Option<Opt> {
     app.lk.tax_opts().into_iter().find(|t| t.id == tid)
 }
 
+/// Desktop: load the chosen customer's/vendor's recent transactions for the history panel.
+fn history_task(app: &App, e: &Editor) -> Task<Message> {
+    let Some(c) = e.contact.as_ref().filter(|_| app.desktop()) else { return Task::none() };
+    let kind = if sales(&e.kind) { "SALES" } else { "ACCPAY" };
+    app.be.call("docs.list", json!({"type": kind, "contact_id": c.id, "limit": 6}), |r| Message::Doc(Msg::History(r)))
+}
+
 pub fn open(app: &mut App, kind: String, id: Option<i64>) -> Task<Message> {
     app.doc = Some(Editor::new(app, &kind));
     let prefill = app.prefill_contact.take();
@@ -288,7 +299,14 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
     let style = app.date_style();
     let Some(mut e) = app.doc.take() else { return Task::none() };
     let task = match m {
-        Msg::Loaded(Ok(d)) => { fill_from(app, &mut e, &d); app.data = Some(json!({})); Task::none() }
+        Msg::Loaded(Ok(d)) => {
+            fill_from(app, &mut e, &d);
+            app.data = Some(json!({}));
+            let t = history_task(app, &e);
+            app.doc = Some(e);
+            return t;
+        }
+        Msg::History(r) => { e.history = r.ok().and_then(|v| v["rows"].as_array().cloned()).unwrap_or_default(); Task::none() }
         Msg::Loaded(Err(err)) => { app.error = Some(err); Task::none() }
         Msg::Contact(c) => {
             // Use the contact's defaults for the first line's account (QuickBooks/Xero both do this).
@@ -297,11 +315,12 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             e.contact = Some(c);
             // QuickBooks offers the customer's open delayed charges/credits to add to an invoice.
             e.delayed.clear();
+            let hist = history_task(app, &e);
             if e.kind == "ACCREC" && app.skin == Skin::QuickBooks && e.added.is_empty() {
                 app.doc = Some(e);
-                return app.be.call("docs.openDelayed", json!({"contact_id": cid}), |r| Message::Doc(Msg::Delayed(r)));
+                return Task::batch([hist, app.be.call("docs.openDelayed", json!({"contact_id": cid}), |r| Message::Doc(Msg::Delayed(r)))]);
             }
-            Task::none()
+            hist
         }
         Msg::ContactText(s) => { e.contact_text = s; e.contact = None; Task::none() }
         Msg::Delayed(r) => { e.delayed = r.ok().and_then(|v| v.as_array().cloned()).unwrap_or_default(); Task::none() }
