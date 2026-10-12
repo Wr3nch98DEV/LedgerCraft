@@ -1622,3 +1622,42 @@ fn desktop_pay_liabilities() {
     assert_eq!(after, 0, "liability cleared");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_class_list_and_enter_time() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("classtime");
+    // Class List: add a class.
+    let _ = app.update(Message::Nav(Route::ClassList));
+    app.data = Some(app.be.call_now("tracking.list", json!({})).unwrap());
+    let _ = app.update(Message::Desk(W::ClassNew("Northern Region".into())));
+    let _ = app.update(Message::Desk(W::ClassAdd));
+    let cats = app.data.as_ref().unwrap().as_array().unwrap().clone();
+    let (id, name, mut opts) = match cats.first() {
+        Some(c) => (c["id"].clone(), c["name"].as_str().unwrap().to_string(), c["options"].as_array().unwrap().iter().map(|o| o["name"].as_str().unwrap().to_string()).collect::<Vec<_>>()),
+        None => (json!(null), "Class".into(), vec![]),
+    };
+    opts.push("Northern Region".into());
+    let r = app.be.call_now("tracking.save", json!({"id": id, "name": name, "options": opts}));
+    let _ = app.update(Message::Desk(W::ClassDone(r)));
+    let after = app.be.call_now("tracking.list", json!({})).unwrap();
+    assert!(after.to_string().contains("Northern Region"));
+    // Enter Time: durations and saving against a project task.
+    assert_eq!(crate::desktop::parse_duration("1:30"), Some(90));
+    assert_eq!(crate::desktop::parse_duration("1.5"), Some(90));
+    assert_eq!(crate::desktop::parse_duration("45m"), Some(45));
+    assert_eq!(crate::desktop::parse_duration("0:75"), None);
+    let _ = app.update(Message::Nav(Route::EnterTime));
+    let projects = app.be.call_now("projects.list", json!({"status": "INPROGRESS"})).unwrap();
+    let p = projects["projects"][0].clone();
+    let full = app.be.call_now("projects.get", json!({"id": p["id"]})).unwrap();
+    app.data = Some(json!({"projects": [{"id": p["id"], "name": p["name"], "contact": p["contact_name"], "tasks": full["tasks"]}]}));
+    let _ = app.update(Message::Desk(W::TimeProject(crate::app::Opt { id: p["id"].as_i64().unwrap(), label: "p".into() })));
+    let _ = app.update(Message::Desk(W::TimeTask(crate::app::Opt { id: full["tasks"][0]["id"].as_i64().unwrap(), label: "t".into() })));
+    let _ = app.update(Message::Desk(W::TimeField(1, "2:15".into())));
+    let _ = app.update(Message::Desk(W::TimeSave));
+    assert!(app.desk.time_busy);
+    let r = app.be.call_now("projects.addTime", json!({"project_id": p["id"], "task_id": full["tasks"][0]["id"], "date": crate::ui::today_iso(), "minutes": 135, "description": ""}));
+    assert!(r.is_ok(), "{r:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -67,6 +67,15 @@ pub struct State {
     pub adj_busy: bool,
     /// Pay Liabilities: per liability account (pay?, amount).
     pub liab_pay: Vec<(i64, bool, String)>,
+    /// Class List: the name being added.
+    pub class_new: String,
+    /// Enter Time: project, task, date, duration (h:mm) and notes.
+    pub time_project: Option<crate::app::Opt>,
+    pub time_task: Option<crate::app::Opt>,
+    pub time_date: String,
+    pub time_dur: String,
+    pub time_notes: String,
+    pub time_busy: bool,
 }
 
 /// A transaction typed straight into the register.
@@ -77,7 +86,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
     /// Keep the current screen's unsaved state with its window.
@@ -157,6 +166,42 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, move |r| Message::Desk(Msg::Detail(id, r)))
         }
         Msg::ReportCat(c) => { app.desk.report_cat = Some(c); Task::none() }
+        Msg::ClassNew(v) => { app.desk.class_new = v; Task::none() }
+        Msg::ClassAdd => {
+            let name = app.desk.class_new.trim().to_string();
+            if name.is_empty() { return app.toast("Enter the class name", true); }
+            let cats = app.data.as_ref().and_then(|d| d.as_array().cloned()).unwrap_or_default();
+            // Classes live in the first tracking category (created as "Class" when there's none).
+            let (id, cat_name, mut opts) = match cats.first() {
+                Some(c) => (c["id"].as_i64(), c["name"].as_str().unwrap_or("Class").to_string(), c["options"].as_array().cloned().unwrap_or_default().iter().filter_map(|o| o["name"].as_str().map(String::from)).collect::<Vec<_>>()),
+                None => (None, "Class".to_string(), vec![]),
+            };
+            if opts.iter().any(|o| o.eq_ignore_ascii_case(&name)) { return app.toast("That class already exists", true); }
+            opts.push(name);
+            app.be.call("tracking.save", serde_json::json!({"id": id, "name": cat_name, "options": opts}), |r| Message::Desk(Msg::ClassDone(r)))
+        }
+        Msg::ClassDone(r) => match r {
+            Ok(_) => { app.desk.class_new.clear(); let t1 = app.toast("Class added", false); Task::batch([t1, app.load()]) }
+            Err(e) => app.toast(e, true),
+        },
+        Msg::TimeProject(p) => { app.desk.time_project = Some(p); app.desk.time_task = None; Task::none() }
+        Msg::TimeTask(t) => { app.desk.time_task = Some(t); Task::none() }
+        Msg::TimeField(f, v) => { match f { 0 => app.desk.time_date = v, 1 => app.desk.time_dur = v, _ => app.desk.time_notes = v } Task::none() }
+        Msg::TimeSave => {
+            let (Some(p), Some(task)) = (app.desk.time_project.clone(), app.desk.time_task.clone()) else { return app.toast("Choose the project and task", true) };
+            let Some(minutes) = parse_duration(&app.desk.time_dur) else { return app.toast("Enter the duration as h:mm (e.g. 1:30) or hours (1.5)", true) };
+            let date_in = if app.desk.time_date.is_empty() { app.d(&ui::today_iso()) } else { app.desk.time_date.clone() };
+            let Some(date) = ui::to_iso(&date_in, app.date_style()) else { return app.toast("Check the date", true) };
+            app.desk.time_busy = true;
+            app.be.call("projects.addTime", serde_json::json!({"project_id": p.id, "task_id": task.id, "date": date, "minutes": minutes, "description": app.desk.time_notes.trim()}), |r| Message::Desk(Msg::TimeSaved(r)))
+        }
+        Msg::TimeSaved(r) => {
+            app.desk.time_busy = false;
+            match r {
+                Ok(_) => { app.desk.time_dur.clear(); app.desk.time_notes.clear(); app.toast("Time recorded — it's ready to invoice from the project", false) }
+                Err(e) => app.toast(e, true),
+            }
+        }
         Msg::LiabPick(id, on) => { liab_row(app, id).1 = on; Task::none() }
         Msg::LiabAmt(id, v) => { let r = liab_row(app, id); r.2 = v; r.1 = true; Task::none() }
         Msg::LiabPay => {
@@ -442,6 +487,8 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::Help => "LedgerCraft Help".into(),
         Route::DocCenter => "Doc Center".into(),
         Route::PayLiabilities => "Pay Liabilities".into(),
+        Route::ClassList => "Class List".into(),
+        Route::EnterTime => "Time/Enter Single Activity".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
             "ACCREC" => "Create Invoices", "QUOTE" => "Create Estimates", "ACCRECCREDIT" => "Create Credit Memos/Refunds", "SALESRECEIPT" => "Enter Sales Receipts",
@@ -493,7 +540,7 @@ fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Messag
             e("My Shortcuts", "", Some(Message::Desk(Msg::Pane(Pane::Shortcuts)))), sep(), e(if app.dark { "Light Mode" } else { "Dark Mode" }, "Alt+T", Some(Message::ToggleTheme)), sep(),
             e("Switch to QuickBooks Online-style layout", "", Some(Message::SetLayout(theme::Layout::Online))), e("Switch to Xero-style layout", "", Some(Message::SetLayout(theme::Layout::Xero)))],
         "Lists" => vec![e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)), e("Item List", "", nav(Route::Products)), e("Fixed Asset Item List", "", rep("fixed-asset-register")), e("Price Level List", "", None),
-            e("Sales Tax Code List", "", nav(Route::Taxes)), e("Payroll Item List", "", None), e("Class List", "", None), e("Other Names List", "", None), e("Templates", "", None), e("Memorized Transaction List", "Ctrl+T", nav(Route::Memorized))],
+            e("Sales Tax Code List", "", nav(Route::Taxes)), e("Payroll Item List", "", None), e("Class List", "", nav(Route::ClassList)), e("Other Names List", "", None), e("Templates", "", None), e("Memorized Transaction List", "Ctrl+T", nav(Route::Memorized))],
         "Favorites" => vec![e("Customize Favorites…", "", None)],
         "Company" => vec![e("Home Page", "", nav(Route::Dashboard)), e("Company Snapshot", "", Some(Message::Desk(Msg::Insights(true)))), sep(), e("My Company", "", nav(Route::Settings)),
             e("Company Information…", "", nav(Route::Settings)), e("Set Up Users and Roles…", "", nav(Route::Settings)), sep(), e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)),
@@ -508,7 +555,7 @@ fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Messag
             sep(), e("Sales Tax: Manage Sales Tax…", "", nav(Route::Taxes)), e("Sales Tax: Pay Sales Tax…", "", nav(Route::PaySalesTax)), sep(), e("Create Purchase Orders", "", doc_new("PO")), e("Purchase Orders List", "", nav(Route::PurchaseOrders)),
             sep(), e("Print/E-file 1099s: 1099 Summary", "", rep("contractor-1099")), e("Enter Bills for Received Items", "", None)],
         "Employees" => vec![e("Employee Center", "", nav(Route::Payroll)), e("Payroll Center", "", nav(Route::Payroll)), sep(), e("Pay Employees", "", nav(Route::Payroll)),
-            e("Pay Liabilities", "", nav(Route::PayLiabilities)), e("Process Payroll Forms", "", None), sep(), e("Enter Time", "", None)],
+            e("Pay Liabilities", "", nav(Route::PayLiabilities)), e("Process Payroll Forms", "", None), sep(), e("Enter Time", "", nav(Route::EnterTime))],
         "Banking" => vec![e("Write Checks", "Ctrl+W", nav(Route::Check(None))), e("Order Checks & Envelopes", "", None), e("Enter Credit Card Charges", "", nav(Route::Spend(None))), sep(),
             e("Use Register", "Ctrl+R", nav(Route::Register(None))), e("Make Deposits", "", nav(Route::Deposit)), e("Transfer Funds", "", nav(Route::Transfer)), e("Reconcile", "", nav(Route::Reconcile)),
             sep(), e("Bank Feeds Center", "", nav(Route::Banking(None)))],
@@ -673,6 +720,63 @@ pub fn frame<'a>(app: &'a App, content: Element<'a, Message>) -> Element<'a, Mes
         layers = layers.push(container(opaque(container(list).padding(8).width(400).style(theme::menu))).padding(Padding { top: 72.0, left: 8.0, ..Padding::ZERO }));
     }
     layers.into()
+}
+
+// ---------------- Class List / Enter Time ----------------
+
+/// Lists ▸ Class List: classes (tracking options) by category, with New Class.
+pub fn class_list(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let mut rows: Vec<(Vec<Element<Message>>, Option<Message>)> = vec![];
+    for c in d.as_array().cloned().unwrap_or_default() {
+        for o in c["options"].as_array().cloned().unwrap_or_default() {
+            rows.push((vec![ui::cell(o["name"].as_str().unwrap_or("").to_string()), ui::cell_muted(c["name"].as_str().unwrap_or("").to_string()),
+                ui::cell_muted(if o["status"] == "ACTIVE" || o["status"].is_null() { "Active" } else { "Inactive" })], None));
+        }
+    }
+    let cols: Vec<(&str, u16, bool)> = vec![("Class", 30, false), ("Category", 24, false), ("Status", 12, false)];
+    list_window(&cols, rows, vec![
+        text_input("New class name", &app.desk.class_new).on_input(|v| Message::Desk(Msg::ClassNew(v))).on_submit(Message::Desk(Msg::ClassAdd)).padding([5, 7]).size(13).style(theme::input).width(260).into(),
+        ui::btn_primary("New Class", Some(Message::Desk(Msg::ClassAdd))),
+        ui::hspace(),
+        text("Classes tag transactions for reports by department, location or anything you like.").size(12).color(k.muted).into(),
+    ])
+}
+
+/// "1:30", "1.5" or "90m" → minutes.
+pub fn parse_duration(s: &str) -> Option<i64> {
+    let s = s.trim();
+    if s.is_empty() { return None; }
+    if let Some(m) = s.strip_suffix('m') { return m.trim().parse::<i64>().ok().filter(|m| *m > 0); }
+    if let Some((h, m)) = s.split_once(':') { let (h, m) = (h.parse::<i64>().ok()?, m.parse::<i64>().ok()?); return Some(h * 60 + m).filter(|v| *v > 0 && m < 60); }
+    s.parse::<f64>().ok().map(|h| (h * 60.0).round() as i64).filter(|v| *v > 0)
+}
+
+/// Employees ▸ Enter Time.
+pub fn enter_time(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let projects = d["projects"].as_array().cloned().unwrap_or_default();
+    let p_opts: Vec<crate::app::Opt> = projects.iter().map(|p| crate::app::Opt { id: p["id"].as_i64().unwrap_or(0),
+        label: format!("{}{}", p["contact"].as_str().map(|c| format!("{c}:")).unwrap_or_default(), p["name"].as_str().unwrap_or("")) }).collect();
+    let t_opts: Vec<crate::app::Opt> = app.desk.time_project.as_ref().and_then(|sel| projects.iter().find(|p| p["id"].as_i64() == Some(sel.id)))
+        .map(|p| p["tasks"].as_array().cloned().unwrap_or_default().iter().map(|t| crate::app::Opt { id: t["id"].as_i64().unwrap_or(0), label: t["name"].as_str().unwrap_or("").to_string() }).collect()).unwrap_or_default();
+    let date = if app.desk.time_date.is_empty() { app.d(&ui::today_iso()) } else { app.desk.time_date.clone() };
+    let lbl = |s: &'static str| text(s).size(11).font(BOLD).color(k.info);
+    let body: Element<Message> = if projects.is_empty() { ui::muted("There are no active projects yet — create one in Projects (the Customer Center's jobs) first.") } else { column![
+        row![
+            column![lbl("DATE"), text_input("", &date).on_input(|v| Message::Desk(Msg::TimeField(0, v))).padding([5, 7]).size(13).style(theme::input).width(130)].spacing(3),
+            column![lbl("CUSTOMER:JOB"), pick_list(p_opts, app.desk.time_project.clone(), |o| Message::Desk(Msg::TimeProject(o))).placeholder("Choose a job").padding([5, 7]).text_size(13).style(theme::pick).width(340)].spacing(3),
+            column![lbl("SERVICE ITEM"), pick_list(t_opts, app.desk.time_task.clone(), |o| Message::Desk(Msg::TimeTask(o))).placeholder("Choose a task").padding([5, 7]).text_size(13).style(theme::pick).width(240)].spacing(3),
+        ].spacing(16),
+        row![
+            column![lbl("DURATION"), text_input("h:mm", &app.desk.time_dur).on_input(|v| Message::Desk(Msg::TimeField(1, v))).padding([5, 7]).size(13).style(theme::input).width(130)].spacing(3),
+            column![lbl("NOTES"), text_input("", &app.desk.time_notes).on_input(|v| Message::Desk(Msg::TimeField(2, v))).on_submit(Message::Desk(Msg::TimeSave)).padding([5, 7]).size(13).style(theme::input).width(600)].spacing(3),
+        ].spacing(16),
+        row![ui::hspace(), ui::btn_primary("Save & New", if app.desk.time_busy { None } else { Some(Message::Desk(Msg::TimeSave)) }), ui::btn("Close", Some(Message::Back))].spacing(8),
+    ].spacing(14).into() };
+    container(column![text("Time/Enter Single Activity").size(22).font(BOLD), container(body).padding(16).width(Fill).style(theme::card)].spacing(12)).padding(18).max_width(1100).into()
 }
 
 // ---------------- Pay Liabilities ----------------
