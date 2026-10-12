@@ -532,7 +532,7 @@ pub fn title(app: &App, r: &Route) -> String {
 
 // ---------------- menu bar ----------------
 
-const MENUS: [&str; 14] = ["File", "Edit", "View", "Lists", "Favorites", "Company", "Inventory", "Customers", "Vendors", "Employees", "Banking", "Reports", "Window", "Help"];
+pub(crate) const MENUS: [&str; 14] = ["File", "Edit", "View", "Lists", "Favorites", "Company", "Inventory", "Customers", "Vendors", "Employees", "Banking", "Reports", "Window", "Help"];
 
 /// Width of a menu bar title (fixed so dropdowns can line up under it).
 fn menu_w(name: &str) -> f32 { name.len() as f32 * 6.9 + 16.0 }
@@ -542,7 +542,7 @@ fn doc_new(kind: &str) -> Option<Message> { nav(Route::Doc { kind: kind.into(), 
 fn rep(key: &str) -> Option<Message> { nav(Route::Report(key.into())) }
 
 /// Menu entries: (label, shortcut, action). "-" is a separator; a label starting with "#" is a group heading.
-fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Message>)> {
+pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Message>)> {
     let e = |l: &str, k: &'static str, m: Option<Message>| (l.to_string(), k, m);
     let sep = || ("-".to_string(), "", None);
     match name {

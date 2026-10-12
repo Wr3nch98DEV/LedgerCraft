@@ -1708,3 +1708,74 @@ fn desktop_view_choices_are_remembered() {
     assert_eq!(again.desk.pane, Pane::Balances);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Run a task's work (engine calls) and feed the resulting messages back into the app, like the
+/// real runtime does. Timers (toast dismissal) are cut short.
+fn settle(app: &mut App, task: iced::Task<Message>) {
+    let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+    let mut pending = vec![task];
+    let mut rounds = 0;
+    while let Some(t) = pending.pop() {
+        rounds += 1;
+        if rounds > 200 { break; }
+        let Some(stream) = iced_runtime::task::into_stream(t) else { continue };
+        let actions: Vec<iced_runtime::Action<Message>> = rt.block_on(async {
+            use iced::futures::StreamExt;
+            tokio::time::timeout(std::time::Duration::from_millis(1500), stream.collect::<Vec<_>>()).await.unwrap_or_default()
+        });
+        for a in actions {
+            if let iced_runtime::Action::Output(m) = a { pending.push(app.update(m)); }
+        }
+    }
+}
+
+/// Every enabled Desktop menu item opens a real screen that renders with its data (no placeholders, no panics).
+#[test]
+fn desktop_every_menu_item_opens_a_screen() {
+    let (mut app, dir) = desktop_app("sweep");
+    let mut opened = 0;
+    for menu in crate::desktop::MENUS {
+        for (label, _, msg) in crate::desktop::menu_items(&app, menu) {
+            let Some(Message::Nav(r)) = msg else { continue };
+            if matches!(r, Route::Setup) { continue; }
+            let t = app.update(Message::Nav(r.clone()));
+            settle(&mut app, t);
+            assert!(app.error.is_none(), "{menu} ▸ {label}: {:?}", app.error);
+            assert!(!matches!(app.route, Route::Placeholder(_)), "{menu} ▸ {label} is a placeholder");
+            // Render with the data the screen loads (or while loading).
+            let _g = sim_lock();
+            let _ui = simulator(app.view());
+            opened += 1;
+        }
+    }
+    assert!(opened > 50, "only {opened} menu items opened");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Every screen, in every layout, loads its real data without an error and renders.
+#[test]
+fn every_screen_in_every_layout_loads() {
+    use crate::theme::Layout;
+    let routes = vec![Route::Dashboard, Route::AllSales, Route::Invoices, Route::Quotes, Route::CreditNotes, Route::Customers, Route::Products, Route::Expenses, Route::Bills,
+        Route::Vendors, Route::PurchaseOrders, Route::Contacts, Route::Banking(None), Route::Chart, Route::Reports, Route::Report("profit-and-loss".into()),
+        Route::Report("balance-sheet".into()), Route::Report("bank-reconciliation".into()), Route::Settings, Route::Doc { kind: "ACCREC".into(), id: None },
+        Route::Doc { kind: "ACCPAY".into(), id: None }, Route::Doc { kind: "QUOTE".into(), id: None }, Route::Doc { kind: "SALESRECEIPT".into(), id: None },
+        Route::ReceivePayment(None), Route::PayBills, Route::Spend(None), Route::Check(None), Route::Deposit, Route::Transfer, Route::Journal,
+        Route::NewContact(true), Route::NewProduct, Route::NewAccount, Route::Payroll, Route::Taxes, Route::Projects, Route::Mileage, Route::Reconcile,
+        Route::Register(None), Route::Calendar, Route::Statements, Route::Memorized, Route::PaySalesTax, Route::AdjustInventory, Route::Help, Route::DocCenter,
+        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports];
+    for layout in Layout::ALL {
+        let (mut app, dir) = desktop_app(&format!("all-{}", layout.key()));
+        let t = app.update(Message::SetLayout(layout));
+        settle(&mut app, t);
+        for r in &routes {
+            let t = app.update(Message::Nav(r.clone()));
+            settle(&mut app, t);
+            assert!(app.error.is_none(), "{} ▸ {r:?}: {:?}", layout.label(), app.error);
+            assert!(app.toasts.iter().all(|t| !t.2), "{} ▸ {r:?}: error toast {:?}", layout.label(), app.toasts);
+            let _g = sim_lock();
+            let _ui = simulator(app.view());
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

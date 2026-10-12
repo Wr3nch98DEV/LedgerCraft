@@ -109,6 +109,12 @@ pub fn params(app: &App) -> Value {
     if let Some(c) = &r.contact { p["contact_id"] = json!(c.id); }
     // Account QuickReport: the account picked by QuickZoom.
     if matches!(&app.route, Route::Report(k) if k == "account-transactions") { if let Some(a) = r.account { p["account_id"] = json!(a); } }
+    // The reconciliation report is per bank account: the zoomed one, else the first.
+    if matches!(&app.route, Route::Report(k) if k == "bank-reconciliation") {
+        let bank = r.account.filter(|a| app.lk.accounts.iter().any(|x| x["id"].as_i64() == Some(*a) && x["type"] == "BANK"))
+            .or_else(|| crate::payments::bank_only(app).first().map(|o| o.id));
+        if let Some(b) = bank { p["account_id"] = json!(b); }
+    }
     p
 }
 

@@ -19,3 +19,4 @@ rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "t
 
 [dev-dependencies]
 iced_test = "0.14"
+iced_runtime = "0.14"
