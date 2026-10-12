@@ -66,13 +66,15 @@ pub struct State {
     pub smtp_tls: Security,
     pub smtp_editing: bool,
     pub test_to: String,
+    /// Set Closing Date: [closing date for most users, closing date for everyone] while editing.
+    pub lock: Option<[String; 2]>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Msg {
     Cat(&'static str), Edit, Field(usize, String), Save, Saved(Result<Value, String>), Cancel,
     Users(Reply), AddUser, UName(String), UEmail(String), URole(RoleOpt), SaveUser, UserSaved(Reply), SetActive(i64, bool),
-    EditSmtp, Smtp(usize, String), SmtpTls(Security), SaveSmtp, SmtpSaved(Reply), TestTo(String), SendTest, TestSent(Reply),
+    LockEdit, LockField(usize, String), LockSave, LockSaved(Reply), EditSmtp, Smtp(usize, String), SmtpTls(Security), SaveSmtp, SmtpSaved(Reply), TestTo(String), SendTest, TestSent(Reply),
 }
 
 pub fn load(app: &mut App) -> Task<Message> {
@@ -86,7 +88,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::Cat(c) => { app.settings.cat = Some(c); Task::none() }
         Msg::Edit => { app.settings.values = FIELDS.iter().map(|(k, _)| app.setting(k)).collect(); app.settings.editing = true; Task::none() }
         Msg::Field(n, v) => { if let Some(x) = app.settings.values.get_mut(n) { *x = v; } Task::none() }
-        Msg::Cancel => { app.settings.editing = false; app.settings.adding = false; app.settings.smtp_editing = false; Task::none() }
+        Msg::Cancel => { app.settings.lock = None; app.settings.editing = false; app.settings.adding = false; app.settings.smtp_editing = false; Task::none() }
         Msg::Save => {
             if app.settings.values.first().map(|v| v.trim().is_empty()).unwrap_or(true) { return app.toast("Company name can't be empty", true); }
             let mut p = serde_json::Map::new();
@@ -98,6 +100,30 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.settings.busy = false;
             match r {
                 Ok(_) => { app.settings.editing = false; let t = app.toast("Company details saved", false); Task::batch([t, app.be.call("session.get", json!({}), Message::Session)]) }
+                Err(e) => app.toast(e, true),
+            }
+        }
+        // ---- closing date ----
+        Msg::LockEdit => { app.settings.lock = Some([app.d(&app.setting("lock_date_all")), app.d(&app.setting("lock_date_others"))]); Task::none() }
+        Msg::LockField(n, v) => { if let Some(l) = app.settings.lock.as_mut() { l[n.min(1)] = v; } Task::none() }
+        Msg::LockSave => {
+            let Some(l) = app.settings.lock.clone() else { return Task::none() };
+            let style = app.date_style();
+            let mut iso = [String::new(), String::new()];
+            for n in 0..2 {
+                let v = l[n].trim();
+                if v.is_empty() { continue; }
+                let Some(d) = ui::to_iso(v, style) else { return app.toast("Check the closing date", true) };
+                iso[n] = d;
+            }
+            if !iso[0].is_empty() && !iso[1].is_empty() && iso[1] < iso[0] { return app.toast("The date for other users can't be earlier than the closing date", true); }
+            app.settings.busy = true;
+            app.be.call("settings.update", json!({"lock_date_all": iso[0], "lock_date_others": iso[1]}), |r| Message::Settings(Msg::LockSaved(r)))
+        }
+        Msg::LockSaved(r) => {
+            app.settings.busy = false;
+            match r {
+                Ok(_) => { app.settings.lock = None; let t = app.toast("Closing date saved", false); Task::batch([t, app.be.call("session.get", json!({}), Message::Session)]) }
                 Err(e) => app.toast(e, true),
             }
         }
@@ -301,6 +327,31 @@ fn company_section(app: &App) -> Element<'_, Message> {
     ].spacing(10))
 }
 
+/// Accounting ▸ Set Closing Date: transactions on or before it can't be added, changed or deleted.
+fn closing_section(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let all = app.setting("lock_date_all");
+    let others = app.setting("lock_date_others");
+    let shown = |iso: &str| if iso.is_empty() { "None".to_string() } else { app.d(iso) };
+    let body: Element<Message> = match &app.settings.lock {
+        Some(l) => column![
+            ui::field("Closing date", &l[0], |v| Message::Settings(Msg::LockField(0, v))),
+            ui::field("Later closing date for other users, except advisers (optional)", &l[1], |v| Message::Settings(Msg::LockField(1, v))),
+            ui::muted("Leave a date blank to remove it."),
+            row![ui::btn("Cancel", Some(Message::Settings(Msg::Cancel))), ui::hspace(), ui::btn_primary("OK", if app.settings.busy { None } else { Some(Message::Settings(Msg::LockSave)) })],
+        ].spacing(10).into(),
+        None => column![
+            row![text("Closing date").size(14).color(k.muted).width(220), text(shown(&all)).size(14)],
+            row![text("For other users").size(14).color(k.muted).width(220), text(shown(&others)).size(14)],
+        ].spacing(8).into(),
+    };
+    ui::card(column![
+        row![ui::h2("Closing Date"), ui::hspace(), ui::btn("Set Date…", Some(Message::Settings(Msg::LockEdit)))].align_y(Alignment::Center),
+        ui::muted("Transactions dated on or before the closing date can't be added, changed or deleted — so filed periods stay as they were."),
+        body,
+    ].spacing(10))
+}
+
 fn file_section(_app: &App) -> Element<'_, Message> {
     ui::card(column![
         ui::h2("Company file"),
@@ -323,7 +374,8 @@ fn desk_view(app: &App) -> Element<'_, Message> {
     let note = |t_: &'static str| -> Element<'_, Message> { ui::card(ui::muted(t_)) };
     let body: Element<Message> = match cat {
         "Desktop View" => column![layout_section(app), appearance_section(app)].spacing(14).into(),
-        "General" | "Accounting" => column![company_section(app), file_section(app)].spacing(14).into(),
+        "Accounting" => column![closing_section(app), company_section(app)].spacing(14).into(),
+        "General" => column![company_section(app), file_section(app)].spacing(14).into(),
         "Send Forms" => email_card(app),
         "Users & Roles" => users_card(app),
         "Sales Tax" => ui::card(column![ui::muted("Sales tax rates and agencies are managed in Manage Sales Tax."), row![ui::btn("Manage Sales Tax…", Some(Message::Nav(Route::Taxes)))]].spacing(10)),

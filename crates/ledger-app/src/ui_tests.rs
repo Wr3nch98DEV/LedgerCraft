@@ -2292,3 +2292,35 @@ fn print_uses_the_form_template() {
     crate::pdf::apply_template(&mut d, &mut json!({}), &themes, &mut title, &mut accent);
     assert_eq!((title.as_str(), d["terms"].as_str().unwrap()), ("Estimate", "Net 30"));
 }
+
+#[test]
+fn desktop_set_closing_date() {
+    use crate::settings::Msg as S;
+    let (mut app, dir) = desktop_app("closing");
+    let t = app.update(Message::Nav(Route::Settings)); settle(&mut app, t);
+    let _ = app.update(Message::Settings(S::Cat("Accounting")));
+    press(&mut app, "Set Date…");
+    let _ = app.update(Message::Settings(S::LockField(0, app.d("2026-01-31"))));
+    press(&mut app, "OK");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert_eq!(app.setting("lock_date_all"), "2026-01-31");
+    // A transaction on or before the closing date is refused; after it is fine.
+    let cust = app.lk.contact_opts(true)[0].id;
+    let acct = app.lk.account_opts(|a| a["type"] == "REVENUE")[0].id;
+    let inv = |date: &str| json!({"doc": {"type": "ACCREC", "contact_id": cust, "date": date, "due_date": date, "line_amount_type": "NOTAX", "status": "AUTHORISED",
+        "lines": [{"description": "x", "quantity": "1", "unit_price": "10", "account_id": acct}]}});
+    assert!(app.be.call_now("docs.save", inv("2026-01-15")).is_err());
+    assert!(app.be.call_now("docs.save", inv("2026-02-01")).is_ok());
+    // The date for other users can't be earlier than the closing date.
+    press(&mut app, "Set Date…");
+    let _ = app.update(Message::Settings(S::LockField(1, app.d("2026-01-01"))));
+    let _ = app.update(Message::Settings(S::LockSave));
+    assert!(app.toasts.iter().any(|t| t.2));
+    // Clearing removes it.
+    let _ = app.update(Message::Settings(S::LockField(0, String::new())));
+    let _ = app.update(Message::Settings(S::LockField(1, String::new())));
+    press(&mut app, "OK");
+    assert_eq!(app.setting("lock_date_all"), "");
+    assert!(app.be.call_now("docs.save", inv("2026-01-15")).is_ok());
+    let _ = std::fs::remove_dir_all(dir);
+}
