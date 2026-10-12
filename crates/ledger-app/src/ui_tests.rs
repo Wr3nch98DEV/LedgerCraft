@@ -1564,3 +1564,27 @@ fn attach_file_to_document() {
     assert_eq!(bytes, data);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_doc_center() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("doccenter");
+    let text_doc = "Officeworks\nTax Invoice 4471\nDate 03/10/2026\nTotal $123.45\n";
+    app.be.call_now("inbox.upload", json!({"filename": "officeworks.txt", "mime": "text/plain", "data": crate::doc::b64(text_doc.as_bytes())})).unwrap();
+    let _ = app.update(Message::Nav(Route::DocCenter));
+    let list = app.be.call_now("inbox.list", json!({})).unwrap();
+    app.data = Some(list.clone());
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["Add a Document", "officeworks.txt", "Create Bill", "View"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    let id = list[0]["id"].as_i64().unwrap();
+    let msgs = click(&app, "Create Bill");
+    assert!(matches!(msgs.as_slice(), [Message::Desk(W::DocToBill(x))] if *x == id), "{msgs:?}");
+    let bill = app.be.call_now("inbox.toBill", json!({"id": id, "overrides": {}}));
+    assert!(bill.is_ok(), "{bill:?}");
+    let _ = app.update(Message::Desk(W::DocBill(bill)));
+    assert!(matches!(app.route, Route::Doc { ref kind, id: Some(_) } if kind == "ACCPAY"));
+    let _ = std::fs::remove_dir_all(dir);
+}

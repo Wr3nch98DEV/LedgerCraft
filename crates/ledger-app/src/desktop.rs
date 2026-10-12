@@ -75,7 +75,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64) }
 
 impl App {
     /// Keep the current screen's unsaved state with its window.
@@ -155,6 +155,42 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, move |r| Message::Desk(Msg::Detail(id, r)))
         }
         Msg::ReportCat(c) => { app.desk.report_cat = Some(c); Task::none() }
+        Msg::DocAdd => {
+            let be = app.be.clone();
+            Task::perform(async move {
+                let Some(file) = rfd::AsyncFileDialog::new().set_title("Add a Document").pick_file().await else { return Ok(None) };
+                let name = file.file_name();
+                let bytes = file.read().await;
+                let mime = crate::doc::mime_for(&name);
+                tokio::task::spawn_blocking(move || be.call_now("inbox.upload", serde_json::json!({"filename": name, "mime": mime, "data": crate::doc::b64(&bytes)})).map(|_| Some(name)))
+                    .await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Desk(Msg::DocAdded(r)))
+        }
+        Msg::DocAdded(r) => match r {
+            Ok(Some(n)) => { let t1 = app.toast(format!("Added {n}"), false); Task::batch([t1, app.load()]) }
+            Ok(None) => Task::none(),
+            Err(e) => app.toast(e, true),
+        },
+        Msg::DocToBill(id) => app.be.call("inbox.toBill", serde_json::json!({"id": id, "overrides": {}}), |r| Message::Desk(Msg::DocBill(r))),
+        Msg::DocBill(r) => match r {
+            Ok(v) => { let t1 = app.toast("Draft bill created from the document — check it and save", false); let t2 = app.go(Route::Doc { kind: "ACCPAY".into(), id: v["id"].as_i64() }); Task::batch([t1, t2]) }
+            Err(e) => app.toast(e, true),
+        },
+        Msg::DocRemove(id) => app.be.call("inbox.archive", serde_json::json!({"id": id}), |r| match r { Ok(_) => Message::Refresh, Err(e) => Message::Failed(e) }),
+        Msg::DocOpen(aid) => {
+            let st = app.be.st.clone();
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<Option<String>, String> {
+                    let (name, _, data) = { let g = st.org.lock().unwrap(); g.as_ref().ok_or("no company open")?.ledger.attachment(aid).map_err(|x| x.to_string())? };
+                    let dir = std::env::temp_dir().join("LedgerCraft attachments");
+                    std::fs::create_dir_all(&dir).map_err(|x| x.to_string())?;
+                    let path = dir.join(&name);
+                    std::fs::write(&path, data).map_err(|x| x.to_string())?;
+                    crate::pdf::open_file(&path);
+                    Ok(None)
+                }).await.unwrap_or_else(|x| Err(x.to_string()))
+            }, |r| Message::Desk(Msg::DocAdded(r)))
+        }
         Msg::AdjQty(id, v) => { match app.desk.adj.iter_mut().find(|x| x.0 == id) { Some(x) => x.1 = v, None => app.desk.adj.push((id, v)) } Task::none() }
         Msg::AdjDate(v) => { app.desk.adj_date = v; Task::none() }
         Msg::AdjAccount(a) => { app.desk.adj_account = Some(a); Task::none() }
@@ -378,6 +414,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::PaySalesTax => "Pay Sales Tax".into(),
         Route::AdjustInventory => "Adjust Quantity/Value on Hand".into(),
         Route::Help => "LedgerCraft Help".into(),
+        Route::DocCenter => "Doc Center".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
             "ACCREC" => "Create Invoices", "QUOTE" => "Create Estimates", "ACCRECCREDIT" => "Create Credit Memos/Refunds", "SALESRECEIPT" => "Enter Sales Receipts",
@@ -433,7 +470,7 @@ fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Messag
         "Favorites" => vec![e("Customize Favorites…", "", None)],
         "Company" => vec![e("Home Page", "", nav(Route::Dashboard)), e("Company Snapshot", "", Some(Message::Desk(Msg::Insights(true)))), sep(), e("My Company", "", nav(Route::Settings)),
             e("Company Information…", "", nav(Route::Settings)), e("Set Up Users and Roles…", "", nav(Route::Settings)), sep(), e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)),
-            e("Make General Journal Entries…", "", nav(Route::Journal)), e("Enter Vehicle Mileage…", "", nav(Route::Mileage)), e("Calendar", "", nav(Route::Calendar)), e("Documents", "", None)],
+            e("Make General Journal Entries…", "", nav(Route::Journal)), e("Enter Vehicle Mileage…", "", nav(Route::Mileage)), e("Calendar", "", nav(Route::Calendar)), e("Documents", "", nav(Route::DocCenter))],
         "Inventory" => vec![e("Inventory Center", "", nav(Route::Products)), e("Item List", "", nav(Route::Products)), sep(), e("Create Purchase Orders", "", doc_new("PO")),
             e("Purchase Orders List", "", nav(Route::PurchaseOrders)), e("Receive Items", "", Some(Message::ReceiveItems)), e("Enter Bills Against Inventory", "", nav(Route::PurchaseOrders)), e("Adjust Quantity/Value on Hand…", "", nav(Route::AdjustInventory))],
         "Customers" => vec![e("Customer Center", "Ctrl+J", nav(Route::Customers)), sep(), e("Create Estimates", "", doc_new("QUOTE")), e("Create Sales Orders", "", doc_new("SALESORDER")),
@@ -523,7 +560,7 @@ fn icon_bar(app: &App) -> Element<'_, Message> {
             item("users", "Vendors", nav(Route::Vendors), matches!(r, Route::Vendors)),
             item("payroll", "Employees", nav(Route::Payroll), matches!(r, Route::Payroll | Route::PayRun(_))),
             item("bank", "Bank Feeds", nav(Route::Banking(None)), matches!(r, Route::Banking(_))),
-            item("docs", "Docs", None, false),
+            item("docs", "Docs", nav(Route::DocCenter), *r == Route::DocCenter),
             item("reports", "Reports", nav(Route::Reports), matches!(r, Route::Reports | Route::Report(_))),
             item("check-write", "Write Checks", nav(Route::Check(None)), matches!(r, Route::Check(_))),
             item("reconcile", "Reconcile", nav(Route::Reconcile), matches!(r, Route::Reconcile)),
@@ -609,6 +646,32 @@ pub fn frame<'a>(app: &'a App, content: Element<'a, Message>) -> Element<'a, Mes
         layers = layers.push(container(opaque(container(list).padding(8).width(400).style(theme::menu))).padding(Padding { top: 72.0, left: 8.0, ..Padding::ZERO }));
     }
     layers.into()
+}
+
+// ---------------- Doc Center ----------------
+
+/// Company ▸ Documents / Docs: files added to the company, with a draft bill from any of them.
+pub fn doc_center(app: &App) -> Element<'_, Message> {
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let cols: Vec<(&str, u16, bool)> = vec![("Document Name", 26, false), ("Added", 12, false), ("Size", 8, true), ("Supplier (read)", 18, false), ("Total (read)", 12, true), ("", 24, false)];
+    let rows = d.as_array().cloned().unwrap_or_default().iter().map(|f| {
+        let id = f["id"].as_i64().unwrap_or(0);
+        let aid = f["attachment_id"].as_i64().unwrap_or(0);
+        let fields = &f["extracted"]["fields"];
+        let total = fields["total"].as_i64();
+        (vec![
+            ui::cell(f["filename"].as_str().unwrap_or("").to_string()), ui::cell_muted(app.d(f["created_at"].as_str().unwrap_or("").get(..10).unwrap_or(""))),
+            ui::num(format!("{} KB", (f["size"].as_i64().unwrap_or(0) + 1023) / 1024)),
+            ui::cell_muted(fields["supplier"].as_str().unwrap_or("").to_string()),
+            if let Some(tv) = total { ui::cell_money(tv) } else { Space::new().into() },
+            row![ui::link("View", Message::Desk(Msg::DocOpen(aid))), ui::link("Create Bill", Message::Desk(Msg::DocToBill(id))), ui::link("Remove", Message::Desk(Msg::DocRemove(id)))].spacing(14).into(),
+        ], None)
+    }).collect();
+    list_window(&cols, rows, vec![
+        ui::btn_primary("Add a Document", Some(Message::Desk(Msg::DocAdd))),
+        ui::hspace(),
+        text("Bills, receipts and other paperwork. LedgerCraft reads the supplier and total from PDFs where it can.").size(12).color(t().muted).into(),
+    ])
 }
 
 // ---------------- Help ----------------
