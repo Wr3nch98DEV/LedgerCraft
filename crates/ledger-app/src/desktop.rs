@@ -62,6 +62,11 @@ pub struct State {
     pub inv_sel: Option<i64>,
     /// Item List: include inactive items.
     pub show_inactive: bool,
+    /// Create Batch Invoices: chosen customers, the lines (item, description, qty, rate), date, busy.
+    pub bi_custs: Vec<i64>,
+    pub bi_lines: Vec<(Option<crate::app::Opt>, String, String, String)>,
+    pub bi_date: String,
+    pub bi_busy: bool,
     pub inv_detail: Option<Value>,
     /// Customer Center: jobs (projects) shown under their customers.
     pub jobs: Vec<Value>,
@@ -129,7 +134,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), ShowInactive(bool), InvSelect(i64), InvDetail(crate::backend::Reply), JobsLoaded(crate::backend::Reply), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), ShowInactive(bool), BiCust(i64, bool), BiAll(bool), BiItem(usize, crate::app::Opt), BiField(usize, u8, String), BiAddLine, BiDate(String), BiCreate, BiDone(crate::backend::Reply), InvSelect(i64), InvDetail(crate::backend::Reply), JobsLoaded(crate::backend::Reply), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
     /// Remember the Desktop view choices (One Window, icon bar pane).
@@ -308,6 +313,59 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::JobsLoaded(r) => { if let Ok(v) = r { app.desk.jobs = v["projects"].as_array().or(v.as_array()).cloned().unwrap_or_default(); } Task::none() }
         Msg::InvSelect(id) => { app.desk.inv_sel = Some(id); app.be.call("items.get", serde_json::json!({"id": id}), |r| Message::Desk(Msg::InvDetail(r))) }
         Msg::InvDetail(r) => match r { Ok(v) => { app.desk.inv_detail = Some(v); Task::none() } Err(e) => app.toast(e, true) },
+        Msg::BiCust(id, on) => { app.desk.bi_custs.retain(|x| *x != id); if on { app.desk.bi_custs.push(id); } Task::none() }
+        Msg::BiAll(on) => { app.desk.bi_custs = if on { app.data.as_ref().and_then(|d| d.as_array().cloned()).unwrap_or_default().iter().filter_map(|c| c["id"].as_i64()).collect() } else { vec![] }; Task::none() }
+        Msg::BiItem(n, o) => {
+            bi_ensure(app, n);
+            let item = app.lk.item(o.id).cloned();
+            let l = &mut app.desk.bi_lines[n];
+            if let Some(it) = item {
+                l.1 = it["sales_description"].as_str().filter(|x| !x.is_empty()).or(it["name"].as_str()).unwrap_or("").to_string();
+                l.3 = it["sale_unit_e2"].as_i64().map(|v| format!("{:.2}", v as f64 / 10_000.0)).unwrap_or_default();
+                if l.2.trim().is_empty() { l.2 = "1".into(); }
+            }
+            l.0 = Some(o);
+            Task::none()
+        }
+        Msg::BiField(n, f, v) => { bi_ensure(app, n); let l = &mut app.desk.bi_lines[n]; match f { 0 => l.1 = v, 1 => l.2 = v, _ => l.3 = v } Task::none() }
+        Msg::BiAddLine => { let n = app.desk.bi_lines.len(); bi_ensure(app, n); Task::none() }
+        Msg::BiDate(v) => { app.desk.bi_date = dkey(app, &app.desk.bi_date, v); Task::none() }
+        Msg::BiCreate => {
+            if app.desk.bi_custs.is_empty() { return app.toast("Tick the customers to invoice", true); }
+            let date_in = if app.desk.bi_date.is_empty() { app.d(&ui::today_iso()) } else { app.desk.bi_date.clone() };
+            let Some(date) = ui::to_iso(&date_in, app.date_style()) else { return app.toast("Check the invoice date", true) };
+            let revenue = app.lk.account_opts(|a| a["class"] == "REVENUE").first().map(|a| a.id);
+            let lines: Vec<Value> = app.desk.bi_lines.iter().filter(|l| ui::parse_money(&l.3).unwrap_or(0) != 0 && (l.0.is_some() || !l.1.trim().is_empty())).map(|(it, desc, qty, rate)| {
+                let item = it.as_ref().and_then(|o| app.lk.item(o.id));
+                serde_json::json!({"item_id": it.as_ref().map(|o| o.id), "description": desc.trim(), "quantity": if qty.trim().is_empty() { "1" } else { qty.trim() }, "unit_price": rate.replace(',', ""),
+                    "account_id": item.and_then(|i| i["sale_account_id"].as_i64()).or(revenue), "tax_rate_id": item.and_then(|i| i["sale_tax_rate_id"].as_i64())})
+            }).collect();
+            if lines.is_empty() { return app.toast("Add at least one line with a rate", true); }
+            let custs = app.desk.bi_custs.clone();
+            let terms_days = 14;
+            let due = ui::add_days_iso(&date, terms_days);
+            let be = app.be.clone();
+            app.desk.bi_busy = true;
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                    for c in &custs {
+                        be.call_now("docs.save", serde_json::json!({"doc": {"type": "ACCREC", "contact_id": c, "date": date, "due_date": due, "line_amount_type": "EXCLUSIVE", "status": "AUTHORISED", "lines": lines}}))?;
+                    }
+                    Ok(serde_json::json!({"count": custs.len()}))
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Desk(Msg::BiDone(r)))
+        }
+        Msg::BiDone(r) => {
+            app.desk.bi_busy = false;
+            match r {
+                Ok(v) => {
+                    app.desk.bi_custs.clear(); app.desk.bi_lines.clear();
+                    let t1 = app.toast(format!("Created {} invoices — print them from File ▸ Print Forms", v["count"]), false);
+                    Task::batch([t1, app.load_lookups()])
+                }
+                Err(e) => app.toast(e, true),
+            }
+        }
         Msg::ShowInactive(v) => { app.desk.show_inactive = v; Task::none() }
         Msg::OpenPrefs(cat) => { app.settings.cat = Some(cat); app.go(Route::Settings) }
         Msg::FavAdd(f) => { if !app.desk.favorites.contains(&f) { app.desk.favorites.push(f); app.save_desk_prefs(); } Task::none() }
@@ -803,6 +861,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::InventoryCenter => "Inventory Center".into(),
         Route::EditItem(_) => "Edit Item".into(),
         Route::EditAccount(_) => "Edit Account".into(),
+        Route::BatchInvoices => "Batch Invoice".into(),
         Route::EditContact(id) => if app.lk.contacts.iter().find(|c| c["id"].as_i64() == Some(*id)).is_some_and(|c| c["is_supplier"].as_i64() == Some(1) && c["is_customer"].as_i64() != Some(1)) { "Edit Vendor".into() } else { "Edit Customer".into() },
         Route::EnterTime => "Time/Enter Single Activity".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
@@ -869,7 +928,7 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
         "Inventory" => vec![e("Inventory Center", "", nav(Route::InventoryCenter)), e("Item List", "", nav(Route::Products)), sep(), e("Create Purchase Orders", "", doc_new("PO")),
             e("Purchase Orders List", "", nav(Route::PurchaseOrders)), e("Receive Items", "", Some(Message::ReceiveItems)), e("Enter Bills Against Inventory", "", nav(Route::PurchaseOrders)), e("Adjust Quantity/Value on Hand…", "", nav(Route::AdjustInventory)), sep(), e("Build Assemblies…", "", nav(Route::BuildAssemblies))],
         "Customers" => vec![e("Customer Center", "Ctrl+J", nav(Route::Customers)), sep(), e("Create Estimates", "", doc_new("QUOTE")), e("Create Sales Orders", "", doc_new("SALESORDER")),
-            e("Create Invoices", "Ctrl+I", doc_new("ACCREC")), e("Enter Sales Receipts", "", doc_new("SALESRECEIPT")), e("Enter Statement Charges", "", doc_new("DELAYEDCHARGE")),
+            e("Create Invoices", "Ctrl+I", doc_new("ACCREC")), e("Create Batch Invoices", "", nav(Route::BatchInvoices)), e("Enter Sales Receipts", "", doc_new("SALESRECEIPT")), e("Enter Statement Charges", "", doc_new("DELAYEDCHARGE")),
             e("Create Statements…", "", nav(Route::Statements)), e("Assess Finance Charges…", "", nav(Route::FinanceCharges)), sep(), e("Receive Payments", "", nav(Route::ReceivePayment(None))),
             e("Create Credit Memos/Refunds", "", doc_new("ACCRECCREDIT")), sep(), e("Income Tracker", "", nav(Route::AllSales)), e("Item List", "", nav(Route::Products))],
         "Vendors" => vec![e("Vendor Center", "", nav(Route::Vendors)), sep(), e("Enter Bills", "", doc_new("ACCPAY")), e("Pay Bills", "", nav(Route::PayBills)), e("Bill Tracker", "", nav(Route::Bills)),
@@ -1151,6 +1210,54 @@ pub fn other_names(app: &App) -> Element<'_, Message> {
 fn dkey(app: &App, old: &str, new: String) -> String {
     let shown = if old.is_empty() { app.d(&ui::today_iso()) } else { old.to_string() };
     ui::date_keys(&shown, &new, app.date_style())
+}
+
+fn bi_ensure(app: &mut App, n: usize) {
+    while app.desk.bi_lines.len() <= n { app.desk.bi_lines.push((None, String::new(), "1".into(), String::new())); }
+}
+
+/// Customers ▸ Create Batch Invoices: the same lines invoiced to every ticked customer.
+pub fn batch_invoices(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let custs = d.as_array().cloned().unwrap_or_default();
+    let mut list = column![row![text("CUSTOMERS").size(11).font(BOLD).color(k.muted).width(Fill), ui::link("All", Message::Desk(Msg::BiAll(true))), ui::link("None", Message::Desk(Msg::BiAll(false)))].spacing(10).padding([6, 10])].spacing(0);
+    for c in &custs {
+        let id = c["id"].as_i64().unwrap_or(0);
+        let on = app.desk.bi_custs.contains(&id);
+        list = list.push(container(iced::widget::checkbox(on).label(c["name"].as_str().unwrap_or("").to_string()).on_toggle(move |v| Message::Desk(Msg::BiCust(id, v))).text_size(13)).padding([4, 10]));
+    }
+    let left = container(column![scrollable(list).style(theme::scroll).height(Fill), container(text(format!("{} customers in this batch", app.desk.bi_custs.len())).size(12).color(k.muted)).padding([6, 10])]).width(320).height(Fill).style(theme::card);
+    let items = app.lk.item_opts();
+    let cols: [(&str, u16, bool); 4] = [("Item", 22, false), ("Description", 34, false), ("Qty", 8, true), ("Rate", 12, true)];
+    let mut grid = column![container(row(cols.iter().map(|(h, w, r)| {
+        let tx = text(h.to_uppercase()).size(11).font(BOLD).color(k.muted);
+        container(if *r { tx.align_x(iced::alignment::Horizontal::Right).width(Fill) } else { tx.width(Fill) }).width(Length::FillPortion(*w)).into()
+    })).spacing(6).padding([6, 8])).style(theme::header_row).width(Fill)];
+    let n_lines = app.desk.bi_lines.len().max(2);
+    let mut total = 0i64;
+    for n in 0..n_lines {
+        let (it, desc, qty, rate) = app.desk.bi_lines.get(n).cloned().unwrap_or((None, String::new(), "1".into(), String::new()));
+        total += ((qty.trim().parse::<f64>().unwrap_or(0.0)) * ui::parse_money(&rate).unwrap_or(0) as f64).round() as i64;
+        let cell = |v: String, f: u8, right: bool| -> Element<'_, Message> {
+            let ti = text_input("", &v).on_input(move |x| Message::Desk(Msg::BiField(n, f, x))).padding([4, 5]).size(13).style(theme::cell_input);
+            if right { ti.align_x(iced::alignment::Horizontal::Right).into() } else { ti.into() }
+        };
+        let cells: Vec<Element<Message>> = vec![
+            pick_list(items.clone(), it, move |o| Message::Desk(Msg::BiItem(n, o))).padding([4, 5]).text_size(13).style(theme::pick).width(Fill).into(),
+            cell(desc, 0, false), cell(qty, 1, true), cell(rate, 2, true),
+        ];
+        grid = grid.push(row(cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into())).spacing(6).align_y(Alignment::Center).padding([2, 8]));
+    }
+    let date = if app.desk.bi_date.is_empty() { app.d(&ui::today_iso()) } else { app.desk.bi_date.clone() };
+    let right = column![
+        row![column![text("INVOICE DATE").size(11).font(BOLD).color(k.info), text_input("", &date).on_input(|v| Message::Desk(Msg::BiDate(v))).padding([5, 7]).size(13).style(theme::input).width(140)].spacing(3),
+            ui::hspace(), column![text("EACH INVOICE").size(11).font(BOLD).color(k.info), text(ui::money(total)).size(18).font(BOLD)].spacing(3).align_x(Alignment::End)].align_y(Alignment::End),
+        container(grid).style(theme::card).width(Fill).clip(true),
+        row![ui::btn("Add Line", Some(Message::Desk(Msg::BiAddLine))), ui::hspace(), text("Sales tax is worked out on each customer's invoice.").size(12).color(k.muted)].spacing(10).align_y(Alignment::Center),
+        row![ui::hspace(), ui::btn_primary("Create Invoices", if app.desk.bi_busy || app.desk.bi_custs.is_empty() { None } else { Some(Message::Desk(Msg::BiCreate)) }), ui::btn("Close", Some(Message::Back))].spacing(8),
+    ].spacing(12).width(Fill);
+    container(column![text("Batch Invoice").size(22).font(BOLD), row![left, right].spacing(14).height(Fill)].spacing(12)).padding(18).height(Fill).into()
 }
 
 /// Inventory ▸ Inventory Center: inventory items with quantity on hand; the selected item's

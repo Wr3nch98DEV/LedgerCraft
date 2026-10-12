@@ -120,6 +120,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::CustomizeFavorites => crate::desktop::customize_favorites(app),
         Route::BuildAssemblies => crate::desktop::build_assemblies(app),
         Route::InventoryCenter => crate::desktop::inventory_center(app),
+        Route::BatchInvoices => crate::desktop::batch_invoices(app),
         Route::EnterTime => crate::desktop::enter_time(app),
         Route::Doc { .. } => doc::view(app),
         Route::ReceivePayment(_) | Route::PayBills | Route::Spend(_) | Route::Check(_) | Route::Deposit => payments::view(app),

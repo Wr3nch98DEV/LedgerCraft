@@ -1767,7 +1767,7 @@ fn every_screen_in_every_layout_loads() {
         Route::ReceivePayment(None), Route::PayBills, Route::Spend(None), Route::Check(None), Route::Deposit, Route::Transfer, Route::Journal,
         Route::NewContact(true), Route::NewProduct, Route::NewAccount, Route::Payroll, Route::Taxes, Route::Projects, Route::Mileage, Route::Reconcile,
         Route::Register(None), Route::Calendar, Route::Statements, Route::Memorized, Route::PaySalesTax, Route::AdjustInventory, Route::Help, Route::DocCenter,
-        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates, Route::PriceLevels, Route::PrintForms, Route::PayrollForms, Route::CustomizeFavorites, Route::BuildAssemblies, Route::InventoryCenter];
+        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates, Route::PriceLevels, Route::PrintForms, Route::PayrollForms, Route::CustomizeFavorites, Route::BuildAssemblies, Route::InventoryCenter, Route::BatchInvoices];
     for layout in Layout::ALL {
         let (mut app, dir) = desktop_app(&format!("all-{}", layout.key()));
         let t = app.update(Message::SetLayout(layout));
@@ -2749,5 +2749,33 @@ fn desktop_make_customer_inactive() {
     assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
     let active = app.be.call_now("contacts.list", json!({"filter": "customers"})).unwrap();
     assert!(active.as_array().unwrap().iter().all(|c| c["id"].as_i64() != Some(free)), "left the Active Customers list");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn end_to_end_batch_invoices() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("batchinv");
+    let t = app.update(Message::Nav(Route::BatchInvoices)); settle(&mut app, t);
+    let custs: Vec<i64> = app.data.as_ref().unwrap().as_array().unwrap().iter().take(3).filter_map(|c| c["id"].as_i64()).collect();
+    for c in &custs { let _ = app.update(Message::Desk(W::BiCust(*c, true))); }
+    let item = app.lk.item_opts()[0].clone();
+    let _ = app.update(Message::Desk(W::BiItem(0, item.clone())));
+    assert!(!app.desk.bi_lines[0].3.is_empty(), "rate filled from the item");
+    let _ = app.update(Message::Desk(W::BiField(1, 0, "Monthly retainer".into())));
+    let _ = app.update(Message::Desk(W::BiField(1, 2, "250".into())));
+    let before = count(&app, "ACCREC");
+    press(&mut app, "Create Invoices");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert_eq!(count(&app, "ACCREC"), before + custs.len());
+    // Each customer got both lines.
+    let rows = app.be.call_now("docs.list", json!({"type": "ACCREC", "limit": 5000})).unwrap()["rows"].as_array().unwrap().clone();
+    for c in &custs {
+        let inv = rows.iter().filter(|r| r["contact_id"].as_i64() == Some(*c)).max_by_key(|r| r["id"].as_i64()).unwrap();
+        let full = app.be.call_now("docs.get", json!({"id": inv["id"]})).unwrap();
+        assert_eq!(full["lines"].as_array().unwrap().len(), 2);
+        assert_eq!(full["status"], "AUTHORISED");
+    }
+    assert!(app.desk.bi_custs.is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
