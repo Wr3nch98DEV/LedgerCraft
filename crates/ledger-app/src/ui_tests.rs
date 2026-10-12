@@ -2651,3 +2651,46 @@ fn desktop_edit_customer_keeps_other_fields() {
     assert_eq!(app.desk.detail.as_ref().map(|d| d["contact"]["phone"].clone()), Some(json!("02 5555 0000")));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_new_inventory_part_and_edit_item() {
+    use crate::forms::Msg as F;
+    let (mut app, dir) = desktop_app("edititem");
+    // New Item ▸ Inventory Part.
+    let t = app.update(Message::Nav(Route::NewProduct)); settle(&mut app, t);
+    for m in [F::ItemType("Inventory Part".into()), F::Name("Oak stool".into()), F::Code("STOOL".into()), F::Price("120".into()), F::Cost("45".into()), F::Reorder("5".into())] { let _ = app.update(Message::Form(m)); }
+    press(&mut app, "Save & Close");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let items = app.be.call_now("items.list", json!({})).unwrap();
+    let it = items.as_array().unwrap().iter().find(|i| i["code"] == "STOOL").expect("item saved").clone();
+    assert_eq!(it["is_tracked"], 1, "an inventory part");
+    assert_eq!(it["reorder_level_e4"], 50000);
+    let id = it["id"].as_i64().unwrap();
+    // A purchase description set elsewhere is kept by Edit Item.
+    let mut full = app.be.call_now("items.get", json!({"id": id})).unwrap();
+    full["purchase_description"] = json!("Oak stool, flat-packed");
+    app.be.call_now("items.update", json!({"id": id, "item": {"code": "STOOL", "name": "Oak stool", "sales_description": "Oak stool", "purchase_description": "Oak stool, flat-packed",
+        "is_sold": true, "is_purchased": true, "sale_price": "120", "purchase_price": "45", "is_tracked": true, "reorder_level": "5",
+        "sale_account_id": full["sale_account_id"], "purchase_account_id": full["purchase_account_id"]}})).unwrap();
+    // Item List row → Edit Item.
+    let t = app.update(Message::Nav(Route::Products)); settle(&mut app, t);
+    let msgs = click(&app, "Oak stool");
+    assert!(matches!(msgs.first(), Some(Message::Nav(Route::EditItem(x))) if *x == id), "{msgs:?}");
+    let t = app.update(Message::Nav(Route::EditItem(id))); settle(&mut app, t);
+    let s = app.form.as_ref().unwrap();
+    assert_eq!((s.name.as_str(), s.price.as_str(), s.cost.as_str(), s.reorder.as_str(), s.tracked), ("Oak stool", "120.00", "45.00", "5", true));
+    for m in [F::Price("135.50".into()), F::Reorder("8".into())] { let _ = app.update(Message::Form(m)); }
+    press(&mut app, "OK");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let after = app.be.call_now("items.get", json!({"id": id})).unwrap();
+    assert_eq!(after["sale_unit_e2"], 1_355_000);
+    assert_eq!(after["reorder_level_e4"], 80000);
+    assert_eq!(after["purchase_description"], "Oak stool, flat-packed", "kept");
+    // Make Inactive.
+    let t = app.update(Message::Nav(Route::EditItem(id))); settle(&mut app, t);
+    let _ = app.update(Message::Form(F::Inactive(true)));
+    press(&mut app, "OK");
+    assert_ne!(app.be.call_now("items.get", json!({"id": id})).unwrap()["status"], "ACTIVE");
+    assert!(app.lk.item_opts().iter().all(|o| o.id != id), "inactive items leave the pickers");
+    let _ = std::fs::remove_dir_all(dir);
+}

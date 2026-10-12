@@ -32,7 +32,7 @@ pub fn view<'a>(app: &'a App, s: &'a State) -> Element<'a, Message> {
     let body: Element<Message> = match &app.route {
         Route::NewContact(customer) => contact(app, s, *customer),
         Route::EditContact(_) => contact(app, s, s.customer),
-        Route::NewProduct => item(app, s),
+        Route::NewProduct | Route::EditItem(_) => item(app, s),
         Route::Transfer => transfer(app, s),
         _ => journal(app, s),
     };
@@ -75,24 +75,26 @@ fn contact<'a>(app: &'a App, s: &'a State, customer: bool) -> Element<'a, Messag
 /// New Item.
 fn item<'a>(app: &'a App, s: &'a State) -> Element<'a, Message> {
     let k = t();
-    let types = vec!["Service".to_string(), "Non-inventory Part".to_string()];
-    let ty = if s.service { "Service" } else { "Non-inventory Part" };
+    let types = vec!["Service".to_string(), "Inventory Part".to_string(), "Non-inventory Part".to_string()];
+    let ty = if s.tracked { "Inventory Part" } else if s.service { "Service" } else { "Non-inventory Part" };
     let income = app.lk.account_opts(|a| a["class"] == "REVENUE");
     let expense = app.lk.account_opts(|a| a["class"] == "EXPENSE" || a["type"] == "DIRECTCOSTS");
     let pick = |lbl: &str, opts: Vec<Opt>, sel: &Option<Opt>, f: fn(Opt) -> Msg, w: f32| -> Element<'a, Message> {
         column![label(lbl), pick_list(opts, sel.clone(), move |o| Message::Form(f(o))).padding([5, 7]).text_size(13).style(theme::pick).width(Length::Fixed(w))].spacing(3).into()
     };
     column![
-        row![column![label("Type"), pick_list(types, Some(ty.to_string()), |v: String| Message::Form(Msg::Service(v == "Service"))).padding([5, 7]).text_size(13).style(theme::pick).width(220)].spacing(3),
-            text(if s.service { "Use for services you charge for or purchase, like specialized labor, consulting hours, or professional fees." } else { "Use for goods you buy but don't track, like office supplies, or materials for a specific job." }).size(12).color(k.muted).width(Fill)].spacing(16).align_y(Alignment::End),
+        row![column![label("Type"), pick_list(types, Some(ty.to_string()), |v: String| Message::Form(Msg::ItemType(v))).padding([5, 7]).text_size(13).style(theme::pick).width(220)].spacing(3),
+            text(if s.tracked { "Use for goods you purchase, track as inventory, and resell." } else if s.service { "Use for services you charge for or purchase, like specialized labor, consulting hours, or professional fees." } else { "Use for goods you buy but don't track, like office supplies, or materials for a specific job." }).size(12).color(k.muted).width(Fill)].spacing(16).align_y(Alignment::End),
         container(column![
             row![input("Item Name/Number", &s.name, 300.0, Msg::Name), input("Sku", &s.code, 160.0, Msg::Code)].spacing(14),
             text("Sales Information").size(13).font(BOLD),
             row![input("Rate", &s.price, 140.0, Msg::Price), pick("Tax Code", app.lk.tax_opts(), &s.tax, Msg::Tax, 220.0), pick("Income Account", income, &s.sale_account, Msg::SaleAccount, 300.0)].spacing(14),
             text("Purchase Information").size(13).font(BOLD),
-            row![input("Cost", &s.cost, 140.0, Msg::Cost), pick("Expense Account", expense, &s.purchase_account, Msg::PurchaseAccount, 300.0)].spacing(14),
+            row![input("Cost", &s.cost, 140.0, Msg::Cost), pick(if s.tracked { "COGS Account" } else { "Expense Account" }, expense, &s.purchase_account, Msg::PurchaseAccount, 300.0)].spacing(14),
+            if s.tracked { Element::from(column![text("Inventory Information").size(13).font(BOLD), row![input("Reorder Point (Min)", &s.reorder, 160.0, Msg::Reorder)].spacing(14)].spacing(12)) } else { Space::new().into() },
+            if s.orig.is_some() { Element::from(checkbox(s.inactive).label("Item is inactive").on_toggle(|v| Message::Form(Msg::Inactive(v))).text_size(13)) } else { Space::new().into() },
         ].spacing(12)).padding(16).width(Fill).style(theme::card),
-        buttons(s, true),
+        buttons(s, s.orig.is_none()),
     ].spacing(14).into()
 }
 

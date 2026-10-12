@@ -45,12 +45,16 @@ pub struct State {
     pub price_level: Option<Opt>,
     /// Edit Customer/Vendor: the contact as saved (everything the form doesn't show is kept).
     pub orig: Option<Value>,
+    /// New/Edit Item: an inventory part (tracked), its reorder point, and (editing) inactive.
+    pub tracked: bool,
+    pub reorder: String,
+    pub inactive: bool,
 }
 
 #[derive(Debug, Clone)]
 pub enum Msg {
     Name(String), Email(String), Phone(String), Code(String), Price(String), Cost(String),
-    SaleAccount(Opt), PurchaseAccount(Opt), Tax(Opt), Service(bool), Track1099(bool), PriceLevel(Opt), EditLoaded(crate::backend::Reply),
+    SaleAccount(Opt), PurchaseAccount(Opt), Tax(Opt), Service(bool), Track1099(bool), PriceLevel(Opt), EditLoaded(crate::backend::Reply), ItemType(String), Reorder(String), Inactive(bool), ItemLoaded(crate::backend::Reply),
     Date(String), Memo(String), From(Opt), To(Opt), Amount(String), First(String), Last(String), Address(String), SaveNew, AcctType(String), Detail(String), JAccount(usize, Opt), JDesc(usize, String), JDebit(usize, String), JCredit(usize, String), AddLine,
     Save, Saved(Result<Value, String>),
 }
@@ -75,6 +79,33 @@ pub fn open_edit(app: &mut App, id: i64) -> Task<Message> {
     app.form = Some(State { service: true, date: ui::date(&ui::today_iso(), app.date_style()), busy: true, ..Default::default() });
     app.data = Some(json!({}));
     app.be.call("contacts.get", json!({"id": id}), |r| Message::Form(Msg::EditLoaded(r)))
+}
+
+/// Edit Item: load the item into the form.
+pub fn open_edit_item(app: &mut App, id: i64) -> Task<Message> {
+    app.form = Some(State { service: true, date: ui::date(&ui::today_iso(), app.date_style()), busy: true, ..Default::default() });
+    app.data = Some(json!({}));
+    app.be.call("items.get", json!({"id": id}), |r| Message::Form(Msg::ItemLoaded(r)))
+}
+
+/// An e4 quantity/price as typed text ("12.5", "89.00").
+fn e4_text(v: Option<i64>) -> String {
+    let Some(v) = v else { return String::new() };
+    let s = format!("{:.4}", v as f64 / 10_000.0);
+    let t = s.trim_end_matches('0');
+    if t.ends_with('.') { format!("{t}00") } else if t.split('.').nth(1).is_some_and(|d| d.len() == 1) { format!("{t}0") } else { t.to_string() }
+}
+
+/// The full item for items.update: the saved item with the form's fields over it.
+fn merged_item(orig: &Value, s: &State) -> Value {
+    let str_of = |k: &str| orig[k].as_str().unwrap_or("").to_string();
+    let name = s.name.trim();
+    json!({"code": if s.code.trim().is_empty() { str_of("code") } else { s.code.trim().to_string() }, "name": name,
+        "sales_description": if str_of("sales_description").is_empty() { name.to_string() } else { str_of("sales_description") }, "purchase_description": str_of("purchase_description"),
+        "is_sold": orig["is_sold"].as_i64() != Some(0), "is_purchased": orig["is_purchased"].as_i64() == Some(1) || !s.cost.trim().is_empty() || s.tracked,
+        "sale_price": s.price.replace(',', ""), "sale_account_id": s.sale_account.as_ref().map(|a| a.id), "sale_tax_rate_id": s.tax.as_ref().map(|x| x.id),
+        "purchase_price": s.cost.replace(',', ""), "purchase_account_id": s.purchase_account.as_ref().map(|a| a.id), "purchase_tax_rate_id": orig["purchase_tax_rate_id"],
+        "is_tracked": s.tracked, "inventory_account_id": orig["inventory_account_id"], "reorder_level": s.reorder.replace(',', "")})
 }
 
 /// The full contact for contacts.update: the saved record with the form's fields over it.
@@ -112,6 +143,29 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                 Err(e) => app.toast(e, true),
             }
         }
+        Msg::ItemLoaded(r) => {
+            s.busy = false;
+            match r {
+                Ok(it) => {
+                    let st = |k: &str| it[k].as_str().unwrap_or("").to_string();
+                    let opt = |id: Option<i64>| id.and_then(|id| app.lk.account_opts(|_| true).into_iter().find(|o| o.id == id));
+                    s.name = st("name"); s.code = st("code");
+                    s.price = e4_text(it["sale_unit_e2"].as_i64()); s.cost = e4_text(it["purchase_unit_e2"].as_i64());
+                    s.sale_account = opt(it["sale_account_id"].as_i64()); s.purchase_account = opt(it["purchase_account_id"].as_i64());
+                    s.tax = it["sale_tax_rate_id"].as_i64().and_then(|id| app.lk.tax_opts().into_iter().find(|o| o.id == id));
+                    s.tracked = it["is_tracked"].as_i64() == Some(1);
+                    s.service = !s.tracked && it["is_purchased"].as_i64() != Some(1);
+                    s.reorder = e4_text(it["reorder_level_e4"].as_i64()).trim_end_matches(".00").to_string();
+                    s.inactive = it["status"] != "ACTIVE";
+                    s.orig = Some(it);
+                    Task::none()
+                }
+                Err(e) => app.toast(e, true),
+            }
+        }
+        Msg::ItemType(t) => { s.tracked = t == "Inventory Part"; s.service = t == "Service"; Task::none() }
+        Msg::Reorder(v) => { s.reorder = v; Task::none() }
+        Msg::Inactive(v) => { s.inactive = v; Task::none() }
         Msg::Name(v) => { s.name = v; Task::none() }
         Msg::Email(v) => { s.email = v; Task::none() }
         Msg::Phone(v) => { s.phone = v; Task::none() }
@@ -148,6 +202,14 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::Save => {
             if s.busy { app.form = Some(s); return Task::none(); }
             let call = match &app.route {
+                Route::EditItem(id) => {
+                    let Some(orig) = s.orig.clone() else { app.form = Some(s); return Task::none() };
+                    if s.name.trim().is_empty() { app.form = Some(s); return app.toast("Enter a name", true); }
+                    let id = *id;
+                    let status = if s.inactive { "ARCHIVED" } else { "ACTIVE" };
+                    if orig["status"].as_str() != Some(status) { let _ = app.be.call_now("items.setStatus", json!({"id": id, "status": status})); }
+                    ("items.update", json!({"id": id, "item": merged_item(&orig, &s)}))
+                }
                 Route::EditContact(id) => {
                     let Some(orig) = s.orig.clone() else { app.form = Some(s); return Task::none() };
                     if s.name.trim().is_empty() { app.form = Some(s); return app.toast("Enter a name", true); }
@@ -190,6 +252,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                     if s.name.trim().is_empty() { app.form = Some(s); return app.toast("Enter a name", true); }
                     let code = if s.code.trim().is_empty() { s.name.trim().to_uppercase().chars().filter(|c| c.is_alphanumeric()).take(10).collect() } else { s.code.trim().to_string() };
                     ("items.create", json!({"code": code, "name": s.name.trim(), "sales_description": s.name.trim(), "is_sold": true, "is_purchased": !s.service || !s.cost.trim().is_empty(),
+                        "is_tracked": s.tracked, "reorder_level": s.reorder.replace(',', ""),
                         "sale_price": s.price.replace(',', ""), "sale_account_id": s.sale_account.as_ref().map(|a| a.id), "sale_tax_rate_id": s.tax.as_ref().map(|x| x.id),
                         "purchase_price": s.cost.replace(',', ""), "purchase_account_id": s.purchase_account.as_ref().map(|a| a.id)}))
                 }
@@ -212,6 +275,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                     let (msg, next) = match &app.route {
                         Route::NewContact(c) => ("Saved", v["id"].as_i64().map(Route::Contact).unwrap_or(if *c { Route::Customers } else { Route::Vendors })),
                         Route::EditContact(id) => ("Changes saved", Route::Contact(*id)),
+                        Route::EditItem(_) => ("Item saved", Route::Products),
                         Route::NewProduct => ("Product saved", Route::Products),
                         Route::NewAccount => ("Account created", Route::Chart),
                         Route::Transfer => ("Transfer recorded", Route::Banking(None)),

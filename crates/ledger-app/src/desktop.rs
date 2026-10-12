@@ -60,6 +60,8 @@ pub struct State {
     pub menu_sel: Option<usize>,
     /// Inventory Center: selected item and its details (items.get).
     pub inv_sel: Option<i64>,
+    /// Item List: include inactive items.
+    pub show_inactive: bool,
     pub inv_detail: Option<Value>,
     /// Customer Center: jobs (projects) shown under their customers.
     pub jobs: Vec<Value>,
@@ -127,7 +129,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), InvSelect(i64), InvDetail(crate::backend::Reply), JobsLoaded(crate::backend::Reply), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), ShowInactive(bool), InvSelect(i64), InvDetail(crate::backend::Reply), JobsLoaded(crate::backend::Reply), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
     /// Remember the Desktop view choices (One Window, icon bar pane).
@@ -306,6 +308,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::JobsLoaded(r) => { if let Ok(v) = r { app.desk.jobs = v["projects"].as_array().or(v.as_array()).cloned().unwrap_or_default(); } Task::none() }
         Msg::InvSelect(id) => { app.desk.inv_sel = Some(id); app.be.call("items.get", serde_json::json!({"id": id}), |r| Message::Desk(Msg::InvDetail(r))) }
         Msg::InvDetail(r) => match r { Ok(v) => { app.desk.inv_detail = Some(v); Task::none() } Err(e) => app.toast(e, true) },
+        Msg::ShowInactive(v) => { app.desk.show_inactive = v; Task::none() }
         Msg::OpenPrefs(cat) => { app.settings.cat = Some(cat); app.go(Route::Settings) }
         Msg::FavAdd(f) => { if !app.desk.favorites.contains(&f) { app.desk.favorites.push(f); app.save_desk_prefs(); } Task::none() }
         Msg::FavRemove(n) => { if n < app.desk.favorites.len() { app.desk.favorites.remove(n); app.save_desk_prefs(); } Task::none() }
@@ -798,6 +801,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::CustomizeFavorites => "Customize Your Menus".into(),
         Route::BuildAssemblies => "Build Assemblies".into(),
         Route::InventoryCenter => "Inventory Center".into(),
+        Route::EditItem(_) => "Edit Item".into(),
         Route::EditContact(id) => if app.lk.contacts.iter().find(|c| c["id"].as_i64() == Some(*id)).is_some_and(|c| c["is_supplier"].as_i64() == Some(1) && c["is_customer"].as_i64() != Some(1)) { "Edit Vendor".into() } else { "Edit Customer".into() },
         Route::EnterTime => "Time/Enter Single Activity".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
@@ -1179,7 +1183,7 @@ pub fn inventory_center(app: &App) -> Element<'_, Message> {
             let money_e4 = |v: Option<i64>| v.map(|x| ui::money((x as f64 / 100.0).round() as i64)).unwrap_or_default();
             let qoh = it["qty_on_hand_e4"].as_i64().unwrap_or(0);
             let info = container(column![
-                text("Item Information").size(15).font(BOLD),
+                row![text("Item Information").size(15).font(BOLD), ui::hspace(), ui::link("Edit Item", Message::Nav(Route::EditItem(it["id"].as_i64().unwrap_or(0))))],
                 row![
                     column![info_row("Item Name", format!("{} — {}", s("code"), s("name"))), info_row("Description", s("sales_description")),
                         info_row("Sales Price", money_e4(it["sale_unit_e2"].as_i64())), info_row("Purchase Cost", money_e4(it["purchase_unit_e2"].as_i64()))].spacing(6).width(Fill),
@@ -2388,23 +2392,24 @@ pub fn chart(app: &App) -> Element<'_, Message> {
 /// Lists ▸ Item List.
 pub fn item_list(app: &App) -> Element<'_, Message> {
     let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
-    let items = d.as_array().cloned().unwrap_or_default();
+    let items: Vec<Value> = d.as_array().cloned().unwrap_or_default().into_iter().filter(|i| app.desk.show_inactive || i["status"] == "ACTIVE").collect();
     let acct = |id: Option<i64>| id.and_then(|id| app.lk.accounts.iter().find(|a| a["id"].as_i64() == Some(id))).map(|a| format!("{} · {}", a["code"].as_str().unwrap_or(""), a["name"].as_str().unwrap_or(""))).unwrap_or_default();
     let cols: Vec<(&str, u16, bool)> = vec![("Name", 20, false), ("Description", 28, false), ("Type", 12, false), ("Account", 22, false), ("On Hand", 8, true), ("Price", 10, true)];
     let rows = items.iter().map(|x| {
         let tracked = x["is_tracked"].as_i64() == Some(1);
         let ty = if tracked { "Inventory Part" } else if x["is_purchased"].as_i64() == Some(1) && x["is_sold"].as_i64() == Some(1) { "Non-inventory Part" } else { "Service" };
         (vec![
-            ui::cell(x["name"].as_str().unwrap_or("").to_string()),
+            ui::cell(format!("{}{}", x["name"].as_str().unwrap_or(""), if x["status"] == "ACTIVE" { "" } else { " (inactive)" })),
             ui::cell_muted(x["sales_description"].as_str().unwrap_or("").to_string()),
             ui::cell_muted(ty),
             ui::cell_muted(acct(x["sale_account_id"].as_i64())),
             if tracked { ui::num(format!("{}", x["qty_on_hand_e4"].as_i64().unwrap_or(0) as f64 / 10000.0)) } else { Space::new().into() },
             ui::num(ui::money(x["sale_unit_e2"].as_i64().unwrap_or(0) / 100)),
-        ], None)
+        ], x["id"].as_i64().map(|id| Message::Nav(Route::EditItem(id))))
     }).collect();
     list_window(&cols, rows, vec![
         ui::btn("Item: New", nav(Route::NewProduct)),
+        iced::widget::checkbox(app.desk.show_inactive).label("Include inactive").on_toggle(|v| Message::Desk(Msg::ShowInactive(v))).text_size(13).into(),
         ui::btn("Activities: Create Invoices", doc_new("ACCREC")), ui::btn("Enter Sales Receipts", doc_new("SALESRECEIPT")), ui::btn("Create Purchase Orders", doc_new("PO")),
         ui::hspace(), ui::btn("Reports: Sales by Item", rep("sales-by-item")),
     ])
