@@ -1970,3 +1970,31 @@ fn end_to_end_desktop_money_screens() {
     let _ = (P::Save, D::Save(true));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn end_to_end_online_and_xero() {
+    use crate::doc::Msg as D;
+    use crate::payments::Msg as P;
+    for (layout, save, cust_label) in [(crate::theme::Layout::Online, "Save and close", "Customer"), (crate::theme::Layout::Xero, "Approve", "Customer")] {
+        let (mut app, dir) = desktop_app(&format!("e2e-{}", layout.key()));
+        let t = app.update(Message::SetLayout(layout)); settle(&mut app, t);
+        let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+        // Invoice
+        let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None })); settle(&mut app, t);
+        for m in [D::Contact(cust.clone()), D::Desc(0, "Consulting".into()), D::Price(0, "450".into())] { let t = app.update(Message::Doc(m)); settle(&mut app, t); }
+        let before = count(&app, "ACCREC");
+        press(&mut app, save);
+        assert_eq!(count(&app, "ACCREC"), before + 1, "{}: invoice saved", layout.label());
+        // Spend money / expense
+        let t = app.update(Message::Nav(Route::Spend(None))); settle(&mut app, t);
+        let acct = app.lk.account_opts(|a| a["code"] == "429").into_iter().next().unwrap();
+        for m in [P::ContactText("Stationery Co".into()), P::LineAccount(0, acct), P::LineAmount(0, "19.95".into())] { let t = app.update(Message::Pay(m)); settle(&mut app, t); }
+        press(&mut app, "Save and close");
+        let bank = crate::payments::bank_only(&app)[0].id;
+        assert!(app.be.call_now("bank.transactions", json!({"id": bank})).unwrap().as_array().unwrap().iter().any(|r| r["contact"] == "Stationery Co"), "{}: expense saved", layout.label());
+        let errors: Vec<_> = app.toasts.iter().filter(|t| t.2).collect();
+        assert!(errors.is_empty(), "{}: {errors:?}", layout.label());
+        let _ = cust_label;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
