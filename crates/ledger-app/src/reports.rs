@@ -187,7 +187,7 @@ fn qb_group(key: &str) -> &'static str {
         "aged-receivables" | "receivable-invoice-detail" | "contact-transactions" => "Who owes you",
         "sales-by-contact" | "sales-by-item" | "income-by-contact" => "Sales and customers",
         "aged-payables" | "payable-invoice-detail" => "What you owe",
-        "purchases-by-contact" | "purchases-by-item" | "expense-claims" => "Expenses and vendors",
+        "purchases-by-contact" | "purchases-by-item" | "expense-claims" | "contractor-1099" => "Expenses and vendors",
         "tax-reconciliation" => "Sales tax",
         "payroll-activity" | "leave-balances" => "Employees",
         "inventory-summary" | "fixed-asset-register" | "fixed-asset-reconciliation" | "depreciation-schedule" | "project-profitability" => "Inventory, assets and projects",
@@ -200,7 +200,9 @@ const FAVOURITES: [&str; 5] = ["profit-and-loss", "balance-sheet", "cash-flow-st
 pub fn centre(app: &App) -> Element<'_, Message> {
     let Some(d) = &app.data else { return ui::page(ui::h1("Reports"), vec![], ui::muted("Loading…")) };
     let k = t();
-    let cat: Vec<Value> = d.as_array().cloned().unwrap_or_default();
+    // 1099s are US-only.
+    let us = app.country() == "US";
+    let cat: Vec<Value> = d.as_array().cloned().unwrap_or_default().into_iter().filter(|r| us || r["key"] != "contractor-1099").collect();
     let link_row = |key: String, title: String, desc: String| -> Element<'_, Message> {
         button(row![icon("reports", 16.0, k.accent), column![text(title).size(14).color(k.accent), ui::muted(desc)].spacing(1)].spacing(10).align_y(Alignment::Center))
             .style(theme::row_btn).padding([8, 10]).width(Fill).on_press(Message::Nav(Route::Report(key))).into()

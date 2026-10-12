@@ -144,6 +144,7 @@ pub fn report(l: &Ledger, name: &str, p: &ReportParams) -> Result<Value> {
             Ok(json!({"title": "Depreciation Schedule", "org": l.setting_or("org_name", "")?, "subtitle": "Projected book depreciation", "columns": cols, "sections": [{"title": "", "rows": rows}]}))
         }
         "project-profitability" => l.project_profitability_report(),
+        "contractor-1099" => l.report_1099(p),
         "payroll-activity" => l.payroll_activity_report(&from, &to),
         "leave-balances" => l.leave_balances_report(),
         "expense-claims" => {

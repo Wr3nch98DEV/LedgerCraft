@@ -256,6 +256,11 @@ pub fn contact(app: &App) -> Element<'_, Message> {
         actions.push(ui::btn(app.term("receive_payment"), Some(Message::Nav(Route::ReceivePayment(Some(id))))));
         actions.push(ui::btn_primary("New invoice", Some(Message::NewDocFor("ACCREC".into(), id))));
     }
+    // US vendors: "Track payments for 1099" (QuickBooks).
+    let info: Element<Message> = if is_supplier && app.country() == "US" {
+        let on = i(&c["track_1099"]) == 1;
+        column![info, iced::widget::checkbox(on).label("Track payments for 1099").on_toggle(move |v| Message::Set1099(id, v)).text_size(14)].spacing(10).into()
+    } else { info };
     let back = if is_supplier { Route::Vendors } else { Route::Customers };
     let title = column![ui::link(if is_supplier { app.term("suppliers") } else { app.term("customers") }, Message::Nav(back)), ui::h1(st(c, "name").to_string())].spacing(4);
     ui::page(title.into(), actions, column![info, ui::h2("Transaction list"), ui::table(&cols, rows, "No transactions yet.")].spacing(16).into())

@@ -41,6 +41,7 @@ pub const CATALOGUE: &[(&str, &str, &str, &str)] = &[
     ("leave-balances", "Leave Balances", "Payroll", "Leave balances per employee"),
     ("fx-gains-losses", "Foreign Currency Gains and Losses", "Accounting", "Realised and unrealised currency gains"),
     ("income-by-contact", "Income by Contact", "Receivables", "Income per contact (cash and accrual)"),
+    ("contractor-1099", "1099 Contractor Summary", "Payables", "Payments to vendors tracked for 1099s (US)"),
 ];
 
 /// Statement of cash flows, indirect method.

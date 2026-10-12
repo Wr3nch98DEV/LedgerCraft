@@ -631,3 +631,34 @@ fn render_add_to_invoice() {
     ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join("lc-delayed.png")).unwrap();
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn track_vendor_for_1099() {
+    let (mut app, dir) = demo_app("t1099", Skin::QuickBooks);
+    // New vendor form (US company) offers 1099 tracking.
+    let _ = app.update(Message::Nav(Route::NewContact(false)));
+    let msgs = click(&app, "Track payments for 1099");
+    assert!(matches!(msgs.as_slice(), [Message::Form(crate::forms::Msg::Track1099(true))]), "{msgs:?}");
+    // Vendor page toggle.
+    let vendor = app.lk.contact_opts(false).into_iter().next().unwrap();
+    let _ = app.update(Message::Nav(Route::Contact(vendor.id)));
+    let c = app.be.call_now("contacts.get", json!({"id": vendor.id})).unwrap();
+    app.data = Some(json!({"contact": c, "sales": [], "bills": []}));
+    if app.data.as_ref().unwrap()["contact"]["is_customer"] == 1 { app.data.as_mut().unwrap()["contact"]["is_customer"] = json!(0); }
+    let msgs = click(&app, "Track payments for 1099");
+    assert!(matches!(msgs.as_slice(), [Message::Set1099(x, true)] if *x == vendor.id), "{msgs:?}");
+    let _ = app.update(Message::Set1099(vendor.id, true));
+    app.be.call_now("contacts.set1099", json!({"id": vendor.id, "on": true})).unwrap();
+    // The 1099 summary lists them and is in the US report centre.
+    let rep = app.be.call_now("reports.run", json!({"name": "contractor-1099", "params": {"from": "2026-01-01", "to": "2026-12-31"}})).unwrap();
+    let listed: usize = rep["sections"].as_array().unwrap().iter().map(|s| s["rows"].as_array().unwrap().len()).sum();
+    assert_eq!(listed, 1);
+    let _ = app.update(Message::Nav(Route::Reports));
+    app.data = Some(app.be.call_now("reports.catalogue", json!({})).unwrap());
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        assert!(ui.find("1099 Contractor Summary").is_ok());
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}

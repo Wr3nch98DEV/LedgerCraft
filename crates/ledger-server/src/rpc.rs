@@ -219,6 +219,7 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
             let delayed: Vec<i64> = if p["close_delayed"].is_array() { de(&p["close_delayed"])? } else { vec![] };
             Ok(json!({"id": l.save_invoice_with_delayed(oi(p, "id"), &input, &delayed)?}))
         }
+        "contacts.set1099" => { need("contacts:write")?; l.set_track_1099(id(p)?, p["on"].as_bool().unwrap_or(true))?; ok() }
         "docs.saveDelayed" => { need("sales:write")?; Ok(json!({"id": l.save_delayed(oi(p, "id"), &de::<DocInput>(&p["doc"])?, p["credit"].as_bool().unwrap_or(false))?})) }
         "docs.openDelayed" => { need("sales:read")?; Ok(json!(l.open_delayed(i(p, "contact_id")?)?)) }
         "docs.setStatus" => { let d = l.get_document(id(p)?)?; need(doc_perm(&d, true))?; l.set_document_status(id(p)?, s(p, "status"))?; ok() }

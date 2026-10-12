@@ -17,6 +17,8 @@ pub struct State {
     pub email: String,
     pub phone: String,
     pub customer: bool,
+    /// New US vendor: track payments for 1099.
+    pub track_1099: bool,
     pub code: String,
     pub price: String,
     pub cost: String,
@@ -39,7 +41,7 @@ pub struct State {
 #[derive(Debug, Clone)]
 pub enum Msg {
     Name(String), Email(String), Phone(String), Code(String), Price(String), Cost(String),
-    SaleAccount(Opt), PurchaseAccount(Opt), Tax(Opt), Service(bool),
+    SaleAccount(Opt), PurchaseAccount(Opt), Tax(Opt), Service(bool), Track1099(bool),
     Date(String), Memo(String), From(Opt), To(Opt), Amount(String), AcctType(String), Detail(String), JAccount(usize, Opt), JDesc(usize, String), JDebit(usize, String), JCredit(usize, String), AddLine,
     Save, Saved(Result<Value, String>),
 }
@@ -73,6 +75,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::PurchaseAccount(a) => { s.purchase_account = Some(a); Task::none() }
         Msg::Tax(x) => { s.tax = Some(x); Task::none() }
         Msg::Service(v) => { s.service = v; Task::none() }
+        Msg::Track1099(v) => { s.track_1099 = v; Task::none() }
         Msg::Date(v) => { s.date = v; Task::none() }
         Msg::From(v) => { s.from = Some(v); Task::none() }
         Msg::To(v) => { s.to = Some(v); Task::none() }
@@ -151,8 +154,13 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                     };
                     let t1 = app.toast(msg, false);
                     let t2 = app.load_lookups();
+                    let t0 = match (&app.route, v["id"].as_i64()) {
+                        (Route::NewContact(false), Some(cid)) if s.track_1099 => app.be.call("contacts.set1099", json!({"id": cid, "on": true}), |_| Message::Noop),
+                        _ => Task::none(),
+                    };
+                    app.form = Some(s);
                     let t3 = app.go(next);
-                    return Task::batch([t1, t2, t3]);
+                    return Task::batch([t0, t1, t2, t3]);
                 }
                 Err(e) => app.toast(e, true),
             }
@@ -181,6 +189,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 ui::card(column![
                     ui::field(if *customer { "Customer display name" } else { "Company or name" }, &s.name, |v| Message::Form(Msg::Name(v))),
                     row![ui::field("Email", &s.email, |v| Message::Form(Msg::Email(v))), ui::field("Phone", &s.phone, |v| Message::Form(Msg::Phone(v)))].spacing(14),
+                    if !customer && app.country() == "US" { Element::from(checkbox(s.track_1099).label("Track payments for 1099").on_toggle(|v| Message::Form(Msg::Track1099(v))).text_size(14)) } else { Space::new().into() },
                 ].spacing(14)),
                 footer(s.busy),
             ].spacing(14).into())

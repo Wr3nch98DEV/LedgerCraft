@@ -488,6 +488,33 @@ fn delayed_charges_and_credits() {
 }
 
 #[test]
+fn contractor_1099_summary() {
+    let l = org();
+    let bank = acct(&l, "090");
+    let exp = acct(&l, "429");
+    let bill = |who: &str, price: &str| l.save_document(None, &DocInput { kind: "ACCPAY".into(), contact_name: Some(who.into()), date: "2026-03-01".into(),
+        line_amount_type: Some("NOTAX".into()), lines: vec![line(exp, None, "1", price)], status: Some("AUTHORISED".into()), ..Default::default() }).unwrap();
+    let a = bill("Ace Contracting", "900");
+    let b = bill("Bob Freelance", "400");
+    let c = bill("Not Tracked LLC", "5000");
+    for (d, amt) in [(a, "900"), (b, "400"), (c, "5000")] {
+        l.add_payment(&PaymentInput { document_id: d, account_id: bank, date: "2026-03-15".into(), amount: amt.into(), ..Default::default() }).unwrap();
+    }
+    // A card payment to Ace doesn't count towards the 1099.
+    let card = l.create_account(&ledger_core::accounts::AccountInput { code: "".into(), name: "Visa".into(), kind: "BANK".into(), bank_type: Some("CREDITCARD".into()), ..Default::default() }).unwrap();
+    let a2 = bill("Ace Contracting", "250");
+    l.add_payment(&PaymentInput { document_id: a2, account_id: card, date: "2026-04-01".into(), amount: "250".into(), ..Default::default() }).unwrap();
+    for d in [a, b] { let cid = l.get_document(d).unwrap()["contact_id"].as_i64().unwrap(); l.set_track_1099(cid, true).unwrap(); }
+    let r = l.report_1099(&ReportParams { from: Some("2026-01-01".into()), to: Some("2026-12-31".into()), ..Default::default() }).unwrap();
+    let over = r["sections"][0]["rows"].as_array().unwrap();
+    assert_eq!(over.len(), 1);
+    assert!(over[0]["label"].as_str().unwrap().starts_with("Ace Contracting"));
+    assert_eq!(over[0]["values"], serde_json::json!([115000, 25000, 90000]));
+    assert_eq!(r["sections"][1]["rows"][0]["values"][2], 40000, "Bob is under $600");
+    assert_eq!(r["sections"].as_array().unwrap().iter().map(|s| s["rows"].as_array().unwrap().len()).sum::<usize>(), 2, "untracked vendors are left out");
+}
+
+#[test]
 fn reports_add_up() {
     let l = org();
     let sales = acct(&l, "200");

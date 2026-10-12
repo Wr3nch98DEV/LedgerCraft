@@ -128,6 +128,10 @@ pub enum Message {
     People(people::Msg),
     /// New invoice/bill for a given contact.
     NewDocFor(String, i64),
+    /// Turn 1099 tracking on/off for a vendor (US).
+    Set1099(i64, bool),
+    /// Show an engine error as a toast.
+    Failed(String),
     Noop,
 }
 
@@ -461,6 +465,11 @@ impl App {
             Message::People(m) => people::update(self, m),
             Message::Settings(m) => crate::settings::update(self, m),
             Message::NewDocFor(kind, cid) => { self.prefill_contact = Some(cid); self.go(Route::Doc { kind, id: None }) }
+            Message::Failed(e) => self.toast(e, true),
+            Message::Set1099(cid, on) => {
+                if let Some(d) = self.data.as_mut() { d["contact"]["track_1099"] = json!(on as i64); }
+                self.be.call("contacts.set1099", json!({"id": cid, "on": on}), |r| match r { Ok(_) => Message::Noop, Err(e) => Message::Failed(e) })
+            }
         }
     }
 
