@@ -22,6 +22,7 @@ pub mod documents;
 pub mod payments;
 pub mod banking;
 pub mod statements;
+pub mod tickoff;
 pub mod reports;
 pub mod search;
 pub mod util;

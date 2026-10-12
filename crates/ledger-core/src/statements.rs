@@ -313,7 +313,7 @@ impl Ledger {
         })
     }
 
-    fn set_target_reconciled(&self, kind: &str, id: i64, v: i64) -> Result<()> {
+    pub(crate) fn set_target_reconciled(&self, kind: &str, id: i64, v: i64) -> Result<()> {
         let sql = match kind {
             "PAYMENT" => "UPDATE payments SET reconciled = ?2 WHERE id = ?1",
             "BANKTX" => "UPDATE bank_transactions SET reconciled = ?2 WHERE id = ?1",

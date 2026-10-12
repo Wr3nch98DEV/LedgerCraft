@@ -390,6 +390,44 @@ fn undeposited_funds_and_bank_deposit() {
 }
 
 #[test]
+fn tick_off_reconciliation() {
+    let l = org();
+    let bank = acct(&l, "090");
+    let sales = acct(&l, "200");
+    let a = invoice(&l, "2026-07-01", vec![line(sales, None, "1", "100")], "AUTHORISED");
+    let b = invoice(&l, "2026-07-02", vec![line(sales, None, "1", "40")], "AUTHORISED");
+    let pa = l.add_payment(&PaymentInput { document_id: a, account_id: bank, date: "2026-07-05".into(), amount: "100".into(), ..Default::default() }).unwrap();
+    l.add_payment(&PaymentInput { document_id: b, account_id: bank, date: "2026-07-06".into(), amount: "40".into(), ..Default::default() }).unwrap();
+    let late = invoice(&l, "2026-08-01", vec![line(sales, None, "1", "7")], "AUTHORISED");
+    l.add_payment(&PaymentInput { document_id: late, account_id: bank, date: "2026-08-02".into(), amount: "7".into(), ..Default::default() }).unwrap();
+    assert_eq!(l.reconcile_beginning_balance(bank).unwrap(), 0);
+    let r = l.reconcile_start(bank, "2026-07-31", 10000).unwrap();
+    assert_eq!(l.reconcile_start(bank, "2026-07-31", 10000).unwrap(), r, "resumes the open one");
+    let s = l.reconcile_session(r).unwrap();
+    assert_eq!(s["items"].as_array().unwrap().len(), 2, "only items up to the statement date");
+    assert_eq!(s["difference"], 10000);
+    assert!(l.reconcile_finish(r).is_err(), "can't finish with a difference");
+    l.reconcile_toggle(r, "PAYMENT", pa, true).unwrap();
+    let s = l.reconcile_session(r).unwrap();
+    assert_eq!((s["cleared_balance"].as_i64(), s["difference"].as_i64()), (Some(10000), Some(0)));
+    l.reconcile_finish(r).unwrap();
+    assert!(l.reconcile_toggle(r, "PAYMENT", pa, false).is_err(), "finished ones are locked");
+    let left = l.unreconciled_ledger_items(bank).unwrap();
+    assert_eq!(left.len(), 2, "the ticked payment is reconciled, the rest aren't");
+    assert!(left.iter().all(|i| i["id"].as_i64() != Some(pa) || i["kind"] != "PAYMENT"));
+    // The next reconciliation starts from the last ending balance.
+    assert_eq!(l.reconcile_beginning_balance(bank).unwrap(), 10000);
+    let r2 = l.reconcile_start(bank, "2026-08-31", 14700).unwrap();
+    assert_eq!(l.reconcile_session(r2).unwrap()["beginning_balance"], 10000);
+    // Undo the last finished one: its items become unreconciled again.
+    l.reconcile_undo_last(bank).unwrap();
+    assert_eq!(l.unreconciled_ledger_items(bank).unwrap().len(), 3);
+    assert_eq!(l.reconcile_beginning_balance(bank).unwrap(), 0);
+    assert!(l.reconcile_start(acct(&l, "200"), "2026-07-31", 0).is_err(), "only bank accounts");
+    assert_invariants(&l);
+}
+
+#[test]
 fn reports_add_up() {
     let l = org();
     let sales = acct(&l, "200");

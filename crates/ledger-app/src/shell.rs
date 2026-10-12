@@ -82,6 +82,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::Reports => reports::centre(app),
         Route::Report(_) => reports::view(app),
         Route::Settings => settings::view(app),
+        Route::Reconcile => crate::reconcile::view(app),
         Route::Doc { .. } => doc::view(app),
         Route::ReceivePayment(_) | Route::PayBills | Route::Spend(_) | Route::Check(_) | Route::Deposit => payments::view(app),
         Route::NewContact(_) | Route::NewProduct | Route::Journal | Route::Transfer => forms::view(app),
@@ -122,7 +123,7 @@ fn qb_section(r: &Route) -> &'static str {
         Route::Taxes | Route::TaxReturn(_) => "taxes",
         Route::Projects => "projects",
         Route::Mileage => "mileage",
-        Route::Chart | Route::Journal => "accounting",
+        Route::Chart | Route::Journal | Route::Reconcile => "accounting",
         Route::NewContact(true) | Route::NewProduct => "sales",
         Route::NewContact(false) => "expenses",
         Route::Placeholder(p) => match *p { "Projects" => "projects", "Payroll" => "payroll", "Taxes" => "taxes", "Mileage" => "mileage", "My accountant" => "accountant", "Apps" => "apps", _ => "" },
@@ -165,7 +166,7 @@ fn qb_sidebar(app: &App) -> Element<'_, Message> {
     nav = nav.push(item("mileage", "Mileage", "mileage", Route::Mileage, false));
     nav = nav.push(item("accounting", "Accounting", "accounting", Route::Chart, true));
     if sec == "accounting" {
-        nav = nav.push(sub("Chart of accounts", Route::Chart)).push(sub("Reconcile", Route::Banking(None)));
+        nav = nav.push(sub("Chart of accounts", Route::Chart)).push(sub("Reconcile", Route::Reconcile));
     }
     nav = nav.push(item("users", "My accountant", "accountant", Route::Placeholder("My accountant"), false));
     nav = nav.push(item("apps", "Apps", "apps", Route::Placeholder("Apps"), false));
@@ -266,7 +267,7 @@ fn gear_menu(app: &App) -> Element<'_, Message> {
     let body = row![
         menu_col("Your company", vec![("Account and settings", Some(Message::Nav(Route::Settings))), ("Manage users", Some(Message::Nav(Route::Settings))), ("Custom form styles", Some(Message::Nav(Route::Settings))), ("Chart of accounts", Some(Message::Nav(Route::Chart)))]),
         menu_col("Lists", vec![("All lists", None), ("Products and services", Some(Message::Nav(Route::Products))), ("Recurring transactions", None), ("Attachments", None)]),
-        menu_col("Tools", vec![("Import data", None), ("Export data", None), ("Reconcile", Some(Message::Nav(Route::Banking(None)))), ("Budgeting", None), ("Audit log", None)]),
+        menu_col("Tools", vec![("Import data", None), ("Export data", None), ("Reconcile", Some(Message::Nav(Route::Reconcile))), ("Budgeting", None), ("Audit log", None)]),
         menu_col("Profile", vec![
             (if other == Skin::Xero { "Switch to Xero-style layout" } else { "Switch to QuickBooks-style layout" }, Some(Message::SetSkin(other))),
             (if app.dark { "Light mode" } else { "Dark mode" }, Some(Message::ToggleTheme)),
@@ -283,7 +284,7 @@ fn xero_section(r: &Route) -> &'static str {
         Route::Dashboard => "dashboard",
         Route::Invoices | Route::Quotes | Route::CreditNotes | Route::Bills | Route::PurchaseOrders | Route::Products | Route::AllSales | Route::Expenses
         | Route::ReceivePayment(_) | Route::PayBills | Route::Doc { .. } => "business",
-        Route::Banking(_) | Route::Reports | Route::Report(_) | Route::Chart | Route::Spend(_) | Route::Journal => "accounting",
+        Route::Banking(_) | Route::Reports | Route::Report(_) | Route::Chart | Route::Spend(_) | Route::Journal | Route::Reconcile => "accounting",
         Route::NewContact(_) => "contacts", Route::NewProduct => "business",
         Route::Payroll | Route::PayRun(_) => "payroll",
         Route::Taxes | Route::TaxReturn(_) => "accounting",
@@ -300,7 +301,7 @@ fn xero_menu(_app: &App, m: &'static str) -> Element<'static, Message> {
         "business" => vec![("Invoices", Some(Message::Nav(Route::Invoices))), ("Quotes", Some(Message::Nav(Route::Quotes))), ("Credit notes", Some(Message::Nav(Route::CreditNotes))),
             ("Bills to pay", Some(Message::Nav(Route::Bills))), ("Purchase orders", Some(Message::Nav(Route::PurchaseOrders))), ("Products and services", Some(Message::Nav(Route::Products))),
             ("Projects", Some(Message::Nav(Route::Projects))), ("Expense claims", Some(Message::Nav(Route::Mileage)))],
-        "accounting" => vec![("Bank accounts", Some(Message::Nav(Route::Banking(None)))), ("Reports", Some(Message::Nav(Route::Reports))), ("Chart of accounts", Some(Message::Nav(Route::Chart))),
+        "accounting" => vec![("Bank accounts", Some(Message::Nav(Route::Banking(None)))), ("Reconcile account", Some(Message::Nav(Route::Reconcile))), ("Reports", Some(Message::Nav(Route::Reports))), ("Chart of accounts", Some(Message::Nav(Route::Chart))),
             ("Manual journal", Some(Message::Nav(Route::Journal))), ("Tax returns", Some(Message::Nav(Route::Taxes))), ("Fixed assets", None)],
         _ => vec![("All contacts", Some(Message::Nav(Route::Contacts))), ("Customers", Some(Message::Nav(Route::Customers))), ("Suppliers", Some(Message::Nav(Route::Vendors)))],
     };

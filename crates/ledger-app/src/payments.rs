@@ -104,7 +104,7 @@ pub fn open_deposit(app: &mut App) -> Task<Message> {
 }
 
 /// Real bank accounts only (not Undeposited Funds or other payment-enabled accounts).
-fn bank_only(app: &App) -> Vec<Opt> {
+pub fn bank_only(app: &App) -> Vec<Opt> {
     let ids: Vec<i64> = app.lk.accounts.iter().filter(|a| a["type"] == "BANK" && a["status"] == "ACTIVE").filter_map(|a| a["id"].as_i64()).collect();
     app.lk.bank_opts().into_iter().filter(|o| ids.contains(&o.id)).collect()
 }

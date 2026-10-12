@@ -12,6 +12,7 @@ mod icons;
 mod import;
 mod lists;
 mod payments;
+mod reconcile;
 mod pdf;
 mod people;
 mod reports;

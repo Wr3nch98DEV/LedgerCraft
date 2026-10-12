@@ -323,3 +323,69 @@ fn undeposited_funds_then_bank_deposit() {
     assert!(items.as_array().unwrap().iter().any(|i| i["kind"] == "DEPOSIT" && i["amount"].as_i64() == Some(expected)));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn tick_off_reconcile() {
+    use crate::reconcile::Msg as R;
+    let (mut app, dir) = demo_app("tickoff", Skin::QuickBooks);
+    // Accounting ▸ Reconcile.
+    let _ = app.update(Message::Nav(Route::Chart));
+    let msgs = click(&app, "Reconcile");
+    assert!(matches!(msgs.as_slice(), [Message::Nav(Route::Reconcile)]), "{msgs:?}");
+    let _ = app.update(Message::Nav(Route::Reconcile));
+    let acc = app.rec.account.as_ref().expect("a bank account is preselected").id;
+    let begin = app.be.call_now("tickoff.beginning", json!({"account_id": acc})).unwrap()["beginning_balance"].as_i64().unwrap();
+    let hist = app.be.call_now("tickoff.history", json!({"account_id": acc})).unwrap();
+    app.data = Some(json!({"account": acc, "beginning_balance": begin, "history": hist}));
+    // Starting without an ending balance is refused before reaching the engine.
+    let msgs = click(&app, "Start reconciling");
+    for m in msgs { let _ = app.update(m); }
+    assert!(app.rec.session.is_none() && app.toasts.iter().any(|t| t.2), "missing ending balance is flagged");
+    // Peek at what's uncleared, then enter a statement balance that covers exactly the first item.
+    let today = crate::ui::today_iso();
+    let probe = app.be.call_now("tickoff.start", json!({"account_id": acc, "statement_date": today, "ending_balance": 0})).unwrap();
+    let item = probe["items"].as_array().unwrap().iter().find(|i| !i["contact"].as_str().unwrap_or("").is_empty()).cloned().expect("demo has uncleared items");
+    let ending = begin + item["amount"].as_i64().unwrap();
+    let _ = app.update(Message::Rec(R::Ending(crate::ui::plain(ending))));
+    let _ = app.update(Message::Rec(R::Start));
+    let started = app.be.call_now("tickoff.start", json!({"account_id": acc, "statement_date": today, "ending_balance": ending}));
+    let _ = app.update(Message::Rec(R::Session(started)));
+    assert_eq!(app.rec.session.as_ref().unwrap()["difference"], item["amount"]);
+    // Clicking the row ticks it; the difference drops to zero and Finish becomes available.
+    let msgs = click(&app, item["contact"].as_str().unwrap());
+    let Some(Message::Rec(R::Toggle(kind, id, true))) = msgs.into_iter().next() else { panic!("row click doesn't tick") };
+    let _ = app.update(Message::Rec(R::Toggle(kind.clone(), id, true)));
+    assert_eq!(app.rec.session.as_ref().unwrap()["difference"], 0, "ticking updates the totals at once");
+    let rid = app.rec.session.as_ref().unwrap()["id"].clone();
+    let reply = app.be.call_now("tickoff.toggle", json!({"id": rid, "kind": kind, "target_id": id, "on": true}));
+    let _ = app.update(Message::Rec(R::Session(reply)));
+    let msgs = click(&app, "Finish now");
+    assert!(matches!(msgs.as_slice(), [Message::Rec(R::Finish)]), "{msgs:?}");
+    let _ = app.update(Message::Rec(R::Finish));
+    let done = app.be.call_now("tickoff.finish", json!({"id": rid}));
+    let _ = app.update(Message::Rec(R::Finished(done)));
+    assert!(app.rec.session.is_none());
+    let left = app.be.call_now("tickoff.history", json!({"account_id": acc})).unwrap();
+    assert_eq!(left[0]["status"], "FINISHED");
+    assert_eq!(app.be.call_now("tickoff.beginning", json!({"account_id": acc})).unwrap()["beginning_balance"], ending, "next one starts from this ending balance");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Renders the tick-off screen to `%TEMP%\lc-reconcile.png` for a visual check (run with --ignored).
+#[test]
+#[ignore]
+fn render_reconcile_screen() {
+    let (mut app, dir) = demo_app("tickoff-shot", Skin::QuickBooks);
+    let _ = app.update(Message::Nav(Route::Reconcile));
+    let acc = app.rec.account.as_ref().unwrap().id;
+    let s = app.be.call_now("tickoff.start", json!({"account_id": acc, "statement_date": crate::ui::today_iso(), "ending_balance": 2_000_000})).unwrap();
+    let first = s["items"][0].clone();
+    let s = app.be.call_now("tickoff.toggle", json!({"id": s["id"], "kind": first["kind"], "target_id": first["id"], "on": true})).unwrap();
+    app.rec.session = Some(s);
+    let out = std::env::temp_dir().join("lc-reconcile.png");
+    let _ = std::fs::remove_file(&out);
+    let _g = sim_lock();
+    let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
+    ui.snapshot(&app.theme()).unwrap().matches_image(&out).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}

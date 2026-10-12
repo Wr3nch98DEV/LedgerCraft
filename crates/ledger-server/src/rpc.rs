@@ -245,6 +245,21 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
         "batch.get" => Ok(l.batch_payment_detail(id(p)?)?),
 
         // ---- banking ----
+        "tickoff.start" => {
+            need("banking:write")?;
+            let r = l.reconcile_start(i(p, "account_id")?, s(p, "statement_date"), i(p, "ending_balance")?)?;
+            Ok(l.reconcile_session(r)?)
+        }
+        "tickoff.beginning" => { need("banking:read")?; Ok(json!({"beginning_balance": l.reconcile_beginning_balance(i(p, "account_id")?)?})) }
+        "tickoff.session" => { need("banking:read")?; Ok(l.reconcile_session(id(p)?)?) }
+        "tickoff.toggle" => {
+            need("banking:write")?;
+            l.reconcile_toggle(id(p)?, s(p, "kind"), i(p, "target_id")?, p["on"].as_bool().unwrap_or(true))?;
+            Ok(l.reconcile_session(id(p)?)?)
+        }
+        "tickoff.finish" => { need("banking:write")?; l.reconcile_finish(id(p)?)?; ok() }
+        "tickoff.undo" => { need("banking:write")?; l.reconcile_undo_last(i(p, "account_id")?)?; ok() }
+        "tickoff.history" => { need("banking:read")?; Ok(json!(l.list_reconciliations(i(p, "account_id")?)?)) }
         "deposits.undeposited" => { need("banking:read")?; Ok(json!({"account_id": l.undeposited_funds_account()?, "payments": l.undeposited_payments()?})) }
         "deposits.create" => {
             need("banking:write")?;
