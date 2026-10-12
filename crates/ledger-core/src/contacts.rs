@@ -45,7 +45,7 @@ impl Ledger {
     pub fn list_contacts(&self, filter: &str, q: &str) -> Result<Vec<Value>> {
         let like = format!("%{}%", q.trim());
         util::query_json(&self.conn,
-            "SELECT c.id, c.name, c.email, c.phone, c.is_customer, c.is_supplier, c.is_employee, c.status, c.default_currency,
+            "SELECT c.id, c.name, c.email, c.phone, c.is_customer, c.is_supplier, c.is_employee, c.status, c.default_currency, c.price_level_id,
                COALESCE((SELECT SUM(total - amount_paid - amount_credited) FROM documents d WHERE d.contact_id = c.id AND d.type = 'ACCREC' AND d.status = 'AUTHORISED'), 0) AS receivable,
                COALESCE((SELECT SUM(total - amount_paid - amount_credited) FROM documents d WHERE d.contact_id = c.id AND d.type = 'ACCPAY' AND d.status = 'AUTHORISED'), 0) AS payable,
                COALESCE((SELECT SUM(total - amount_paid - amount_credited) FROM documents d WHERE d.contact_id = c.id AND d.type = 'ACCREC' AND d.status = 'AUTHORISED' AND d.due_date < date('now','localtime')), 0) AS overdue

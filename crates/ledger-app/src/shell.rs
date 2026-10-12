@@ -114,6 +114,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::OtherNames => crate::desktop::other_names(app),
         Route::FinanceCharges => crate::desktop::finance_charges(app),
         Route::Templates => crate::desktop::templates(app),
+        Route::PriceLevels => crate::desktop::price_levels(app),
         Route::EnterTime => crate::desktop::enter_time(app),
         Route::Doc { .. } => doc::view(app),
         Route::ReceivePayment(_) | Route::PayBills | Route::Spend(_) | Route::Check(_) | Route::Deposit => payments::view(app),

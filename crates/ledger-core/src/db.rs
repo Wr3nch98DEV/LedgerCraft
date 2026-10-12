@@ -12,6 +12,7 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
     ("v7_account_detail_types", include_str!("schema_v7.sql")),
     ("v8_1099_tracking", include_str!("schema_v8.sql")),
     ("v9_sales_tax_agencies", include_str!("schema_v9.sql")),
+    ("v10_price_levels", include_str!("schema_v10.sql")),
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

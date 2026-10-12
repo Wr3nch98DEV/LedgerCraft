@@ -15,7 +15,7 @@ fn demo_app(tag: &str, skin: Skin) -> (App, std::path::PathBuf) {
     let session = app.be.call_now("session.get", json!({})).unwrap();
     let _ = app.update(Message::Session(Ok(session)));
     let get = |m: &str, p: Value| app.be.call_now(m, p).unwrap().as_array().cloned().unwrap();
-    let lk = Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})) };
+    let lk = Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})) };
     let _ = app.update(Message::LookupsLoaded(Box::new(lk)));
     (app, dir)
 }
@@ -724,7 +724,7 @@ fn desktop_app(tag: &str) -> (App, std::path::PathBuf) {
     let session = app.be.call_now("session.get", json!({})).unwrap();
     let _ = app.update(Message::Session(Ok(session)));
     let get = |m: &str, p: Value| app.be.call_now(m, p).unwrap().as_array().cloned().unwrap();
-    let lk = Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})) };
+    let lk = Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})) };
     let _ = app.update(Message::LookupsLoaded(Box::new(lk)));
     (app, dir)
 }
@@ -1767,7 +1767,7 @@ fn every_screen_in_every_layout_loads() {
         Route::ReceivePayment(None), Route::PayBills, Route::Spend(None), Route::Check(None), Route::Deposit, Route::Transfer, Route::Journal,
         Route::NewContact(true), Route::NewProduct, Route::NewAccount, Route::Payroll, Route::Taxes, Route::Projects, Route::Mileage, Route::Reconcile,
         Route::Register(None), Route::Calendar, Route::Statements, Route::Memorized, Route::PaySalesTax, Route::AdjustInventory, Route::Help, Route::DocCenter,
-        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates];
+        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates, Route::PriceLevels];
     for layout in Layout::ALL {
         let (mut app, dir) = desktop_app(&format!("all-{}", layout.key()));
         let t = app.update(Message::SetLayout(layout));
@@ -2130,5 +2130,52 @@ fn end_to_end_templates() {
     press(&mut app, "Delete");
     assert_eq!(app.be.call_now("branding.list", json!({})).unwrap().as_array().unwrap().len(), n0);
     assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn end_to_end_price_levels() {
+    use crate::desktop::Msg as W;
+    use crate::doc::Msg as D;
+    let (mut app, dir) = desktop_app("e2e-pricelevels");
+    let t = app.update(Message::Nav(Route::PriceLevels)); settle(&mut app, t);
+    // A 0% or blank level is refused.
+    let _ = app.update(Message::Desk(W::PlField(0, "Wholesale".into())));
+    let _ = app.update(Message::Desk(W::PlAdd));
+    assert!(app.toasts.iter().any(|t| t.2));
+    app.toasts.clear();
+    let _ = app.update(Message::Desk(W::PlField(1, "-10".into())));
+    press(&mut app, "New Price Level");
+    let levels = app.be.call_now("priceLevels.list", json!({})).unwrap();
+    assert_eq!(levels[0]["name"], "Wholesale");
+    assert_eq!(levels[0]["percent_bp"], -1000);
+    // Assign it to a customer.
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    let lvl = crate::app::Opt { id: levels[0]["id"].as_i64().unwrap(), label: "Wholesale".into() };
+    let _ = app.update(Message::Desk(W::PlCust(cust.clone())));
+    let _ = app.update(Message::Desk(W::PlLevel(lvl)));
+    press(&mut app, "Assign");
+    assert_eq!(app.lk.price_level_bp(cust.id), Some(-1000));
+    assert_eq!(app.be.call_now("priceLevels.list", json!({})).unwrap()[0]["customers"], 1);
+    // An invoice for that customer prices items 10% lower.
+    let item = app.lk.items.iter().find(|i| i["sale_unit_e2"].as_i64().unwrap_or(0) > 0).cloned().expect("priced item");
+    let base = item["sale_unit_e2"].as_i64().unwrap();
+    let iopt = crate::app::Opt { id: item["id"].as_i64().unwrap(), label: "i".into() };
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None })); settle(&mut app, t);
+    let t = app.update(Message::Doc(D::Contact(cust.clone()))); settle(&mut app, t);
+    let t = app.update(Message::Doc(D::Item(0, iopt.clone()))); settle(&mut app, t);
+    let price = crate::doc::parse_e4(&app.doc.as_ref().unwrap().lines[0].price).unwrap();
+    assert_eq!(price, ledger_core::pricelevels::apply_level(base, -1000));
+    assert!(price < base);
+    // Another customer pays the standard price.
+    let other = app.lk.contact_opts(true).into_iter().nth(1).unwrap();
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None })); settle(&mut app, t);
+    let t = app.update(Message::Doc(D::Contact(other))); settle(&mut app, t);
+    let t = app.update(Message::Doc(D::Item(0, iopt))); settle(&mut app, t);
+    assert_eq!(crate::doc::parse_e4(&app.doc.as_ref().unwrap().lines[0].price).unwrap(), base);
+    // Deleting the level puts the customer back on standard prices.
+    let t = app.update(Message::Nav(Route::PriceLevels)); settle(&mut app, t);
+    let t = app.update(Message::Desk(W::PlDelete(levels[0]["id"].as_i64().unwrap()))); settle(&mut app, t);
+    assert_eq!(app.lk.price_level_bp(cust.id), None);
     let _ = std::fs::remove_dir_all(dir);
 }

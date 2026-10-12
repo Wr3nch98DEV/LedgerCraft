@@ -84,6 +84,11 @@ pub struct State {
     /// Templates: the template being edited (a working copy of its row) and whether it's the default.
     pub tpl: Option<Value>,
     pub tpl_default: bool,
+    /// Price Level List: new level name and percentage; the customer and level being assigned.
+    pub pl_name: String,
+    pub pl_pct: String,
+    pub pl_cust: Option<crate::app::Opt>,
+    pub pl_level: Option<crate::app::Opt>,
     /// Enter Time: project, task, date, duration (h:mm) and notes.
     pub time_project: Option<crate::app::Opt>,
     pub time_task: Option<crate::app::Opt>,
@@ -101,7 +106,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
     /// Remember the Desktop view choices (One Window, icon bar pane).
@@ -217,6 +222,29 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             if name.is_empty() { return app.toast("Enter the name", true); }
             app.be.call("contacts.create", serde_json::json!({"name": name}), |r| Message::Desk(Msg::ClassDone(r)))
         }
+        Msg::PlField(f, v) => { if f == 0 { app.desk.pl_name = v } else { app.desk.pl_pct = v } Task::none() }
+        Msg::PlAdd => {
+            let pct: Option<f64> = app.desk.pl_pct.trim().trim_end_matches('%').trim().parse().ok();
+            let Some(pct) = pct.filter(|p| *p != 0.0 && *p > -100.0) else { return app.toast("Enter the percentage, e.g. -10 for 10% off or 5 for 5% more", true) };
+            app.be.call("priceLevels.save", serde_json::json!({"name": app.desk.pl_name.trim(), "percent_bp": (pct * 100.0).round() as i64}), |r| Message::Desk(Msg::PlDone(r)))
+        }
+        Msg::PlDelete(id) => app.be.call("priceLevels.delete", serde_json::json!({"id": id}), |r| Message::Desk(Msg::PlDone(r))),
+        Msg::PlCust(c) => { app.desk.pl_cust = Some(c); Task::none() }
+        Msg::PlLevel(l) => { app.desk.pl_level = Some(l); Task::none() }
+        Msg::PlAssign => {
+            let Some(c) = app.desk.pl_cust.clone() else { return app.toast("Choose the customer", true) };
+            // Level id 0 = standard prices.
+            let level = app.desk.pl_level.as_ref().map(|l| l.id).filter(|id| *id > 0);
+            app.be.call("contacts.setPriceLevel", serde_json::json!({"id": c.id, "price_level_id": level}), |r| Message::Desk(Msg::PlDone(r)))
+        }
+        Msg::PlDone(r) => match r {
+            Ok(_) => {
+                app.desk.pl_name.clear(); app.desk.pl_pct.clear(); app.desk.pl_cust = None;
+                let t1 = app.toast("Price levels updated", false);
+                Task::batch([t1, app.load(), app.load_lookups()])
+            }
+            Err(e) => app.toast(e, true),
+        },
         Msg::TplPick(id) => {
             let row = app.data.as_ref().and_then(|d| d.as_array().cloned()).unwrap_or_default().into_iter().find(|t| t["id"].as_i64() == Some(id));
             app.desk.tpl_default = row.as_ref().is_some_and(|r| r["is_default"].as_i64() == Some(1));
@@ -612,6 +640,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::OtherNames => "Other Names List".into(),
         Route::FinanceCharges => "Assess Finance Charges".into(),
         Route::Templates => "Templates".into(),
+        Route::PriceLevels => "Price Level List".into(),
         Route::EnterTime => "Time/Enter Single Activity".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
@@ -663,7 +692,7 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
             e("Open Window List", "", Some(Message::Desk(Msg::Pane(Pane::Windows)))), e("View Balances", "", Some(Message::Desk(Msg::Pane(Pane::Balances)))),
             e("My Shortcuts", "", Some(Message::Desk(Msg::Pane(Pane::Shortcuts)))), sep(), e(if app.dark { "Light Mode" } else { "Dark Mode" }, "Alt+T", Some(Message::ToggleTheme)), sep(),
             e("Switch to QuickBooks Online-style layout", "", Some(Message::SetLayout(theme::Layout::Online))), e("Switch to Xero-style layout", "", Some(Message::SetLayout(theme::Layout::Xero)))],
-        "Lists" => vec![e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)), e("Item List", "", nav(Route::Products)), e("Fixed Asset Item List", "", rep("fixed-asset-register")), e("Price Level List", "", None),
+        "Lists" => vec![e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)), e("Item List", "", nav(Route::Products)), e("Fixed Asset Item List", "", rep("fixed-asset-register")), e("Price Level List", "", nav(Route::PriceLevels)),
             e("Sales Tax Code List", "", nav(Route::Taxes)), e("Payroll Item List", "", nav(Route::PayrollItems)), e("Class List", "", nav(Route::ClassList)), e("Other Names List", "", nav(Route::OtherNames)), e("Templates", "", nav(Route::Templates)), e("Memorized Transaction List", "Ctrl+T", nav(Route::Memorized))],
         "Favorites" => vec![e("Customize Favorites…", "", None)],
         "Company" => vec![e("Home Page", "", nav(Route::Dashboard)), e("Company Snapshot", "", Some(Message::Desk(Msg::Insights(true)))), sep(), e("My Company", "", nav(Route::Settings)),
@@ -913,6 +942,47 @@ pub fn other_names(app: &App) -> Element<'_, Message> {
         ui::hspace(),
         text("Owners, partners and one-off payees. A name becomes a customer or vendor once you transact with it.").size(12).color(k.muted).into(),
     ])
+}
+
+fn pct_label(bp: i64) -> String {
+    let v = bp as f64 / 100.0;
+    let s = if v.fract() == 0.0 { format!("{}", v.abs() as i64) } else { format!("{:.2}", v.abs()) };
+    format!("{s}% {}", if bp < 0 { "decrease" } else { "increase" })
+}
+
+/// Lists ▸ Price Level List: fixed-percentage price levels and which customers use them.
+pub fn price_levels(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let levels = d.as_array().cloned().unwrap_or_default();
+    let rows = levels.iter().map(|p| {
+        let id = p["id"].as_i64().unwrap_or(0);
+        (vec![ui::cell(p["name"].as_str().unwrap_or("").to_string()), ui::cell_muted("Fixed %".to_string()),
+            ui::cell_muted(pct_label(p["percent_bp"].as_i64().unwrap_or(0))), ui::num(p["customers"].as_i64().unwrap_or(0).to_string()),
+            ui::link("Delete", Message::Desk(Msg::PlDelete(id)))], None)
+    }).collect();
+    let cols: Vec<(&str, u16, bool)> = vec![("Price Level", 26, false), ("Type", 12, false), ("Adjustment", 18, false), ("Customers", 10, true), ("", 10, false)];
+    let mut level_opts = vec![crate::app::Opt { id: 0, label: "(standard prices)".into() }];
+    level_opts.extend(levels.iter().map(|p| crate::app::Opt { id: p["id"].as_i64().unwrap_or(0), label: p["name"].as_str().unwrap_or("").to_string() }));
+    let current = app.desk.pl_cust.as_ref().and_then(|c| app.lk.contacts.iter().find(|x| x["id"].as_i64() == Some(c.id)))
+        .and_then(|c| levels.iter().find(|p| p["id"] == c["price_level_id"])).map(|p| format!("Now: {}", p["name"].as_str().unwrap_or(""))).unwrap_or_default();
+    let assign = container(row![
+        text("Assign to customer").size(13).font(BOLD),
+        pick_list(app.lk.contact_opts(true), app.desk.pl_cust.clone(), |c| Message::Desk(Msg::PlCust(c))).placeholder("Customer").padding([5, 7]).text_size(13).style(theme::pick).width(240),
+        pick_list(level_opts, app.desk.pl_level.clone(), |l| Message::Desk(Msg::PlLevel(l))).placeholder("Price level").padding([5, 7]).text_size(13).style(theme::pick).width(200),
+        ui::btn("Assign", Some(Message::Desk(Msg::PlAssign))),
+        text(current).size(12).color(k.muted),
+    ].spacing(10).align_y(Alignment::Center)).padding([8, 12]).width(Fill).style(theme::card);
+    column![
+        container(list_window(&cols, rows, vec![
+            text_input("Price level name", &app.desk.pl_name).on_input(|v| Message::Desk(Msg::PlField(0, v))).on_submit(Message::Desk(Msg::PlAdd)).padding([5, 7]).size(13).style(theme::input).width(220).into(),
+            text_input("% (−10 = 10% off)", &app.desk.pl_pct).on_input(|v| Message::Desk(Msg::PlField(1, v))).on_submit(Message::Desk(Msg::PlAdd)).padding([5, 7]).size(13).style(theme::input).width(150).into(),
+            ui::btn_primary("New Price Level", Some(Message::Desk(Msg::PlAdd))),
+            ui::hspace(),
+            text("Item prices on invoices and sales receipts change by the customer's level.").size(12).color(k.muted).into(),
+        ])).height(Fill),
+        container(assign).padding(Padding { left: 12.0, right: 12.0, bottom: 12.0, top: 0.0 }),
+    ].height(Fill).into()
 }
 
 /// The template being edited, starting a working copy of the default the first time it's changed.

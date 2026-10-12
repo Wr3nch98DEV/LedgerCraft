@@ -219,6 +219,10 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
             let delayed: Vec<i64> = if p["close_delayed"].is_array() { de(&p["close_delayed"])? } else { vec![] };
             Ok(json!({"id": l.save_invoice_with_delayed(oi(p, "id"), &input, &delayed)?}))
         }
+        "priceLevels.list" => { need("sales:read")?; Ok(json!(l.list_price_levels()?)) }
+        "priceLevels.save" => { need("sales:write")?; Ok(json!({"id": l.save_price_level(oi(p, "id"), s(p, "name"), p["percent_bp"].as_i64().unwrap_or(0))?})) }
+        "priceLevels.delete" => { need("sales:write")?; l.delete_price_level(id(p)?)?; ok() }
+        "contacts.setPriceLevel" => { need("contacts:write")?; l.set_contact_price_level(id(p)?, oi(p, "price_level_id"))?; ok() }
         "agencies.list" => { need("reports:read")?; Ok(json!(l.list_agencies()?)) }
         "agencies.create" => { need("accounting:write")?; Ok(json!({"id": l.agency(s(p, "name"), p["frequency"].as_str())?})) }
         "agencies.setFrequency" => { need("accounting:write")?; l.set_agency_frequency(id(p)?, s(p, "frequency"))?; ok() }

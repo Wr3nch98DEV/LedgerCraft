@@ -513,7 +513,10 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                 let s = sales(&e.kind);
                 let l = &mut e.lines[i];
                 l.description = item[if s { "sales_description" } else { "purchase_description" }].as_str().filter(|x| !x.is_empty()).or(item["name"].as_str()).unwrap_or("").to_string();
-                l.price = fmt_price(item[if s { "sale_unit_e2" } else { "purchase_unit_e2" }].as_i64().unwrap_or(0));
+                let mut price = item[if s { "sale_unit_e2" } else { "purchase_unit_e2" }].as_i64().unwrap_or(0);
+                // The customer's price level raises or lowers the item's sales price.
+                if let Some(bp) = e.contact.as_ref().filter(|_| s).and_then(|c| app.lk.price_level_bp(c.id)) { price = ledger_core::pricelevels::apply_level(price, bp); }
+                l.price = fmt_price(price);
                 if l.qty.trim().is_empty() { l.qty = "1".into(); }
                 let acc = item[if s { "sale_account_id" } else { "purchase_account_id" }].as_i64();
                 if let Some(a) = acc.and_then(|id| app.lk.account_opts(|_| true).into_iter().find(|o| o.id == id)) { l.account = Some(a); }
@@ -940,7 +943,7 @@ mod tests {
         app.be.call_now("orgs.create", json!({"org_name": "Test Co", "country": "AU", "demo": false, "owner_name": "Tess"})).unwrap();
         app.session = Some(app.be.call_now("session.get", json!({})).unwrap());
         let get = |m: &str, p: Value| app.be.call_now(m, p).unwrap().as_array().cloned().unwrap();
-        app.lk = crate::app::Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})) };
+        app.lk = crate::app::Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})) };
         let mut e = Editor::new(&app, "ACCREC");
         e.contact_text = "New Customer Pty".into();
         e.lines[0].description = "Consulting".into();

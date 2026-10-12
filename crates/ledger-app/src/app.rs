@@ -76,6 +76,8 @@ pub enum Route {
     FinanceCharges,
     /// QuickBooks Desktop Lists ▸ Templates (invoice/quote/PO form designs).
     Templates,
+    /// QuickBooks Desktop Lists ▸ Price Level List.
+    PriceLevels,
     /// QuickBooks Desktop Enter Time (single activity against a project task).
     EnterTime,
     NewProduct,
@@ -96,8 +98,14 @@ pub struct Lookups {
     pub tax_rates: Vec<Value>,
     pub items: Vec<Value>,
     pub contacts: Vec<Value>,
+    pub price_levels: Vec<Value>,
 }
 impl Lookups {
+    /// The price level adjustment (basis points) for a customer, if they have one.
+    pub fn price_level_bp(&self, contact_id: i64) -> Option<i64> {
+        let level = self.contacts.iter().find(|c| c["id"].as_i64() == Some(contact_id))?["price_level_id"].as_i64()?;
+        self.price_levels.iter().find(|p| p["id"].as_i64() == Some(level))?["percent_bp"].as_i64()
+    }
     pub fn account_opts(&self, f: impl Fn(&Value) -> bool) -> Vec<Opt> {
         self.accounts.iter().filter(|a| a["status"] == "ACTIVE" && f(a)).map(|a| Opt { id: a["id"].as_i64().unwrap_or(0), label: format!("{} {}", a["code"].as_str().unwrap_or(""), a["name"].as_str().unwrap_or("")) }).collect()
     }
@@ -227,7 +235,7 @@ pub fn parse_route(s: &str) -> Option<Route> {
         "customers" => Route::Customers, "products" => Route::Products, "expenses" => Route::Expenses, "bills" => Route::Bills, "vendors" => Route::Vendors,
         "pos" => Route::PurchaseOrders, "contacts" => Route::Contacts, "contact" => Route::Contact(id(1)?), "banking" => Route::Banking(id(1)), "chart" => Route::Chart,
         "reports" => Route::Reports, "report" => Route::Report(parts.get(1)?.to_string()), "settings" => Route::Settings, "setup" => Route::Setup,
-        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "adjustinventory" => Route::AdjustInventory, "help" => Route::Help, "memreports" => Route::MemorizedReports, "docs" => Route::DocCenter, "payliabilities" => Route::PayLiabilities, "classes" => Route::ClassList, "payitems" => Route::PayrollItems, "othernames" => Route::OtherNames, "financecharges" => Route::FinanceCharges, "templates" => Route::Templates, "time" => Route::EnterTime, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
+        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "adjustinventory" => Route::AdjustInventory, "help" => Route::Help, "memreports" => Route::MemorizedReports, "docs" => Route::DocCenter, "payliabilities" => Route::PayLiabilities, "classes" => Route::ClassList, "payitems" => Route::PayrollItems, "othernames" => Route::OtherNames, "financecharges" => Route::FinanceCharges, "templates" => Route::Templates, "pricelevels" => Route::PriceLevels, "time" => Route::EnterTime, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
         _ => return None,
     })
 }
@@ -384,7 +392,7 @@ impl App {
                 tokio::task::spawn_blocking(move || {
                     if qb { let _ = be.call_now("accounts.undeposited", json!({})); }
                     let get = |m: &str, p: Value| be.call_now(m, p).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
-                    Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})) }
+                    Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})) }
                 }).await.unwrap_or_default()
             },
             |l| Message::LookupsLoaded(Box::new(l)),
@@ -481,6 +489,7 @@ impl App {
             Route::ClassList => call("tracking.list", json!({})),
             Route::PayrollItems => call("payroll.settings", json!({})),
             Route::Templates => call("branding.list", json!({})),
+            Route::PriceLevels => call("priceLevels.list", json!({})),
             Route::OtherNames => call("contacts.list", json!({"filter": "all"})),
             Route::FinanceCharges => call("docs.list", json!({"type": "ACCREC", "tab": "overdue", "limit": 2000})),
             Route::EnterTime => {
