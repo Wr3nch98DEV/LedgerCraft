@@ -21,6 +21,9 @@ pub enum Mode { Receive, PayBills, Spend, Deposit }
 
 pub struct State {
     pub mode: Mode,
+    /// Desktop expense grid: type-ahead account box per line, and the accounts they were built for.
+    pub acct_boxes: Vec<combo_box::State<Opt>>,
+    pub box_sig: Vec<Option<i64>>,
     pub contact: Option<Opt>,
     pub contact_text: String,
     pub contacts: combo_box::State<Opt>,
@@ -65,9 +68,20 @@ pub enum Msg {
 
 fn i(v: &Value) -> i64 { v.as_i64().unwrap_or(0) }
 
+/// Keep the expense grid's account boxes in step with its lines (QuickFill).
+pub fn sync_boxes(app: &mut App) {
+    if !app.desktop() { return; }
+    let accts = app.lk.account_opts(|a| a["type"] != "BANK");
+    let Some(s) = app.pay.as_mut() else { return };
+    let sig: Vec<Option<i64>> = s.lines.iter().map(|l| l.account.as_ref().map(|o| o.id)).collect();
+    if sig == s.box_sig && s.acct_boxes.len() == s.lines.len() { return; }
+    s.acct_boxes = s.lines.iter().map(|l| combo_box::State::with_selection(accts.clone(), l.account.as_ref())).collect();
+    s.box_sig = sig;
+}
+
 fn base(app: &App, mode: Mode, customers: bool) -> State {
     State {
-        mode, contact: None, contact_text: String::new(), contacts: combo_box::State::new(app.lk.contact_opts(customers)),
+        mode, acct_boxes: vec![], box_sig: vec![], contact: None, contact_text: String::new(), contacts: combo_box::State::new(app.lk.contact_opts(customers)),
         account: app.lk.bank_opts().into_iter().next(), date: ui::date(&ui::today_iso(), app.date_style()), reference: String::new(),
         docs: vec![], lines: vec![], lat: "INCLUSIVE".into(), busy: false, check: false, check_no: String::new(), new_after: false,
     }

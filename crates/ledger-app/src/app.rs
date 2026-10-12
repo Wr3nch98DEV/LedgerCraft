@@ -567,6 +567,14 @@ impl App {
     }
 
     pub fn update(&mut self, msg: Message) -> Task<Message> {
+        let t = self.update_inner(msg);
+        // Desktop grids' type-ahead boxes follow their lines (cheap when nothing changed).
+        doc::sync_boxes(self);
+        payments::sync_boxes(self);
+        t
+    }
+
+    fn update_inner(&mut self, msg: Message) -> Task<Message> {
         match msg {
             Message::Noop => Task::none(),
             Message::Nav(r) => self.go(r),
@@ -669,7 +677,7 @@ impl App {
             Message::ListTab(t) => { self.list_tab = t; self.load() }
             Message::DropToast(id) => { self.toasts.retain(|t| t.0 != id); Task::none() }
             Message::Key(ev) => self.on_key(ev),
-            Message::Doc(m) => { let t = doc::update(self, m); doc::sync_boxes(self); t }
+            Message::Doc(m) => doc::update(self, m),
             Message::Pay(m) => payments::update(self, m),
             Message::Bank(m) => banking::update(self, m),
             Message::Report(m) => reports::update(self, m),

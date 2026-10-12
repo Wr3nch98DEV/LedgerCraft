@@ -118,7 +118,11 @@ fn spend<'a>(app: &'a App, s: &'a State) -> Element<'a, Message> {
     let mut grid = column![grid_head(&cols)];
     for (n, l) in s.lines.iter().enumerate() {
         grid = grid.push(grid_row(vec![
-            pick_list(accounts.clone(), l.account.clone(), move |a| Message::Pay(Msg::LineAccount(n, a))).padding([4, 5]).text_size(13).style(theme::pick).width(Fill).into(),
+            match s.acct_boxes.get(n) {
+                // QuickFill: type the account name.
+                Some(st) => combo_box(st, "", l.account.as_ref(), move |a| Message::Pay(Msg::LineAccount(n, a))).padding([4, 5]).size(13).input_style(theme::cell_input).width(Fill).into(),
+                None => pick_list(accounts.clone(), l.account.clone(), move |a| Message::Pay(Msg::LineAccount(n, a))).padding([4, 5]).text_size(13).style(theme::pick).width(Fill).into(),
+            },
             text_input("", &l.amount).on_input(move |v| Message::Pay(Msg::LineAmount(n, v))).padding([4, 5]).size(13).align_x(iced::alignment::Horizontal::Right).style(theme::cell_input).into(),
             text_input("", &l.description).on_input(move |v| Message::Pay(Msg::LineDesc(n, v))).padding([4, 5]).size(13).style(theme::cell_input).into(),
             pick_list(taxes.clone(), l.tax.clone(), move |x| Message::Pay(Msg::LineTax(n, x))).padding([4, 5]).text_size(13).style(theme::pick).width(Fill).into(),
