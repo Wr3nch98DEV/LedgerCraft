@@ -656,8 +656,10 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.doc = Some(e);
             return Task::perform(async move {
                 tokio::task::spawn_blocking(move || -> Result<String, String> {
-                    let d = be.call_now("docs.get", json!({"id": id}))?;
-                    let st = be.call_now("settings.get", json!({}))?;
+                    let mut d = be.call_now("docs.get", json!({"id": id}))?;
+                    let mut st = be.call_now("settings.get", json!({}))?;
+                    let (mut title, mut accent) = (title, accent);
+                    if let Ok(themes) = be.call_now("branding.list", json!({})) { crate::pdf::apply_template(&mut d, &mut st, &themes, &mut title, &mut accent); }
                     let bytes = crate::pdf::document(&d, &st, &title, &|x| ui::date(x, style), accent);
                     let name = format!("{}.pdf", d["number"].as_str().filter(|n| !n.is_empty()).unwrap_or("document").replace(|c: char| !c.is_alphanumeric() && c != '-', "_"));
                     let path = crate::pdf::output_dir().join(name);

@@ -2259,3 +2259,29 @@ fn desktop_customize_favorites() {
     assert_eq!(app.desk.favorites, vec!["Banking ▸ Write Checks".to_string()]);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn print_uses_the_form_template() {
+    let themes = json!([
+        {"id": 1, "is_default": 1, "invoice_title": "Tax Invoice", "quote_title": "Estimate", "accent": "#ff0000", "terms": "Net 30", "payment_instructions": "Pay to BSB 000-000", "show_tax_number": 0},
+        {"id": 2, "is_default": 0, "invoice_title": "Invoice (Blue)", "accent": "#0000ff", "terms": "", "payment_instructions": "", "show_tax_number": 1},
+    ]);
+    let mut st = json!({"tax_number": "12 345"});
+    let mut d = json!({"type": "ACCREC", "terms": ""});
+    let (mut title, mut accent) = ("Invoice".to_string(), (0.0, 0.0, 0.0));
+    crate::pdf::apply_template(&mut d, &mut st, &themes, &mut title, &mut accent);
+    assert_eq!(title, "Tax Invoice");
+    assert_eq!(accent, (1.0, 0.0, 0.0));
+    assert_eq!(d["terms"], "Net 30\n\nPay to BSB 000-000");
+    assert_eq!(st["tax_number"], "", "tax number hidden");
+    // A document's own template wins; quotes don't get payment instructions.
+    let mut st = json!({"tax_number": "12 345"});
+    let mut d = json!({"type": "ACCREC", "terms": "Due now", "branding_theme_id": 2});
+    let (mut title, mut accent) = ("Invoice".to_string(), (0.0, 0.0, 0.0));
+    crate::pdf::apply_template(&mut d, &mut st, &themes, &mut title, &mut accent);
+    assert_eq!((title.as_str(), accent, d["terms"].as_str().unwrap(), st["tax_number"].as_str().unwrap()), ("Invoice (Blue)", (0.0, 0.0, 1.0), "Due now", "12 345"));
+    let mut d = json!({"type": "QUOTE", "terms": ""});
+    let mut title = "Quote".to_string();
+    crate::pdf::apply_template(&mut d, &mut json!({}), &themes, &mut title, &mut accent);
+    assert_eq!((title.as_str(), d["terms"].as_str().unwrap()), ("Estimate", "Net 30"));
+}

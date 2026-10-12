@@ -113,6 +113,26 @@ const MUTED: (f32, f32, f32) = (0.42, 0.44, 0.48);
 const RULE: (f32, f32, f32) = (0.82, 0.84, 0.87);
 const BAND: (f32, f32, f32) = (0.95, 0.96, 0.97);
 
+/// Apply a form template (Lists ▸ Templates): the document's own template, else the default.
+/// Sets the printed title and colour, adds the template's terms and payment instructions, and
+/// hides the tax number when the template says so.
+pub fn apply_template(doc: &mut Value, settings: &mut Value, themes: &Value, title: &mut String, accent: &mut (f32, f32, f32)) {
+    let list = themes.as_array().cloned().unwrap_or_default();
+    let Some(t) = list.iter().find(|t| doc["branding_theme_id"].as_i64().is_some() && t["id"] == doc["branding_theme_id"])
+        .or_else(|| list.iter().find(|t| t["is_default"].as_i64() == Some(1))).or(list.first()) else { return };
+    let field = match doc["type"].as_str().unwrap_or("") { "ACCREC" => "invoice_title", "ACCRECCREDIT" => "credit_title", "QUOTE" => "quote_title", "PO" => "po_title", _ => "" };
+    if let Some(s) = t[field].as_str().map(str::trim).filter(|s| !s.is_empty()) { *title = s.to_string(); }
+    if let Some(h) = t["accent"].as_str().map(|s| s.trim().trim_start_matches('#')).filter(|h| h.len() == 6).and_then(|h| u32::from_str_radix(h, 16).ok()) {
+        *accent = (((h >> 16) & 255) as f32 / 255.0, ((h >> 8) & 255) as f32 / 255.0, (h & 255) as f32 / 255.0);
+    }
+    let mut terms = doc["terms"].as_str().unwrap_or("").trim().to_string();
+    if terms.is_empty() { terms = t["terms"].as_str().unwrap_or("").trim().to_string(); }
+    let pay = t["payment_instructions"].as_str().unwrap_or("").trim();
+    if !pay.is_empty() && matches!(doc["type"].as_str(), Some("ACCREC")) { if !terms.is_empty() { terms.push_str("\n\n"); } terms.push_str(pay); }
+    doc["terms"] = Value::String(terms);
+    if t["show_tax_number"].as_i64() == Some(0) { settings["tax_number"] = Value::String(String::new()); }
+}
+
 /// Render an invoice, bill, quote/estimate, credit note or purchase order.
 /// `title` is the printed heading; `fmt_date` formats ISO dates in the company's style.
 pub fn document(doc: &Value, settings: &Value, title: &str, fmt_date: &dyn Fn(&str) -> String, accent: (f32, f32, f32)) -> Vec<u8> {

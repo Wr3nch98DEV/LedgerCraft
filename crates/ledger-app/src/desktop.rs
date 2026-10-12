@@ -260,9 +260,17 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             Task::perform(async move {
                 tokio::task::spawn_blocking(move || -> Result<(String, usize), String> {
                     let st = be.call_now("settings.get", serde_json::json!({}))?;
+                    let themes = be.call_now("branding.list", serde_json::json!({})).unwrap_or_default();
                     let mut docs = vec![];
-                    for id in &ids { docs.push((be.call_now("docs.get", serde_json::json!({"id": id}))?, title.clone())); }
-                    let bytes = crate::pdf::documents(&docs, &st, &|x| ui::date(x, style), accent);
+                    let mut acc = accent;
+                    let mut st2 = st.clone();
+                    for id in &ids {
+                        let mut d = be.call_now("docs.get", serde_json::json!({"id": id}))?;
+                        let mut t1 = title.clone();
+                        crate::pdf::apply_template(&mut d, &mut st2, &themes, &mut t1, &mut acc);
+                        docs.push((d, t1));
+                    }
+                    let bytes = crate::pdf::documents(&docs, &st2, &|x| ui::date(x, style), acc);
                     let stamp = chrono::Local::now().format("%Y-%m-%d %H%M%S").to_string();
                     let path = crate::pdf::output_dir().join(["Invoices ", &stamp, ".pdf"].concat());
                     std::fs::write(&path, bytes).map_err(|e| ["Couldn't save the PDF: ", &e.to_string()].concat())?;
