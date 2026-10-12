@@ -1998,3 +1998,31 @@ fn end_to_end_online_and_xero() {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
+
+/// Renders the Desktop Insights tab to `%TEMP%\lc-insights-wgpu.png` (run with --ignored).
+#[test]
+#[ignore]
+fn render_insights() {
+    let (mut app, dir) = desktop_app("insights-shot");
+    let t = app.update(Message::Desk(crate::desktop::Msg::Insights(true))); settle(&mut app, t);
+    let t = app.update(Message::Nav(Route::Dashboard)); settle(&mut app, t);
+    let _ = std::fs::remove_file(std::env::temp_dir().join("lc-insights-wgpu.png"));
+    let _g = sim_lock();
+    let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
+    ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join("lc-insights.png")).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn desktop_insights_loads_pl_and_top_customers() {
+    let (mut app, dir) = desktop_app("insights");
+    let t = app.update(Message::Desk(crate::desktop::Msg::Insights(true))); settle(&mut app, t);
+    let d = app.data.clone().expect("insights data");
+    assert!(d["pl"]["sections"].is_array(), "monthly P&L loaded");
+    assert!(d["top"].is_object(), "sales by customer loaded");
+    assert!(d["counts"]["awaiting"].is_number(), "invoice counts loaded");
+    // Back to the Home Page tab loads the ordinary home data again.
+    let t = app.update(Message::Desk(crate::desktop::Msg::Insights(false))); settle(&mut app, t);
+    assert!(app.data.as_ref().map_or(true, |d| !d["pl"].is_object()));
+    let _ = std::fs::remove_dir_all(dir);
+}

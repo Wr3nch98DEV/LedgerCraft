@@ -2193,6 +2193,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "iced",
+ "iced_runtime",
  "iced_test",
  "ledger-core",
  "ledger-server",

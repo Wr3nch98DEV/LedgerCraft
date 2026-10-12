@@ -161,7 +161,10 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.load()
         }
         Msg::Pane(p) => { app.desk.pane = p; app.save_desk_prefs(); Task::none() }
-        Msg::Insights(v) => { app.desk.insights = v; Task::none() }
+        Msg::Insights(v) => {
+            app.desk.insights = v;
+            if app.route == Route::Dashboard { app.load() } else { app.go(Route::Dashboard) }
+        }
         Msg::Exit => iced::exit(),
         Msg::Select(id) => {
             app.desk.sel = Some(id);
@@ -1758,6 +1761,101 @@ pub fn center(app: &App, customers: bool) -> Element<'_, Message> {
     column![toolbar, row![left, right].spacing(10).height(Fill)].spacing(10).padding(12).height(Fill).into()
 }
 
+// ---------------- Insights ----------------
+
+/// Data for the Home ▸ Insights tab: 12 months of income and expenses, top customers, open/overdue/paid.
+pub fn load_insights(app: &mut App) -> Task<Message> {
+    let be = app.be.clone();
+    let g = app.page_gen;
+    let today = ui::today_iso();
+    let first_this = format!("{}-01", &today[..7]);
+    let from = chrono::NaiveDate::parse_from_str(&first_this, "%Y-%m-%d").ok().and_then(|d| d.checked_sub_months(chrono::Months::new(11))).map(|d| d.to_string()).unwrap_or(first_this.clone());
+    let year_from = format!("{}-01-01", &today[..4]);
+    Task::perform(async move {
+        tokio::task::spawn_blocking(move || -> Result<Value, String> {
+            let pl = be.call_now("reports.run", serde_json::json!({"name": "profit-and-loss", "params": {"from": from, "to": today, "monthly": true}}))?;
+            let top = be.call_now("reports.run", serde_json::json!({"name": "sales-by-contact", "params": {"from": year_from, "to": today}}))?;
+            let inv = be.call_now("docs.list", serde_json::json!({"type": "ACCREC", "limit": 1}))?;
+            Ok(serde_json::json!({"pl": pl, "top": top, "counts": inv["counts"]}))
+        }).await.unwrap_or_else(|e| Err(e.to_string()))
+    }, move |r| Message::Loaded(g, r))
+}
+
+/// Home ▸ Insights (QuickBooks Desktop Enterprise): profit & loss by month, income summary, top customers.
+fn insights(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = app.data.as_ref().filter(|d| d["pl"].is_object()) else { return container(ui::muted("Loading…")).padding(20).into() };
+    let pl = &d["pl"];
+    let months: Vec<String> = pl["columns"].as_array().cloned().unwrap_or_default().iter().map(|c| c.as_str().unwrap_or("").chars().take(3).collect()).collect();
+    let n = months.len();
+    let sum_of = |titles: &[&str]| -> Vec<i64> {
+        let mut v = vec![0i64; n];
+        for s in pl["sections"].as_array().cloned().unwrap_or_default() {
+            if titles.contains(&s["title"].as_str().unwrap_or("")) {
+                for (i, x) in s["total"]["values"].as_array().cloned().unwrap_or_default().iter().enumerate().take(n) { v[i] += x.as_i64().unwrap_or(0); }
+            }
+        }
+        v
+    };
+    let income = sum_of(&["Trading Income", "Other Income"]);
+    let expense = sum_of(&["Cost of Sales", "Operating Expenses"]);
+    let max = income.iter().chain(expense.iter()).copied().max().unwrap_or(1).max(1);
+    let bar = |v: i64, c: iced::Color| -> Element<'_, Message> {
+        let h = (v.max(0) as f32 / max as f32 * 180.0).max(1.0);
+        container(Space::new()).width(14).height(Length::Fixed(h)).style(move |_: &iced::Theme| container::Style { background: Some(iced::Background::Color(c)), border: iced::Border { radius: 2.0.into(), ..Default::default() }, ..Default::default() }).into()
+    };
+    let green = hexc(0x3c9a3e);
+    let blue = hexc(0x2f6fb5);
+    let mut chart = row![].spacing(10).align_y(Alignment::End);
+    for i in 0..n {
+        chart = chart.push(column![
+            row![bar(income[i], green), bar(expense[i], blue)].spacing(2).align_y(Alignment::End),
+            text(months[i].clone()).size(11).color(k.muted),
+        ].spacing(4).align_x(Alignment::Center).width(Fill));
+    }
+    let tot_in: i64 = income.iter().sum();
+    let tot_ex: i64 = expense.iter().sum();
+    let legend = row![
+        container(Space::new()).width(10).height(10).style(move |_: &iced::Theme| container::Style { background: Some(iced::Background::Color(green)), ..Default::default() }), text(format!("Income {}", ui::money(tot_in))).size(12),
+        container(Space::new()).width(10).height(10).style(move |_: &iced::Theme| container::Style { background: Some(iced::Background::Color(blue)), ..Default::default() }), text(format!("Expenses {}", ui::money(tot_ex))).size(12),
+        ui::hspace(), text(format!("Net income {}", ui::money(tot_in - tot_ex))).size(13).font(BOLD).color(if tot_in >= tot_ex { k.ok } else { k.bad }),
+    ].spacing(8).align_y(Alignment::Center);
+    let pl_card = container(column![
+        row![text("PROFIT & LOSS").size(12).font(BOLD).color(k.info), ui::hspace(), text("Last 12 months").size(12).color(k.muted), ui::link("Run report", Message::Nav(Route::Report("profit-and-loss".into())))].spacing(10).align_y(Alignment::Center),
+        container(chart).height(Length::Fixed(210.0)).align_y(iced::alignment::Vertical::Bottom),
+        legend,
+    ].spacing(10)).padding(16).width(Fill).style(theme::card);
+    // Income summary from the invoice counts.
+    let c = &d["counts"];
+    let tile = |label: &'static str, amt: i64, sub: String, col: iced::Color| -> Element<'_, Message> {
+        container(column![text(label).size(12).font(BOLD).color(k.muted), text(ui::money(amt)).size(22).font(BOLD).color(col), text(sub).size(12).color(k.muted)].spacing(3)).padding(14).width(Fill).style(theme::card).into()
+    };
+    let income_row = row![
+        tile("OPEN INVOICES", c["awaiting_total"].as_i64().unwrap_or(0), format!("{} invoices", c["awaiting"].as_i64().unwrap_or(0)), k.text),
+        tile("OVERDUE", c["overdue_total"].as_i64().unwrap_or(0), format!("{} invoices", c["overdue"].as_i64().unwrap_or(0)), k.bad),
+        tile("INCOME", tot_in, "last 12 months".into(), k.ok),
+    ].spacing(12);
+    // Top customers by sales (this year).
+    let mut tops: Vec<(String, i64)> = vec![];
+    for s in d["top"]["sections"].as_array().cloned().unwrap_or_default() {
+        for r in s["rows"].as_array().cloned().unwrap_or_default() {
+            let v = r["values"].as_array().and_then(|a| a.last()).and_then(|x| x.as_i64()).unwrap_or(0);
+            tops.push((r["label"].as_str().unwrap_or("").to_string(), v));
+        }
+    }
+    tops.sort_by(|a, b| b.1.cmp(&a.1));
+    let top_max = tops.first().map(|x| x.1).unwrap_or(1).max(1);
+    let mut top_col = column![row![text("TOP CUSTOMERS BY SALES").size(12).font(BOLD).color(k.info), ui::hspace(), text("This year").size(12).color(k.muted)]].spacing(8);
+    for (name, v) in tops.iter().take(5) {
+        let w = (*v as f32 / top_max as f32 * 260.0).max(2.0);
+        top_col = top_col.push(row![text(name.clone()).size(13).width(180),
+            container(Space::new()).width(Length::Fixed(w)).height(12).style(move |_: &iced::Theme| container::Style { background: Some(iced::Background::Color(green)), border: iced::Border { radius: 2.0.into(), ..Default::default() }, ..Default::default() }),
+            ui::hspace(), text(ui::money(*v)).size(13)].spacing(10).align_y(Alignment::Center));
+    }
+    if tops.is_empty() { top_col = top_col.push(ui::muted("No sales yet this year.")); }
+    column![pl_card, income_row, container(top_col).padding(16).width(Fill).style(theme::card)].spacing(12).into()
+}
+
 // ---------------- Home page ----------------
 
 /// A clickable workflow icon on the Home page.
@@ -1794,7 +1892,7 @@ pub fn home(app: &App) -> Element<'_, Message> {
     };
     let tabs = row![tab("Home Page", !app.desk.insights, false), tab("Insights", app.desk.insights, true)].spacing(4);
     if app.desk.insights {
-        return column![container(tabs).padding(Padding { top: 10.0, left: 20.0, ..Padding::ZERO }), crate::dashboard::view(app)].into();
+        return scrollable(column![tabs, insights(app)].spacing(12).padding(Padding { top: 10.0, left: 20.0, right: 20.0, bottom: 24.0 }).max_width(1400)).style(theme::scroll).height(Fill).into();
     }
     let vendors = band("VENDORS", vec![
         row![node("box", "Purchase Orders", doc_new("PO")), arrow(), node("truck", "Receive Inventory", Some(Message::ReceiveItems)), arrow(), node("expenses", "Enter Bills Against Inventory", nav(Route::PurchaseOrders)), gap(), node("taxes", "Manage Sales Tax", nav(Route::Taxes))].align_y(Alignment::Start).into(),

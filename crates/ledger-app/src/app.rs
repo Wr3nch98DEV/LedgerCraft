@@ -432,6 +432,7 @@ impl App {
         let g = self.page_gen;
         let call = |m: &str, p: Value| self.be.call(m, p, move |r| Message::Loaded(g, r));
         match self.route.clone() {
+            Route::Dashboard if self.desktop() && self.desk.insights => crate::desktop::load_insights(self),
             Route::Dashboard => crate::dashboard::load(self),
             Route::AllSales | Route::Invoices if self.desktop() => crate::desktop::load_tracker(self, true),
             Route::Bills | Route::Expenses if self.desktop() => crate::desktop::load_tracker(self, false),
