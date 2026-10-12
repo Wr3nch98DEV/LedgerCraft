@@ -2055,6 +2055,9 @@ fn end_to_end_payroll_items_other_names_finance_charges() {
     let before = count(&app, "ACCREC");
     press(&mut app, "Assess Charges");
     assert_eq!(count(&app, "ACCREC"), before + due.len() - 1);
+    // Assessing again the same day charges nothing more for those customers (only the one left out).
+    let again = crate::desktop::finance_charges_due(&app);
+    assert_eq!(again.iter().filter(|c| c.3 > 0).map(|c| c.0).collect::<Vec<_>>(), vec![due[0].0], "{again:?}");
     let errors: Vec<_> = app.toasts.iter().filter(|t| t.2).collect();
     assert!(errors.is_empty(), "errors: {errors:?}");
     let _ = std::fs::remove_dir_all(dir);
@@ -2076,6 +2079,11 @@ fn finance_charge_math() {
     assert_eq!(crate::desktop::finance_charges_due(&app)[0].3, 2000);
     app.desk.fc_min = "25".into();
     assert_eq!(crate::desktop::finance_charges_due(&app)[0].3, 2500);
+    // Charged on 2026-01-21 already: only the 10 days since count; earlier charges aren't charged on.
+    app.desk.fc_grace.clear(); app.desk.fc_min.clear();
+    app.data.as_mut().unwrap()["charged"] = json!([{"reference": "Finance charge", "status": "AUTHORISED", "date": "2026-01-21", "contact_id": 1}]);
+    app.data.as_mut().unwrap()["rows"].as_array_mut().unwrap().push(json!({"status": "AUTHORISED", "reference": "Finance charge", "due_date": "2026-01-01", "amount_due": 5000, "contact_id": 1, "contact_name": "A"}));
+    assert_eq!(crate::desktop::finance_charges_due(&app), vec![(1, "A".to_string(), 100000, 1000)]);
     let _ = std::fs::remove_dir_all(dir);
 }
 

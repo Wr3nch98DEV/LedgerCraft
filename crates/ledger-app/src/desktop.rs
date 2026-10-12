@@ -357,7 +357,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             Task::perform(async move {
                 tokio::task::spawn_blocking(move || -> Result<Value, String> {
                     for (cid, amt) in &charges {
-                        be.call_now("docs.save", serde_json::json!({"doc": {"type": "ACCREC", "contact_id": cid, "reference": "Finance charge", "date": date, "due_date": date, "line_amount_type": "NOTAX", "status": "AUTHORISED",
+                        be.call_now("docs.save", serde_json::json!({"doc": {"type": "ACCREC", "contact_id": cid, "reference": FC_REFERENCE, "date": date, "due_date": date, "line_amount_type": "NOTAX", "status": "AUTHORISED",
                             "lines": [{"description": "Finance charge on overdue balance", "quantity": "1", "unit_price": ui::plain(*amt), "account_id": acct}]}}))?;
                     }
                     Ok(serde_json::json!({"count": charges.len()}))
@@ -1238,20 +1238,36 @@ fn fc_rate(app: &App) -> f64 { if app.desk.fc_rate.trim().is_empty() { 18.0 } el
 fn fc_min(app: &App) -> i64 { if app.desk.fc_min.trim().is_empty() { 0 } else { ui::parse_money(&app.desk.fc_min).unwrap_or(0) } }
 fn fc_grace(app: &App) -> i64 { if app.desk.fc_grace.trim().is_empty() { 0 } else { app.desk.fc_grace.trim().parse().unwrap_or(0) } }
 
+/// The reference on finance charge invoices (used to find earlier assessments).
+pub const FC_REFERENCE: &str = "Finance charge";
+
 /// Per customer: (contact id, name, overdue balance, finance charge) — simple daily interest on each
-/// overdue invoice from its due date (plus grace days) to the assessment date, at least the minimum charge.
+/// overdue invoice from its due date (plus grace days), or from the customer's last assessment if
+/// later, to the assessment date, at least the minimum charge. Finance charges aren't charged on.
 pub fn finance_charges_due(app: &App) -> Vec<(i64, String, i64, i64)> {
     let Some(asof) = ui::to_iso(&fc_date(app), app.date_style()).and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok()) else { return vec![] };
     let (rate, grace, min) = (fc_rate(app), fc_grace(app), fc_min(app));
+    let date_of = |v: &Value, k: &str| v[k].as_str().and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+    let d = app.data.as_ref();
+    // Each customer's most recent finance charge.
+    let mut last: std::collections::HashMap<i64, chrono::NaiveDate> = Default::default();
+    for c in d.and_then(|d| d["charged"].as_array().cloned()).unwrap_or_default() {
+        if c["reference"] != FC_REFERENCE || c["status"] == "DELETED" || c["status"] == "VOIDED" { continue; }
+        let (Some(cid), Some(dt)) = (c["contact_id"].as_i64(), date_of(&c, "date")) else { continue };
+        let e = last.entry(cid).or_insert(dt);
+        if dt > *e { *e = dt; }
+    }
     let mut out: Vec<(i64, String, i64, i64)> = vec![];
-    for r in app.data.as_ref().and_then(|d| d["rows"].as_array().cloned()).unwrap_or_default() {
-        if r["status"] != "AUTHORISED" { continue; }
-        let Some(due) = r["due_date"].as_str().and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()) else { continue };
+    for r in d.and_then(|d| d["rows"].as_array().cloned()).unwrap_or_default() {
+        if r["status"] != "AUTHORISED" || r["reference"] == FC_REFERENCE { continue; }
+        let Some(due) = date_of(&r, "due_date") else { continue };
         let bal = r["amount_due"].as_i64().unwrap_or(0);
-        let days = (asof - due).num_days() - grace;
+        let cid = r["contact_id"].as_i64().unwrap_or(0);
+        let start = due + chrono::Duration::days(grace);
+        let start = match last.get(&cid) { Some(l) if *l > start => *l, _ => start };
+        let days = (asof - start).num_days();
         if bal <= 0 || days <= 0 { continue; }
         let charge = (bal as f64 * rate / 100.0 * days as f64 / 365.0).round() as i64;
-        let cid = r["contact_id"].as_i64().unwrap_or(0);
         match out.iter_mut().find(|c| c.0 == cid) {
             Some(c) => { c.2 += bal; c.3 += charge; }
             None => out.push((cid, r["contact_name"].as_str().unwrap_or("").to_string(), bal, charge)),

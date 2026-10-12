@@ -500,7 +500,17 @@ impl App {
             Route::PayrollForms => call("payroll.payRuns", json!({})),
             Route::PrintForms => call("docs.list", json!({"type": "ACCREC", "limit": 5000})),
             Route::OtherNames => call("contacts.list", json!({"filter": "all"})),
-            Route::FinanceCharges => call("docs.list", json!({"type": "ACCREC", "tab": "overdue", "limit": 2000})),
+            Route::FinanceCharges => {
+                // Overdue invoices, plus earlier finance charges so interest isn't charged twice.
+                let be = self.be.clone();
+                Task::perform(async move {
+                    tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                        let mut v = be.call_now("docs.list", json!({"type": "ACCREC", "tab": "overdue", "limit": 5000}))?;
+                        v["charged"] = be.call_now("docs.list", json!({"type": "ACCREC", "q": crate::desktop::FC_REFERENCE, "limit": 5000}))?["rows"].clone();
+                        Ok(v)
+                    }).await.unwrap_or_else(|e| Err(e.to_string()))
+                }, move |r| Message::Loaded(g, r))
+            }
             Route::EnterTime => {
                 let be = self.be.clone();
                 Task::perform(async move {
