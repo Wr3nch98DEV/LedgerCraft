@@ -835,3 +835,41 @@ fn desktop_create_invoices_save_and_close() {
     assert!(app.doc.as_ref().unwrap().lines.iter().any(|l| l.on_items), "Items tab gets its own line");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_money_forms() {
+    use crate::payments::Msg as P;
+    let (mut app, dir) = desktop_app("deskpay");
+    let _ = app.update(Message::Nav(Route::Check(None)));
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["PAY TO THE", "ORDER OF", "DOLLARS", "MEMO", "ENDING BALANCE", "Save & New", "Save & Close"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    let _ = app.update(Message::Pay(P::LineAmount(0, "1234.56".into())));
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        let w = crate::paydesk::words(123456);
+        assert_eq!(w, "One thousand two hundred thirty-four and 56/100");
+        let line = format!("{w}{}", "*".repeat(60usize.saturating_sub(w.len())));
+        assert!(ui.find(line.as_str()).is_ok(), "amount in words on the check");
+    }
+    // Save & New keeps the window open and starts a fresh check.
+    let windows = app.desk.windows.len();
+    let _ = app.update(Message::Pay(P::SaveNew));
+    assert!(app.pay.as_ref().unwrap().new_after);
+    let _ = app.update(Message::Pay(P::Saved(Ok(json!({"id": 1})))));
+    assert_eq!(app.desk.windows.len(), windows);
+    // Save & Close closes it.
+    let _ = app.update(Message::Pay(P::Save));
+    let _ = app.update(Message::Pay(P::Saved(Ok(json!({"id": 1})))));
+    assert_eq!(app.desk.windows.len(), windows - 1);
+    for (r, want) in [(Route::ReceivePayment(None), "Customer Payment"), (Route::PayBills, "Select Bills to Be Paid"), (Route::Deposit, "Deposit Total")] {
+        let _ = app.update(Message::Nav(r));
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        assert!(ui.find(want).is_ok(), "missing {want}");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}

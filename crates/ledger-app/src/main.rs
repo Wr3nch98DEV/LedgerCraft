@@ -15,6 +15,7 @@ mod icons;
 mod import;
 mod lists;
 mod payments;
+mod paydesk;
 mod reconcile;
 mod pdf;
 mod people;

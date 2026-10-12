@@ -16,6 +16,7 @@ pub struct OpenDoc { pub id: i64, pub number: String, pub contact: String, pub d
 #[derive(Debug, Clone, Default)]
 pub struct SpendLine { pub account: Option<Opt>, pub description: String, pub amount: String, pub tax: Option<Opt> }
 
+#[derive(Clone, Copy, PartialEq)]
 pub enum Mode { Receive, PayBills, Spend, Deposit }
 
 pub struct State {
@@ -33,6 +34,8 @@ pub struct State {
     /// A check (QuickBooks) rather than a plain expense.
     pub check: bool,
     pub check_no: String,
+    /// Desktop "Save & New": start a fresh form after saving.
+    pub new_after: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +59,8 @@ pub enum Msg {
     CheckNo(String),
     NextCheck(Result<Value, String>),
     Undeposited(Result<Value, String>),
+    /// Desktop: save, then open a fresh form.
+    SaveNew,
 }
 
 fn i(v: &Value) -> i64 { v.as_i64().unwrap_or(0) }
@@ -64,7 +69,7 @@ fn base(app: &App, mode: Mode, customers: bool) -> State {
     State {
         mode, contact: None, contact_text: String::new(), contacts: combo_box::State::new(app.lk.contact_opts(customers)),
         account: app.lk.bank_opts().into_iter().next(), date: ui::date(&ui::today_iso(), app.date_style()), reference: String::new(),
-        docs: vec![], lines: vec![], lat: "INCLUSIVE".into(), busy: false, check: false, check_no: String::new(),
+        docs: vec![], lines: vec![], lat: "INCLUSIVE".into(), busy: false, check: false, check_no: String::new(), new_after: false,
     }
 }
 
@@ -116,7 +121,9 @@ fn load_docs(app: &App, kind: &str, contact: Option<i64>) -> Task<Message> {
 pub fn update(app: &mut App, m: Msg) -> Task<Message> {
     let style = app.date_style();
     let Some(mut s) = app.pay.take() else { return Task::none() };
+    let m = match m { Msg::SaveNew => { s.new_after = true; Msg::Save } Msg::Save => { s.new_after = false; Msg::Save } m => m };
     let task = match m {
+        Msg::SaveNew => Task::none(),
         Msg::Docs(Ok(v)) => {
             s.docs = v["rows"].as_array().cloned().unwrap_or_default().iter().map(|r| OpenDoc {
                 id: i(&r["id"]), number: r["number"].as_str().unwrap_or("").into(), contact: r["contact_name"].as_str().unwrap_or("").into(),
@@ -211,6 +218,14 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::Saved(r) => {
             s.busy = false;
             match r {
+                Ok(_) if app.desktop() => {
+                    // Desktop: Save & Close closes the window; Save & New starts a fresh form.
+                    let msg = match s.mode { Mode::Receive => "Payment recorded", Mode::PayBills => "Bills paid", Mode::Spend if s.check => "Check saved", Mode::Spend => "Charge saved", Mode::Deposit => "Deposit saved" };
+                    let t1 = app.toast(msg, false);
+                    let t2 = app.load_lookups();
+                    let t3 = if s.new_after { app.load() } else { let i = app.desk.active; app.close_window(i) };
+                    return Task::batch([t1, t2, t3]);
+                }
                 Ok(_) => {
                     let (msg, next) = match s.mode { Mode::Receive => ("Payment recorded", Route::Invoices), Mode::PayBills => ("Bills paid", Route::Bills), Mode::Spend if s.check => ("Check saved", Route::Expenses), Mode::Spend => ("Expense saved", Route::Expenses), Mode::Deposit => ("Deposit saved", Route::Banking(None)) };
                     let t1 = app.toast(msg, false);
@@ -233,6 +248,7 @@ fn a_tax(app: &App, account: i64) -> Option<Opt> {
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let Some(s) = &app.pay else { return ui::muted("…") };
+    if app.desktop() { return crate::paydesk::view(app, s); }
     let k = t();
     let date_ph = match app.date_style() { ui::DateStyle::Us => "MM/DD/YYYY", ui::DateStyle::Intl => "DD/MM/YYYY", ui::DateStyle::Long => "12 Oct 2026" };
     let banks = app.lk.bank_opts();
