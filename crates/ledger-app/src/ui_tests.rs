@@ -1001,3 +1001,39 @@ fn desktop_income_and_bill_trackers() {
     assert_eq!(crate::desktop::title(&app, &Route::Bills), "Bill Tracker");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_small_forms() {
+    use crate::forms::Msg as F;
+    let (mut app, dir) = desktop_app("deskforms");
+    // New Customer: name, person and address reach the engine; Save & Close closes the window.
+    let _ = app.update(Message::Nav(Route::NewContact(true)));
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["CUSTOMER NAME", "Address Info", "FULL NAME", "INVOICE/BILL TO", "Save & Close"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    for m in [F::Name("Hilltop Cafe".into()), F::First("Sam".into()), F::Last("Lee".into()), F::Address("1 Hill St".into())] { let _ = app.update(Message::Form(m)); }
+    let windows = app.desk.windows.len();
+    let _ = app.update(Message::Form(F::Save));
+    let r = app.be.call_now("contacts.create", json!({"name": "Hilltop Cafe", "first_name": "Sam", "last_name": "Lee", "postal_address": "1 Hill St", "is_customer": true}));
+    let id = r.as_ref().unwrap()["id"].as_i64().unwrap();
+    let _ = app.update(Message::Form(F::Saved(r)));
+    assert_eq!(app.desk.windows.len(), windows - 1);
+    let c = app.be.call_now("contacts.get", json!({"id": id})).unwrap();
+    assert_eq!((c["first_name"].as_str(), c["postal_address"].as_str()), (Some("Sam"), Some("1 Hill St")));
+    // Journal entry and transfer screens.
+    for (r, want) in [(Route::Journal, "ENTRY NO."), (Route::Transfer, "TRANSFER FUNDS FROM"), (Route::NewProduct, "ITEM NAME/NUMBER")] {
+        let _ = app.update(Message::Nav(r));
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        assert!(ui.find(want).is_ok(), "missing {want}");
+    }
+    // Save & New on the journal keeps the window.
+    let _ = app.update(Message::Nav(Route::Journal));
+    let windows = app.desk.windows.len();
+    let _ = app.update(Message::Form(F::SaveNew));
+    let _ = app.update(Message::Form(F::Saved(Ok(json!({"id": 1})))));
+    assert_eq!(app.desk.windows.len(), windows);
+    let _ = std::fs::remove_dir_all(dir);
+}

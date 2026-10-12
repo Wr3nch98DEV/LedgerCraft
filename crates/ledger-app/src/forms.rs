@@ -36,13 +36,18 @@ pub struct State {
     /// New account: QuickBooks account type name (or Xero type name) and detail type.
     pub acct_type: Option<String>,
     pub detail: Option<String>,
+    /// Desktop New Customer/Vendor: name parts and address; "Save & New".
+    pub first: String,
+    pub last: String,
+    pub address: String,
+    pub new_after: bool,
 }
 
 #[derive(Debug, Clone)]
 pub enum Msg {
     Name(String), Email(String), Phone(String), Code(String), Price(String), Cost(String),
     SaleAccount(Opt), PurchaseAccount(Opt), Tax(Opt), Service(bool), Track1099(bool),
-    Date(String), Memo(String), From(Opt), To(Opt), Amount(String), AcctType(String), Detail(String), JAccount(usize, Opt), JDesc(usize, String), JDebit(usize, String), JCredit(usize, String), AddLine,
+    Date(String), Memo(String), From(Opt), To(Opt), Amount(String), First(String), Last(String), Address(String), SaveNew, AcctType(String), Detail(String), JAccount(usize, Opt), JDesc(usize, String), JDebit(usize, String), JCredit(usize, String), AddLine,
     Save, Saved(Result<Value, String>),
 }
 
@@ -64,6 +69,7 @@ pub fn open(app: &mut App) -> Task<Message> {
 pub fn update(app: &mut App, m: Msg) -> Task<Message> {
     let style = app.date_style();
     let Some(mut s) = app.form.take() else { return Task::none() };
+    let m = match m { Msg::SaveNew => { s.new_after = true; Msg::Save } Msg::Save => { s.new_after = false; Msg::Save } m => m };
     let task = match m {
         Msg::Name(v) => { s.name = v; Task::none() }
         Msg::Email(v) => { s.email = v; Task::none() }
@@ -80,6 +86,10 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::From(v) => { s.from = Some(v); Task::none() }
         Msg::To(v) => { s.to = Some(v); Task::none() }
         Msg::Amount(v) => { s.amount = v; Task::none() }
+        Msg::First(v) => { s.first = v; Task::none() }
+        Msg::Last(v) => { s.last = v; Task::none() }
+        Msg::Address(v) => { s.address = v; Task::none() }
+        Msg::SaveNew => Task::none(),
         Msg::AcctType(v) => {
             // A new QuickBooks type starts on its first detail type.
             s.detail = crate::coa::QB_TYPES.iter().find(|t| t.name == v).map(|t| t.details[0].0.to_string());
@@ -98,7 +108,8 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             let call = match &app.route {
                 Route::NewContact(_) => {
                     if s.name.trim().is_empty() { app.form = Some(s); return app.toast("Enter a name", true); }
-                    ("contacts.create", json!({"name": s.name.trim(), "email": s.email.trim(), "phone": s.phone.trim(), "is_customer": s.customer, "is_supplier": !s.customer}))
+                    ("contacts.create", json!({"name": s.name.trim(), "email": s.email.trim(), "phone": s.phone.trim(), "is_customer": s.customer, "is_supplier": !s.customer,
+                        "first_name": s.first.trim(), "last_name": s.last.trim(), "postal_address": s.address.trim()}))
                 }
                 Route::Transfer => {
                     let (Some(f), Some(t)) = (s.from.clone(), s.to.clone()) else { app.form = Some(s); return app.toast("Choose both accounts", true) };
@@ -158,6 +169,11 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                         (Route::NewContact(false), Some(cid)) if s.track_1099 => app.be.call("contacts.set1099", json!({"id": cid, "on": true}), |_| Message::Noop),
                         _ => Task::none(),
                     };
+                    if app.desktop() {
+                        // Desktop: Save & Close closes the window, Save & New starts again.
+                        let t3 = if s.new_after { app.load() } else { let i = app.desk.active; app.close_window(i) };
+                        return Task::batch([t0, t1, t2, t3]);
+                    }
                     app.form = Some(s);
                     let t3 = app.go(next);
                     return Task::batch([t0, t1, t2, t3]);
@@ -170,7 +186,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
     task
 }
 
-fn totals(s: &State) -> (i64, i64) {
+pub(crate) fn totals(s: &State) -> (i64, i64) {
     s.lines.iter().fold((0, 0), |(d, c), l| (d + ui::parse_money(&l.debit).unwrap_or(0), c + ui::parse_money(&l.credit).unwrap_or(0)))
 }
 
@@ -181,6 +197,7 @@ fn footer<'a>(busy: bool) -> Element<'a, Message> {
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let Some(s) = &app.form else { return ui::muted("…") };
+    if app.desktop() && !matches!(app.route, Route::NewAccount) { return crate::formdesk::view(app, s); }
     let k = t();
     match &app.route {
         Route::NewContact(customer) => {

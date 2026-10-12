@@ -11,6 +11,7 @@ mod desktop;
 mod doc;
 mod docdesk;
 mod forms;
+mod formdesk;
 mod icons;
 mod import;
 mod lists;
