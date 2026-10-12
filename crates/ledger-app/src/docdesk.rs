@@ -81,6 +81,10 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
     }
     if delayed(&e.kind) && saved && status == "SENT" && !editable { ribbon = ribbon.push(rib("swap", "Edit", m(Msg::Edit))); }
     ribbon = ribbon.push(container(Space::new()).width(1).height(36).style(theme::rule));
+    // Apply Credits (invoice/bill) or apply the credit (credit memo/vendor credit), once saved and open.
+    let can_apply = saved && status == "AUTHORISED" && e.doc.as_ref().and_then(|d| d["amount_due"].as_i64()).unwrap_or(0) > 0 && crate::doc::apply_other(&e.kind).is_some();
+    let apply_label = match e.kind.as_str() { "ACCRECCREDIT" => "Apply to Invoice", "ACCPAYCREDIT" => "Apply to Bill", _ => "Apply Credits" };
+    if crate::doc::apply_other(&e.kind).is_some() { ribbon = ribbon.push(rib("swap", apply_label, if can_apply { m(Msg::ApplyOpen) } else { None })); }
     match e.kind.as_str() {
         "ACCREC" => { ribbon = ribbon.push(rib("receive", "Receive Payments", Some(Message::Nav(Route::ReceivePayment(e.contact.as_ref().map(|c| c.id)))))); }
         "QUOTE" => { ribbon = ribbon.push(rib("sales", "Create Invoice", if saved && matches!(status, "SENT" | "ACCEPTED" | "DRAFT") { m(Msg::Action("to_invoice")) } else { None })); }
@@ -216,6 +220,7 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
         error,
         header,
         memorize_panel(e),
+        apply_panel(app, e),
         doc_extra(app, e),
         grid_area,
         add,
@@ -223,6 +228,36 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
         buttons,
     ].spacing(12).padding(Padding { top: 12.0, left: 16.0, right: 16.0, bottom: 16.0 });
     column![ribbon, row![scrollable(container(form).max_width(1250)).style(theme::scroll).height(Fill).width(Fill), history_panel(app, e)]].into()
+}
+
+/// Apply Credits: amounts to apply against each open document on the other side.
+fn apply_panel<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
+    let Some(list) = &e.apply else { return Space::new().into() };
+    let k = t();
+    let credit_side = e.kind.ends_with("CREDIT");
+    let what = match e.kind.as_str() { "ACCRECCREDIT" => "Invoices", "ACCPAYCREDIT" => "Bills", "ACCREC" => "Available Credits", _ => "Available Vendor Credits" };
+    let available = e.doc.as_ref().and_then(|d| d["amount_due"].as_i64()).unwrap_or(0);
+    let applied: i64 = list.iter().map(|(_, a)| ui::parse_money(a).unwrap_or(0)).sum();
+    let mut rows = column![row![
+        text("NUMBER").size(11).font(BOLD).color(k.muted).width(Length::FillPortion(12)), text("DATE").size(11).font(BOLD).color(k.muted).width(Length::FillPortion(12)),
+        text(if credit_side { "AMT. DUE" } else { "CREDIT AMT." }).size(11).font(BOLD).color(k.muted).align_x(iced::alignment::Horizontal::Right).width(Length::FillPortion(12)),
+        text("AMT. TO APPLY").size(11).font(BOLD).color(k.muted).align_x(iced::alignment::Horizontal::Right).width(Length::FillPortion(14)),
+    ].spacing(8)].spacing(4);
+    if list.is_empty() { rows = rows.push(text(format!("No open {} for this name.", what.to_lowercase())).size(13).color(k.muted)); }
+    for (n, (d, amt)) in list.iter().enumerate() {
+        rows = rows.push(row![
+            text(d["number"].as_str().unwrap_or("").to_string()).size(13).width(Length::FillPortion(12)),
+            text(app.d(d["date"].as_str().unwrap_or(""))).size(13).width(Length::FillPortion(12)),
+            text(ui::money(d["amount_due"].as_i64().unwrap_or(0))).size(13).align_x(iced::alignment::Horizontal::Right).width(Length::FillPortion(12)),
+            container(text_input("", amt).on_input(move |v| Message::Doc(Msg::ApplyAmt(n, v))).padding([4, 6]).size(13).align_x(iced::alignment::Horizontal::Right).style(theme::input)).width(Length::FillPortion(14)),
+        ].spacing(8).align_y(Alignment::Center));
+    }
+    container(column![
+        row![text(if credit_side { format!("Apply credit to {what}") } else { what.to_string() }).size(15).font(BOLD), ui::hspace(),
+            text(format!("{} available · {} to apply", ui::money(available), ui::money(applied))).size(12).color(if applied > available && credit_side { k.bad } else { k.muted })].align_y(Alignment::Center),
+        rows,
+        row![ui::hspace(), ui::btn("Cancel", Some(Message::Doc(Msg::ApplyOpen))), ui::btn_primary("Done", if e.busy || list.is_empty() { None } else { Some(Message::Doc(Msg::ApplySave)) })].spacing(8),
+    ].spacing(10)).padding(14).width(Fill).style(theme::accent_soft).into()
 }
 
 /// Memorize Transaction: how often, next date, and whether to enter it automatically.

@@ -60,6 +60,9 @@ pub struct Editor {
     pub memo_freq: &'static str,
     pub memo_next: String,
     pub memo_auto: bool,
+    /// Apply Credits: open documents on the other side (credits for an invoice/bill, or
+    /// invoices/bills for a credit) as (document, amount to apply).
+    pub apply: Option<Vec<(Value, String)>>,
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +111,7 @@ pub enum Msg {
     /// Desktop history panel data.
     History(Result<Value, String>),
     /// Desktop Memorize panel.
+    ApplyOpen, ApplyDocs(Result<Value, String>), ApplyAmt(usize, String), ApplySave, Applied(Result<Value, String>),
     Memorize, MemoFreq(&'static str), MemoNext(String), MemoAuto(bool), MemoSave, Memorized(Result<Value, String>),
     /// Desktop Expenses tab: an amount typed straight in (quantity 1).
     Amount(usize, String),
@@ -127,6 +131,11 @@ const LATS: [LatOpt; 3] = [LatOpt("EXCLUSIVE"), LatOpt("INCLUSIVE"), LatOpt("NOT
 pub(crate) fn div_round(n: i128, d: i128) -> i64 { let q = (n.abs() + d.abs() / 2) / d.abs(); (if (n < 0) != (d < 0) { -q } else { q }) as i64 }
 /// Line amount in cents from e4 quantity × e4 price.
 pub(crate) fn line_cents(q: i64, p: i64) -> i64 { div_round(q as i128 * p as i128, 1_000_000) }
+
+/// What a document's credit is applied against: invoices ↔ credit memos, bills ↔ vendor credits.
+pub fn apply_other(kind: &str) -> Option<&'static str> {
+    match kind { "ACCREC" => Some("ACCRECCREDIT"), "ACCRECCREDIT" => Some("ACCREC"), "ACCPAY" => Some("ACCPAYCREDIT"), "ACCPAYCREDIT" => Some("ACCPAY"), _ => None }
+}
 
 /// Memorize "How Often" choices → engine schedule (unit, count).
 pub const MEMO_FREQS: [&str; 5] = ["Weekly", "Every two weeks", "Monthly", "Quarterly", "Annually"];
@@ -179,7 +188,7 @@ impl Editor {
             lines: vec![Line { qty: "1".into(), ..Default::default() }, Line { qty: "1".into(), ..Default::default() }],
             terms: String::new(), busy: false, editing: true,
             pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false,
-            delayed: vec![], added: vec![], items_tab: false, close_after: false, history: vec![], memo_open: false, memo_freq: "Monthly", memo_next: String::new(), memo_auto: false,
+            delayed: vec![], added: vec![], items_tab: false, close_after: false, history: vec![], memo_open: false, memo_freq: "Monthly", memo_next: String::new(), memo_auto: false, apply: None,
         };
         if let Some(a) = default_account(app, kind) { for l in &mut e.lines { l.account = Some(a.clone()); l.tax = default_tax(app, Some(a.id)); } }
         e
@@ -318,6 +327,49 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             let t = history_task(app, &e);
             app.doc = Some(e);
             return t;
+        }
+        Msg::ApplyOpen => {
+            if e.apply.is_some() { e.apply = None; app.doc = Some(e); return Task::none(); }
+            let (Some(c), Some(other)) = (e.contact.as_ref(), apply_other(&e.kind)) else { app.doc = Some(e); return Task::none() };
+            let p = json!({"type": other, "contact_id": c.id, "tab": "awaiting", "limit": 200});
+            app.doc = Some(e);
+            return app.be.call("docs.list", p, |r| Message::Doc(Msg::ApplyDocs(r)));
+        }
+        Msg::ApplyDocs(r) => {
+            let mine = e.doc.as_ref().and_then(|d| d["amount_due"].as_i64()).unwrap_or(0);
+            let mut left = mine;
+            // Suggest applying oldest first, up to what's available on each side.
+            e.apply = Some(r.ok().and_then(|v| v["rows"].as_array().cloned()).unwrap_or_default().into_iter().map(|d| {
+                let due = d["amount_due"].as_i64().unwrap_or(0);
+                let amt = due.min(left).max(0);
+                left -= amt;
+                (d, if amt > 0 { ui::plain(amt) } else { String::new() })
+            }).collect());
+            Task::none()
+        }
+        Msg::ApplyAmt(n, v) => { if let Some(a) = e.apply.as_mut() { if let Some(x) = a.get_mut(n) { x.1 = v; } } Task::none() }
+        Msg::ApplySave => {
+            let (Some(id), Some(list)) = (e.id, e.apply.clone()) else { app.doc = Some(e); return Task::none() };
+            let credit_side = e.kind.ends_with("CREDIT");
+            let pairs: Vec<(i64, i64, String)> = list.iter().filter(|(_, a)| ui::parse_money(a).unwrap_or(0) > 0)
+                .map(|(d, a)| { let other = d["id"].as_i64().unwrap_or(0); if credit_side { (id, other, a.replace(',', "")) } else { (other, id, a.replace(',', "")) } }).collect();
+            if pairs.is_empty() { app.doc = Some(e); return app.toast("Enter an amount to apply", true); }
+            let be = app.be.clone();
+            e.busy = true;
+            app.doc = Some(e);
+            return Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                    for (credit, doc, amt) in &pairs { be.call_now("credits.allocate", json!({"credit_id": credit, "document_id": doc, "amount": amt}))?; }
+                    Ok(json!({"applied": pairs.len()}))
+                }).await.unwrap_or_else(|x| Err(x.to_string()))
+            }, |r| Message::Doc(Msg::Applied(r)));
+        }
+        Msg::Applied(r) => {
+            e.busy = false;
+            match r {
+                Ok(_) => { e.apply = None; app.doc = Some(e); let t1 = app.toast("Credit applied", false); let t2 = app.load(); let t3 = app.load_lookups(); return Task::batch([t1, t2, t3]); }
+                Err(err) => app.toast(err, true),
+            }
         }
         Msg::Memorize => {
             e.memo_open = !e.memo_open;

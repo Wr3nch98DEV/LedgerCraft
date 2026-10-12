@@ -1220,3 +1220,38 @@ fn desktop_memorize_transaction() {
     assert!(after > before, "the memorized invoice was entered");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_apply_credit_to_invoice() {
+    use crate::doc::Msg as D;
+    let (mut app, dir) = desktop_app("deskapply");
+    // An open invoice and a credit memo for the same customer.
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    let mk = |kind: &str, price: &str| app.be.call_now("docs.save", json!({"doc": {"type": kind, "contact_id": cust.id, "date": crate::ui::today_iso(), "line_amount_type": "NOTAX", "status": "AUTHORISED",
+        "lines": [{"description": "x", "quantity": "1", "unit_price": price, "account_id": app.lk.accounts.iter().find(|a| a["code"] == "200").unwrap()["id"]}]}})).unwrap()["id"].as_i64().unwrap();
+    let inv = mk("ACCREC", "300");
+    let cm = mk("ACCRECCREDIT", "120");
+    let _ = app.update(Message::Nav(Route::Doc { kind: "ACCRECCREDIT".into(), id: Some(cm) }));
+    let d = app.be.call_now("docs.get", json!({"id": cm}));
+    let _ = app.update(Message::Doc(D::Loaded(d)));
+    let msgs = click(&app, "Apply to Invoice");
+    assert!(matches!(msgs.as_slice(), [Message::Doc(D::ApplyOpen)]), "{msgs:?}");
+    let _ = app.update(Message::Doc(D::ApplyOpen));
+    let open = app.be.call_now("docs.list", json!({"type": "ACCREC", "contact_id": cust.id, "tab": "awaiting", "limit": 200}));
+    let _ = app.update(Message::Doc(D::ApplyDocs(open)));
+    // Only apply to our new invoice.
+    let list = app.doc.as_ref().unwrap().apply.clone().unwrap();
+    for (n, (d, _)) in list.iter().enumerate() { let v = if d["id"].as_i64() == Some(inv) { "120.00" } else { "" }; let _ = app.update(Message::Doc(D::ApplyAmt(n, v.into()))); }
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        assert!(ui.find("Apply credit to Invoices").is_ok());
+    }
+    let _ = app.update(Message::Doc(D::ApplySave));
+    app.be.call_now("credits.allocate", json!({"credit_id": cm, "document_id": inv, "amount": "120.00"})).unwrap();
+    let _ = app.update(Message::Doc(D::Applied(Ok(json!({"applied": 1})))));
+    assert!(app.doc.as_ref().map(|e| e.apply.is_none()).unwrap_or(true));
+    assert_eq!(app.be.call_now("docs.get", json!({"id": inv})).unwrap()["amount_due"], 18000);
+    assert_eq!(app.be.call_now("docs.get", json!({"id": cm})).unwrap()["amount_due"], 0);
+    let _ = std::fs::remove_dir_all(dir);
+}
