@@ -2,6 +2,17 @@
 
 > **Update — native app prototype (12 Oct 2026).** `start.bat` now opens the new **native LedgerCraft app** (100% Rust, iced): three layouts over the same books: **QuickBooks Desktop-style** (the default: menu bar, icon bar, Home page, Centers, classic forms, several windows open at once), **QuickBooks Online-style** and **Xero-style**. Switch from View (Desktop), the gear menu or Preferences, or start with `start.bat desktop` / `start.bat online` / `start.bat xero`. Both use the same company files. Working natively: dashboard, invoices/estimates/credit memos/sales receipts/bills/POs (with PDF printing and save-and-send), receive payment, pay bills, expenses and checks, bank deposits from Undeposited Funds, transfers, bank feed review + statement upload, tick-off Reconcile, chart of accounts, journal entries, all reports (export to PDF/CSV), payroll runs, tax returns, projects, mileage, company settings and sign-in. Still in the previous version: users, branding/email settings and a few advanced screens — **`start.bat web`**. Status and what's next: see `UI_REWRITE_PLAN.md`.
 
+> **Update — QuickBooks Desktop layout, night of 12–13 Oct 2026.** The Desktop layout (the default) now covers nearly every menu command in QuickBooks Desktop Enterprise 2024:
+> * **Home ▸ Insights** (12-month income vs expenses, open/overdue, top customers), **Company ▸ Reminders**, **Edit ▸ Find (Ctrl+F)**, **Set Closing Date**.
+> * **Lists:** Price Level List (invoice prices follow the customer's level), Payroll Item List, Class List, Other Names, **Templates** (form designs: printing uses them; pick one on each invoice/estimate/PO), Memorized Reports.
+> * **Customers:** Create Batch Invoices, Assess Finance Charges, Customer:Job (jobs under each customer; Add Job), Edit Customer/Vendor with "is inactive".
+> * **Inventory:** Inventory Center, Inventory Part items, **Build Assemblies**, Edit Item, Adjust Quantity.
+> * **Banking:** Print Check (voucher checks), open/edit/**Void Check** from the register, Make Deposits with other amounts, Receive Payments auto-apply, Pay Bills Select All.
+> * **Employees:** New/Edit Employee, Pay Liabilities, Process Payroll Forms. **File ▸ Print Forms** batch-prints invoices.
+> * **Keyboard like QuickBooks:** QuickFill (type in Item/Account columns), date keys (+ − T W K M H Y R), Alt+A Save & Close, Alt+S Save & New, Alt+letter menus with arrow keys, Ctrl+P/M/N, Ctrl+I/W/E/J/A/R/T. Full list in **Help (F1)**.
+> * Background jobs (repeating invoices, email, backups) now run in the native app too. Your company file is updated automatically (two new tables: price levels, assemblies).
+> * Light/dark: this computer's saved preference is currently **light** (Alt+T or View ▸ Dark Mode switches back); the Desktop Home bands are toned down in dark mode.
+
 **Start here:** double-click **`start.bat`**. First run builds everything (a few minutes). Then click **"Just show me the demo company"** to explore 12 months of sample data, or set up your own business.
 
 LedgerCraft opens in its own window in **dark mode**. Toggle light/dark with the sun/moon icon (top right) or **Alt+T**.
