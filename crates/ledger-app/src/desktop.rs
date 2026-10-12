@@ -342,14 +342,13 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }).collect();
             if lines.is_empty() { return app.toast("Add at least one line with a rate", true); }
             let custs = app.desk.bi_custs.clone();
-            let terms_days = 14;
-            let due = ui::add_days_iso(&date, terms_days);
             let be = app.be.clone();
             app.desk.bi_busy = true;
             Task::perform(async move {
                 tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                    // No due date: each customer's own terms apply.
                     for c in &custs {
-                        be.call_now("docs.save", serde_json::json!({"doc": {"type": "ACCREC", "contact_id": c, "date": date, "due_date": due, "line_amount_type": "EXCLUSIVE", "status": "AUTHORISED", "lines": lines}}))?;
+                        be.call_now("docs.save", serde_json::json!({"doc": {"type": "ACCREC", "contact_id": c, "date": date, "line_amount_type": "EXCLUSIVE", "status": "AUTHORISED", "lines": lines}}))?;
                     }
                     Ok(serde_json::json!({"count": custs.len()}))
                 }).await.unwrap_or_else(|e| Err(e.to_string()))
