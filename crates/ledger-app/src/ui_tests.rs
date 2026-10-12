@@ -1767,7 +1767,7 @@ fn every_screen_in_every_layout_loads() {
         Route::ReceivePayment(None), Route::PayBills, Route::Spend(None), Route::Check(None), Route::Deposit, Route::Transfer, Route::Journal,
         Route::NewContact(true), Route::NewProduct, Route::NewAccount, Route::Payroll, Route::Taxes, Route::Projects, Route::Mileage, Route::Reconcile,
         Route::Register(None), Route::Calendar, Route::Statements, Route::Memorized, Route::PaySalesTax, Route::AdjustInventory, Route::Help, Route::DocCenter,
-        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates, Route::PriceLevels, Route::PrintForms, Route::PayrollForms, Route::CustomizeFavorites, Route::BuildAssemblies];
+        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates, Route::PriceLevels, Route::PrintForms, Route::PayrollForms, Route::CustomizeFavorites, Route::BuildAssemblies, Route::InventoryCenter];
     for layout in Layout::ALL {
         let (mut app, dir) = desktop_app(&format!("all-{}", layout.key()));
         let t = app.update(Message::SetLayout(layout));
@@ -2562,5 +2562,23 @@ fn render_invoice_quickfill() {
     let _g = sim_lock();
     let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
     ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join("lc-route.png")).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn desktop_inventory_center() {
+    let (mut app, dir) = desktop_app("invcenter");
+    let t = app.update(Message::Nav(Route::InventoryCenter)); settle(&mut app, t);
+    let sel = app.desk.inv_sel.expect("first inventory item selected");
+    let d = app.desk.inv_detail.clone().expect("details loaded");
+    assert_eq!(d["id"].as_i64(), Some(sel));
+    // A movement from a bill or invoice opens that transaction.
+    let mv = d["movements"].as_array().unwrap().iter().find(|m| matches!(m["source_type"].as_str(), Some("ACCREC" | "ACCPAY"))).cloned().expect("demo stock has bills/invoices");
+    let label = if mv["source_type"] == "ACCREC" { "Invoice" } else { "Bill" };
+    let msgs = click(&app, label);
+    assert!(msgs.iter().any(|m| matches!(m, Message::Nav(Route::Doc { id: Some(_), .. }))), "{msgs:?}");
+    assert!(click(&app, "Inventory Valuation Summary").iter().any(|m| matches!(m, Message::Nav(Route::Report(_)))));
+    let t = app.update(Message::Nav(Route::Report("inventory-summary".into()))); settle(&mut app, t);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
     let _ = std::fs::remove_dir_all(dir);
 }

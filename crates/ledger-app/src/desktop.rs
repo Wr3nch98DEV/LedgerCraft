@@ -58,6 +58,9 @@ pub struct State {
     pub favorites: Vec<String>,
     /// The menu item highlighted with the arrow keys (index into `menu_items`).
     pub menu_sel: Option<usize>,
+    /// Inventory Center: selected item and its details (items.get).
+    pub inv_sel: Option<i64>,
+    pub inv_detail: Option<Value>,
     /// Customer Center: jobs (projects) shown under their customers.
     pub jobs: Vec<Value>,
     /// Build Assemblies: the assembly, its components/builds (from items.components), quantity, date, memo,
@@ -124,7 +127,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), JobsLoaded(crate::backend::Reply), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), InvSelect(i64), InvDetail(crate::backend::Reply), JobsLoaded(crate::backend::Reply), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
     /// Remember the Desktop view choices (One Window, icon bar pane).
@@ -301,6 +304,8 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             })
         }
         Msg::JobsLoaded(r) => { if let Ok(v) = r { app.desk.jobs = v["projects"].as_array().or(v.as_array()).cloned().unwrap_or_default(); } Task::none() }
+        Msg::InvSelect(id) => { app.desk.inv_sel = Some(id); app.be.call("items.get", serde_json::json!({"id": id}), |r| Message::Desk(Msg::InvDetail(r))) }
+        Msg::InvDetail(r) => match r { Ok(v) => { app.desk.inv_detail = Some(v); Task::none() } Err(e) => app.toast(e, true) },
         Msg::OpenPrefs(cat) => { app.settings.cat = Some(cat); app.go(Route::Settings) }
         Msg::FavAdd(f) => { if !app.desk.favorites.contains(&f) { app.desk.favorites.push(f); app.save_desk_prefs(); } Task::none() }
         Msg::FavRemove(n) => { if n < app.desk.favorites.len() { app.desk.favorites.remove(n); app.save_desk_prefs(); } Task::none() }
@@ -729,6 +734,12 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
 
 /// After a Center's list loads, select the remembered name (or the first one).
 pub fn after_load(app: &mut App) -> Task<Message> {
+    if app.desktop() && app.route == Route::InventoryCenter {
+        // Select the first inventory item (or keep the one shown), and refresh its details.
+        let list: Vec<Value> = app.data.as_ref().and_then(|d| d.as_array().cloned()).unwrap_or_default().into_iter().filter(|i| i["is_tracked"].as_i64() == Some(1)).collect();
+        let keep = app.desk.inv_sel.filter(|s| list.iter().any(|i| i["id"].as_i64() == Some(*s)));
+        return match keep.or_else(|| list.first().and_then(|i| i["id"].as_i64())) { Some(id) => update(app, Msg::InvSelect(id)), None => Task::none() };
+    }
     if !app.desktop() || !matches!(app.route, Route::Customers | Route::Vendors) { return Task::none(); }
     let list = app.data.as_ref().and_then(|d| d.as_array().cloned()).unwrap_or_default();
     let keep = app.desk.sel.filter(|s| list.iter().any(|c| c["id"].as_i64() == Some(*s)));
@@ -785,6 +796,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::PayrollForms => "Process Payroll Forms".into(),
         Route::CustomizeFavorites => "Customize Your Menus".into(),
         Route::BuildAssemblies => "Build Assemblies".into(),
+        Route::InventoryCenter => "Inventory Center".into(),
         Route::EnterTime => "Time/Enter Single Activity".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
@@ -847,7 +859,7 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
         "Company" => vec![e("Home Page", "", nav(Route::Dashboard)), e("Company Snapshot", "", Some(Message::Desk(Msg::Insights(true)))), sep(), e("My Company", "", nav(Route::Settings)),
             e("Company Information…", "", nav(Route::Settings)), e("Set Up Users and Roles…", "", Some(Message::Desk(Msg::OpenPrefs("Users & Roles")))), e("Set Closing Date…", "", Some(Message::Desk(Msg::OpenPrefs("Accounting")))), sep(), e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)),
             e("Make General Journal Entries…", "", nav(Route::Journal)), e("Enter Vehicle Mileage…", "", nav(Route::Mileage)), e("Calendar", "", nav(Route::Calendar)), e("Documents", "", nav(Route::DocCenter))],
-        "Inventory" => vec![e("Inventory Center", "", nav(Route::Products)), e("Item List", "", nav(Route::Products)), sep(), e("Create Purchase Orders", "", doc_new("PO")),
+        "Inventory" => vec![e("Inventory Center", "", nav(Route::InventoryCenter)), e("Item List", "", nav(Route::Products)), sep(), e("Create Purchase Orders", "", doc_new("PO")),
             e("Purchase Orders List", "", nav(Route::PurchaseOrders)), e("Receive Items", "", Some(Message::ReceiveItems)), e("Enter Bills Against Inventory", "", nav(Route::PurchaseOrders)), e("Adjust Quantity/Value on Hand…", "", nav(Route::AdjustInventory)), sep(), e("Build Assemblies…", "", nav(Route::BuildAssemblies))],
         "Customers" => vec![e("Customer Center", "Ctrl+J", nav(Route::Customers)), sep(), e("Create Estimates", "", doc_new("QUOTE")), e("Create Sales Orders", "", doc_new("SALESORDER")),
             e("Create Invoices", "Ctrl+I", doc_new("ACCREC")), e("Enter Sales Receipts", "", doc_new("SALESRECEIPT")), e("Enter Statement Charges", "", doc_new("DELAYEDCHARGE")),
@@ -1132,6 +1144,71 @@ pub fn other_names(app: &App) -> Element<'_, Message> {
 fn dkey(app: &App, old: &str, new: String) -> String {
     let shown = if old.is_empty() { app.d(&ui::today_iso()) } else { old.to_string() };
     ui::date_keys(&shown, &new, app.date_style())
+}
+
+/// Inventory ▸ Inventory Center: inventory items with quantity on hand; the selected item's
+/// details and stock movements (each opens its transaction).
+pub fn inventory_center(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let items: Vec<Value> = d.as_array().cloned().unwrap_or_default().into_iter().filter(|i| i["is_tracked"].as_i64() == Some(1) && i["status"] == "ACTIVE").collect();
+    let toolbar = row![
+        ui::btn("New Inventory Item", nav(Route::NewProduct)), ui::btn("Create Purchase Orders", doc_new("PO")), ui::btn("Receive Items", Some(Message::ReceiveItems)),
+        ui::btn("Adjust Quantity/Value", nav(Route::AdjustInventory)), ui::btn("Build Assemblies", nav(Route::BuildAssemblies)),
+        ui::hspace(), ui::btn("Inventory Valuation Summary", Some(Message::Nav(Route::Report("inventory-summary".into())))),
+    ].spacing(6);
+    let mut names = column![row![text("NAME").size(11).font(BOLD).color(k.muted).width(Fill), text("ON HAND").size(11).font(BOLD).color(k.muted)].padding([6, 10])].spacing(0);
+    for i in &items {
+        let id = i["id"].as_i64().unwrap_or(0);
+        let on = app.desk.inv_sel == Some(id);
+        let low = i["low_stock"].as_i64() == Some(1);
+        names = names.push(button(row![
+            text(format!("{} — {}", i["code"].as_str().unwrap_or(""), i["name"].as_str().unwrap_or(""))).size(13).width(Fill),
+            text(qty_text(i["qty_on_hand_e4"].as_i64().unwrap_or(0))).size(13).color(if low { k.bad } else { k.text }),
+        ].spacing(8)).padding([4, 10]).width(Fill).style(theme::list_item(on)).on_press(Message::Desk(Msg::InvSelect(id))));
+    }
+    if items.is_empty() { names = names.push(container(ui::muted("No inventory items yet — New Inventory Item tracks quantity and cost.")).padding(10)); }
+    let left = container(scrollable(names).style(theme::scroll).height(Fill)).width(380).height(Fill).style(theme::card);
+    let right: Element<Message> = match app.desk.inv_detail.as_ref().filter(|v| v["id"].as_i64() == app.desk.inv_sel) {
+        None => container(ui::muted(if items.is_empty() { "" } else { "Loading…" })).padding(20).width(Fill).height(Fill).style(theme::card).into(),
+        Some(it) => {
+            let s = |key: &str| it[key].as_str().unwrap_or("").to_string();
+            let info_row = |label: &'static str, v: String| -> Element<'_, Message> { row![text(label).size(12).color(k.info).width(130), text(if v.is_empty() { "—".into() } else { v }).size(13)].spacing(6).into() };
+            let money_e4 = |v: Option<i64>| v.map(|x| ui::money((x as f64 / 100.0).round() as i64)).unwrap_or_default();
+            let qoh = it["qty_on_hand_e4"].as_i64().unwrap_or(0);
+            let info = container(column![
+                text("Item Information").size(15).font(BOLD),
+                row![
+                    column![info_row("Item Name", format!("{} — {}", s("code"), s("name"))), info_row("Description", s("sales_description")),
+                        info_row("Sales Price", money_e4(it["sale_unit_e2"].as_i64())), info_row("Purchase Cost", money_e4(it["purchase_unit_e2"].as_i64()))].spacing(6).width(Fill),
+                    column![info_row("Quantity On Hand", qty_text(qoh)), info_row("Average Cost", ui::money(it["avg_cost"].as_i64().unwrap_or(0))),
+                        info_row("Total Value", ui::money(it["total_cost"].as_i64().unwrap_or(0))), info_row("Reorder Point", it["reorder_level_e4"].as_i64().map(qty_text).unwrap_or_default())].spacing(6).width(Fill),
+                ].spacing(20),
+            ].spacing(10)).padding(14).width(Fill).style(theme::card);
+            let cols: [(&str, u16, bool); 5] = [("Type", 16, false), ("Date", 14, false), ("Qty", 10, true), ("Cost", 14, true), ("", 10, false)];
+            let head = container(row(cols.iter().map(|(h, w, r)| {
+                let tx = text(h.to_uppercase()).size(11).font(BOLD).color(k.muted);
+                container(if *r { tx.align_x(iced::alignment::Horizontal::Right).width(Fill) } else { tx.width(Fill) }).width(Length::FillPortion(*w)).into()
+            })).spacing(8).padding([6, 10])).style(theme::header_row).width(Fill);
+            let mut rows = column![].spacing(0);
+            for m in it["movements"].as_array().cloned().unwrap_or_default() {
+                let st = m["source_type"].as_str().unwrap_or("").to_string();
+                let label = match st.as_str() { "ACCREC" => "Invoice", "ACCPAY" => "Bill", "ACCRECCREDIT" => "Credit Memo", "ACCPAYCREDIT" => "Vendor Credit", "ADJUSTMENT" => "Inventory Adjust", "BUILD" => "Build Assembly", "REVERSAL" => "Reversal", "SALESRECEIPT" => "Sales Receipt", o => o }.to_string();
+                let open = m["source_id"].as_i64().filter(|_| matches!(st.as_str(), "ACCREC" | "ACCPAY" | "ACCRECCREDIT" | "ACCPAYCREDIT" | "SALESRECEIPT")).map(|id| Message::Nav(Route::Doc { kind: st.clone(), id: Some(id) }));
+                let q = m["qty_e4"].as_i64().unwrap_or(0);
+                let cells: Vec<Element<Message>> = vec![ui::cell(label), ui::cell_muted(app.d(m["date"].as_str().unwrap_or(""))),
+                    text(qty_text(q)).size(13).color(if q < 0 { k.bad } else { k.text }).align_x(iced::alignment::Horizontal::Right).width(Fill).into(),
+                    ui::cell_money(m["cost"].as_i64().unwrap_or(0)), Space::new().into()];
+                let r = row(cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into())).spacing(8).align_y(Alignment::Center).padding([5, 10]);
+                rows = rows.push(button(r).padding(0).width(Fill).style(theme::row_btn).on_press_maybe(open));
+                rows = rows.push(ui::hr());
+            }
+            if it["movements"].as_array().is_none_or(|a| a.is_empty()) { rows = rows.push(container(ui::muted("No stock movements yet.")).padding(12)); }
+            column![info, text("Transactions").size(15).font(BOLD),
+                container(column![head, scrollable(rows).style(theme::scroll).height(Fill)]).width(Fill).height(Fill).style(theme::card).clip(true)].spacing(10).width(Fill).height(Fill).into()
+        }
+    };
+    column![toolbar, row![left, right].spacing(12).height(Fill)].spacing(10).padding(12).height(Fill).into()
 }
 
 fn qty_text(e4: i64) -> String {
