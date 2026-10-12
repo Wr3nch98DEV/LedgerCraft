@@ -74,7 +74,7 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
         container(Space::new()).width(1).height(36).style(theme::rule),
         rib("file", "Print", if saved { m(Msg::Print) } else { None }),
         rib("docs", "Email", if saved && is_sales && matches!(status, "AUTHORISED" | "SENT" | "PAID") { m(Msg::Send) } else { None }),
-        rib("docs", "Attach File", None),
+        rib("docs", "Attach File", if saved { m(Msg::Attach) } else { None }),
     ].spacing(2).align_y(Alignment::Center);
     if !editable && saved && matches!(status, "AUTHORISED") && !(e.doc.as_ref().map(|d| d["amount_paid"].as_i64().unwrap_or(0) != 0 || d["amount_credited"].as_i64().unwrap_or(0) != 0).unwrap_or(false)) {
         ribbon = ribbon.push(rib("swap", "Edit", m(Msg::Edit)));
@@ -226,7 +226,7 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
         doc_extra(app, e),
         grid_area,
         add,
-        row![memo, ui::hspace(), tot].align_y(Alignment::Start),
+        row![column![memo, attachments(e)].spacing(10), ui::hspace(), tot].align_y(Alignment::Start),
         buttons,
     ].spacing(12).padding(Padding { top: 12.0, left: 16.0, right: 16.0, bottom: 16.0 });
     column![ribbon, row![scrollable(container(form).max_width(1250)).style(theme::scroll).height(Fill).width(Fill), history_panel(app, e)]].into()
@@ -277,6 +277,21 @@ fn apply_panel<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
         rows,
         row![ui::hspace(), ui::btn("Cancel", Some(Message::Doc(Msg::ApplyOpen))), ui::btn_primary("Done", if e.busy || list.is_empty() { None } else { Some(Message::Doc(Msg::ApplySave)) })].spacing(8),
     ].spacing(10)).padding(14).width(Fill).style(theme::accent_soft).into()
+}
+
+/// Files attached to the saved document (click to open).
+fn attachments(e: &Editor) -> Element<'_, Message> {
+    let list = e.doc.as_ref().and_then(|d| d["attachments"].as_array().cloned()).unwrap_or_default();
+    if list.is_empty() { return Space::new().into(); }
+    let k = t();
+    let mut c = column![label("Attachments")].spacing(3);
+    for a in list {
+        let name = a["filename"].as_str().unwrap_or("file").to_string();
+        let kb = (a["size"].as_i64().unwrap_or(0) + 1023) / 1024;
+        c = c.push(button(row![icon("file", 14.0, k.info), text(name).size(13).color(k.info), text(format!("{kb} KB")).size(11).color(k.muted)].spacing(6).align_y(Alignment::Center))
+            .style(theme::ghost).padding([2, 2]).on_press(Message::Doc(Msg::OpenAttachment(a["id"].as_i64().unwrap_or(0)))));
+    }
+    c.into()
 }
 
 /// Memorize Transaction: how often, next date, and whether to enter it automatically.

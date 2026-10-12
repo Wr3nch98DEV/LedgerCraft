@@ -114,6 +114,8 @@ pub enum Msg {
     History(Result<Value, String>),
     /// Desktop Memorize panel.
     RefundOpen,
+    /// Attach a file to the saved document / open an attachment.
+    Attach, Attached(Result<Option<String>, String>), OpenAttachment(i64),
     ApplyOpen, ApplyDocs(Result<Value, String>), ApplyAmt(usize, String), ApplySave, Applied(Result<Value, String>),
     Memorize, MemoFreq(&'static str), MemoNext(String), MemoAuto(bool), MemoSave, Memorized(Result<Value, String>),
     /// Desktop Expenses tab: an amount typed straight in (quantity 1).
@@ -134,6 +136,29 @@ const LATS: [LatOpt; 3] = [LatOpt("EXCLUSIVE"), LatOpt("INCLUSIVE"), LatOpt("NOT
 pub(crate) fn div_round(n: i128, d: i128) -> i64 { let q = (n.abs() + d.abs() / 2) / d.abs(); (if (n < 0) != (d < 0) { -q } else { q }) as i64 }
 /// Line amount in cents from e4 quantity × e4 price.
 pub(crate) fn line_cents(q: i64, p: i64) -> i64 { div_round(q as i128 * p as i128, 1_000_000) }
+
+/// Standard base64 (for sending file contents to the engine).
+pub fn b64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for c in data.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if c.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if c.len() > 2 { T[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
+/// A file's MIME type from its extension.
+pub fn mime_for(name: &str) -> &'static str {
+    match name.rsplit('.').next().unwrap_or("").to_lowercase().as_str() {
+        "pdf" => "application/pdf", "png" => "image/png", "jpg" | "jpeg" => "image/jpeg", "gif" => "image/gif", "txt" => "text/plain", "csv" => "text/csv",
+        "doc" => "application/msword", "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel", "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", _ => "application/octet-stream",
+    }
+}
 
 /// What a document's credit is applied against: invoices ↔ credit memos, bills ↔ vendor credits.
 pub fn apply_other(kind: &str) -> Option<&'static str> {
@@ -332,6 +357,39 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             let t = history_task(app, &e);
             app.doc = Some(e);
             return t;
+        }
+        Msg::Attach => {
+            let Some(id) = e.id else { app.doc = Some(e); return app.toast("Save it first, then attach files", true) };
+            let be = app.be.clone();
+            app.doc = Some(e);
+            return Task::perform(async move {
+                let Some(file) = rfd::AsyncFileDialog::new().set_title("Attach File").pick_file().await else { return Ok(None) };
+                let name = file.file_name();
+                let bytes = file.read().await;
+                let mime = mime_for(&name);
+                tokio::task::spawn_blocking(move || be.call_now("attachments.add", json!({"entity": "document", "entity_id": id, "filename": name, "mime": mime, "data": b64(&bytes)})).map(|_| Some(name)))
+                    .await.unwrap_or_else(|x| Err(x.to_string()))
+            }, |r| Message::Doc(Msg::Attached(r)));
+        }
+        Msg::Attached(r) => match r {
+            Ok(Some(name)) => { app.doc = Some(e); let t1 = app.toast(format!("Attached {name}"), false); return Task::batch([t1, app.load()]); }
+            Ok(None) => Task::none(),
+            Err(err) => app.toast(err, true),
+        },
+        Msg::OpenAttachment(aid) => {
+            let st = app.be.st.clone();
+            app.doc = Some(e);
+            return Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<Option<String>, String> {
+                    let (name, _, data) = { let g = st.org.lock().unwrap(); g.as_ref().ok_or("no company open")?.ledger.attachment(aid).map_err(|x| x.to_string())? };
+                    let dir = std::env::temp_dir().join("LedgerCraft attachments");
+                    std::fs::create_dir_all(&dir).map_err(|x| x.to_string())?;
+                    let path = dir.join(&name);
+                    std::fs::write(&path, data).map_err(|x| x.to_string())?;
+                    crate::pdf::open_file(&path);
+                    Ok(None)
+                }).await.unwrap_or_else(|x| Err(x.to_string()))
+            }, |r| Message::Doc(Msg::Attached(r)));
         }
         Msg::RefundOpen => { e.refund_open = !e.refund_open; Task::none() }
         Msg::ApplyOpen => {

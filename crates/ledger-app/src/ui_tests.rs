@@ -1538,3 +1538,29 @@ fn desktop_sales_orders() {
     assert_eq!(crate::vocab::status(Skin::QuickBooks, "SALESORDER", d["status"].as_str().unwrap(), false), "Closed");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn attach_file_to_document() {
+    let (mut app, dir) = desktop_app("attach");
+    assert_eq!(crate::doc::b64(b"Man"), "TWFu");
+    assert_eq!(crate::doc::b64(b"Ma"), "TWE=");
+    assert_eq!(crate::doc::b64(b"M"), "TQ==");
+    assert_eq!(crate::doc::mime_for("Receipt.PDF"), "application/pdf");
+    let inv = app.be.call_now("docs.list", json!({"type": "ACCREC", "limit": 1})).unwrap()["rows"][0]["id"].as_i64().unwrap();
+    let data = b"%PDF-1.4 receipt scan";
+    app.be.call_now("attachments.add", json!({"entity": "document", "entity_id": inv, "filename": "receipt.pdf", "mime": "application/pdf", "data": crate::doc::b64(data)})).unwrap();
+    let _ = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: Some(inv) }));
+    let d = app.be.call_now("docs.get", json!({"id": inv}));
+    let _ = app.update(Message::Doc(crate::doc::Msg::Loaded(d)));
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        assert!(ui.find("receipt.pdf").is_ok(), "attachment listed on the form");
+        assert!(ui.find("ATTACHMENTS").is_ok());
+    }
+    // The stored bytes round-trip.
+    let aid = app.doc.as_ref().unwrap().doc.as_ref().unwrap()["attachments"][0]["id"].as_i64().unwrap();
+    let (_, _, bytes) = app.be.st.org.lock().unwrap().as_ref().unwrap().ledger.attachment(aid).unwrap();
+    assert_eq!(bytes, data);
+    let _ = std::fs::remove_dir_all(dir);
+}
