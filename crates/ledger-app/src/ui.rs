@@ -55,6 +55,12 @@ pub fn to_iso(input: &str, style: DateStyle) -> Option<String> {
     let fmts: &[&str] = match style { DateStyle::Us => &["%m/%d/%Y", "%Y-%m-%d"], DateStyle::Intl => &["%d/%m/%Y", "%Y-%m-%d"], DateStyle::Long => &["%d %b %Y", "%d/%m/%Y", "%Y-%m-%d"] };
     fmts.iter().find_map(|f| chrono::NaiveDate::parse_from_str(s, f).ok()).map(|d| d.format("%Y-%m-%d").to_string())
 }
+/// The first of the month `n` months after `d` (which should be a 1st).
+pub fn add_months_date(d: chrono::NaiveDate, n: i32) -> chrono::NaiveDate {
+    use chrono::Datelike;
+    let m0 = d.year() * 12 + d.month0() as i32 + n;
+    chrono::NaiveDate::from_ymd_opt(m0.div_euclid(12), m0.rem_euclid(12) as u32 + 1, 1).unwrap_or(d)
+}
 pub fn today_iso() -> String { chrono::Local::now().date_naive().format("%Y-%m-%d").to_string() }
 pub fn add_days_iso(iso: &str, days: i64) -> String {
     chrono::NaiveDate::parse_from_str(iso, "%Y-%m-%d").map(|d| (d + chrono::Duration::days(days)).format("%Y-%m-%d").to_string()).unwrap_or_else(|_| iso.to_string())

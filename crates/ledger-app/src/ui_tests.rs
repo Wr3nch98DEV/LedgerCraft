@@ -1118,3 +1118,27 @@ fn desktop_form_history_panel() {
     drop(ui);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_calendar() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("deskcal");
+    let _ = app.update(Message::Nav(Route::Calendar));
+    let mut rows = vec![];
+    for k in ["ACCREC", "ACCPAY"] { rows.extend(app.be.call_now("docs.list", json!({"type": k, "tab": "awaiting"})).unwrap()["rows"].as_array().cloned().unwrap()); }
+    app.data = Some(json!({"rows": rows}));
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["SUN", "SAT", "UPCOMING: NEXT 7 DAYS", "DUE: PAST DUE", "Today"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    let _ = app.update(Message::Desk(W::CalMonth(1)));
+    let _ = app.update(Message::Desk(W::CalMonth(1)));
+    assert_eq!(app.desk.cal_offset, 2);
+    let _ = app.update(Message::Desk(W::CalMonth(0)));
+    assert_eq!(app.desk.cal_offset, 0, "Today goes back to this month");
+    let d = chrono::NaiveDate::from_ymd_opt(2026, 11, 1).unwrap();
+    assert_eq!(crate::ui::add_months_date(d, 2), chrono::NaiveDate::from_ymd_opt(2027, 1, 1).unwrap());
+    assert_eq!(crate::ui::add_months_date(d, -11), chrono::NaiveDate::from_ymd_opt(2025, 12, 1).unwrap());
+    let _ = std::fs::remove_dir_all(dir);
+}

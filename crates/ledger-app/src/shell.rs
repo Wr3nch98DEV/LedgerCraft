@@ -97,6 +97,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::Settings => settings::view(app),
         Route::Reconcile => crate::reconcile::view(app),
         Route::Register(_) => crate::desktop::register(app),
+        Route::Calendar => crate::desktop::calendar(app),
         Route::Doc { .. } => doc::view(app),
         Route::ReceivePayment(_) | Route::PayBills | Route::Spend(_) | Route::Check(_) | Route::Deposit => payments::view(app),
         Route::NewContact(_) | Route::NewProduct | Route::NewAccount | Route::Journal | Route::Transfer => forms::view(app),
@@ -140,6 +141,7 @@ fn qb_section(r: &Route) -> &'static str {
         Route::Mileage => "mileage",
         Route::Chart | Route::Journal | Route::Reconcile | Route::NewAccount => "accounting",
         Route::Register(_) => "banking",
+        Route::Calendar => "dashboard",
         Route::NewContact(true) | Route::NewProduct => "sales",
         Route::NewContact(false) => "expenses",
         Route::Placeholder(p) => match *p { "Projects" => "projects", "Payroll" => "payroll", "Taxes" => "taxes", "Mileage" => "mileage", "My accountant" => "accountant", "Apps" => "apps", _ => "" },
@@ -302,6 +304,7 @@ fn xero_section(r: &Route) -> &'static str {
         Route::Invoices | Route::Quotes | Route::CreditNotes | Route::Bills | Route::PurchaseOrders | Route::Products | Route::AllSales | Route::Expenses
         | Route::ReceivePayment(_) | Route::PayBills | Route::Doc { .. } => "business",
         Route::Banking(_) | Route::Reports | Route::Report(_) | Route::Chart | Route::Spend(_) | Route::Journal | Route::Reconcile | Route::NewAccount | Route::Register(_) => "accounting",
+        Route::Calendar => "dashboard",
         Route::NewContact(_) => "contacts", Route::NewProduct => "business",
         Route::Payroll | Route::PayRun(_) => "payroll",
         Route::Taxes | Route::TaxReturn(_) => "accounting",

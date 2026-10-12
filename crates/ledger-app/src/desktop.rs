@@ -41,10 +41,12 @@ pub struct State {
     pub tracker: &'static str,
     /// Employee Center: selected employee.
     pub emp: Option<i64>,
+    /// Calendar: months away from the current month.
+    pub cal_offset: i32,
 }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32) }
 
 impl App {
     /// Keep the current screen's unsaved state with its window.
@@ -122,6 +124,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, move |r| Message::Desk(Msg::Detail(id, r)))
         }
         Msg::ReportCat(c) => { app.desk.report_cat = Some(c); Task::none() }
+        Msg::CalMonth(d) => { app.desk.cal_offset = if d == 0 { 0 } else { app.desk.cal_offset + d }; Task::none() }
         Msg::Employee(id) => { app.desk.emp = Some(id); Task::none() }
         Msg::Tracker(f) => { app.desk.tracker = if app.desk.tracker == f { "all" } else { f }; Task::none() }
         Msg::Detail(id, r) => {
@@ -170,6 +173,7 @@ pub fn title(app: &App, r: &Route) -> String {
         },
         Route::Settings => "Preferences".into(),
         Route::Reconcile => "Reconcile".into(),
+        Route::Calendar => "Calendar".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
             "ACCREC" => "Create Invoices", "QUOTE" => "Create Estimates", "ACCRECCREDIT" => "Create Credit Memos/Refunds", "SALESRECEIPT" => "Enter Sales Receipts",
@@ -223,7 +227,7 @@ fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Messag
         "Favorites" => vec![e("Customize Favorites…", "", None)],
         "Company" => vec![e("Home Page", "", nav(Route::Dashboard)), e("Company Snapshot", "", Some(Message::Desk(Msg::Insights(true)))), sep(), e("My Company", "", nav(Route::Settings)),
             e("Company Information…", "", nav(Route::Settings)), e("Set Up Users and Roles…", "", nav(Route::Settings)), sep(), e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)),
-            e("Make General Journal Entries…", "", nav(Route::Journal)), e("Enter Vehicle Mileage…", "", nav(Route::Mileage)), e("Calendar", "", None), e("Documents", "", None)],
+            e("Make General Journal Entries…", "", nav(Route::Journal)), e("Enter Vehicle Mileage…", "", nav(Route::Mileage)), e("Calendar", "", nav(Route::Calendar)), e("Documents", "", None)],
         "Inventory" => vec![e("Inventory Center", "", nav(Route::Products)), e("Item List", "", nav(Route::Products)), sep(), e("Create Purchase Orders", "", doc_new("PO")),
             e("Purchase Orders List", "", nav(Route::PurchaseOrders)), e("Receive Items", "", None), e("Adjust Quantity/Value on Hand…", "", None)],
         "Customers" => vec![e("Customer Center", "Ctrl+J", nav(Route::Customers)), sep(), e("Create Estimates", "", doc_new("QUOTE")), e("Create Sales Orders", "", None),
@@ -304,7 +308,7 @@ fn icon_bar(app: &App) -> Element<'_, Message> {
             item("apps", "My Company", nav(Route::Settings), *r == Route::Settings),
             item("sales", "Income Tracker", nav(Route::AllSales), matches!(r, Route::AllSales | Route::Invoices)),
             item("expenses", "Bill Tracker", nav(Route::Bills), matches!(r, Route::Bills)),
-            item("calendar", "Calendar", None, false),
+            item("calendar", "Calendar", nav(Route::Calendar), *r == Route::Calendar),
             item("chart", "Snapshots", Some(Message::Desk(Msg::Insights(true))), false),
             item("contacts", "Customers", nav(Route::Customers), matches!(r, Route::Customers | Route::Contact(_))),
             item("users", "Vendors", nav(Route::Vendors), matches!(r, Route::Vendors)),
@@ -396,6 +400,87 @@ pub fn frame<'a>(app: &'a App, content: Element<'a, Message>) -> Element<'a, Mes
         layers = layers.push(container(opaque(container(list).padding(8).width(400).style(theme::menu))).padding(Padding { top: 72.0, left: 8.0, ..Padding::ZERO }));
     }
     layers.into()
+}
+
+// ---------------- Calendar ----------------
+
+/// Open invoices and bills with their due dates for the Calendar.
+pub fn load_calendar(app: &mut App) -> Task<Message> {
+    let be = app.be.clone();
+    let g = app.page_gen;
+    Task::perform(async move {
+        tokio::task::spawn_blocking(move || -> Result<Value, String> {
+            let mut rows = vec![];
+            for k in ["ACCREC", "ACCPAY"] { rows.extend(be.call_now("docs.list", serde_json::json!({"type": k, "tab": "awaiting", "limit": 2000}))?["rows"].as_array().cloned().unwrap_or_default()); }
+            Ok(serde_json::json!({"rows": rows}))
+        }).await.unwrap_or_else(|e| Err(e.to_string()))
+    }, move |r| Message::Loaded(g, r))
+}
+
+fn iso(d: chrono::NaiveDate) -> String { d.to_string() }
+
+/// Company ▸ Calendar: a month grid of what's due, plus Upcoming and Past Due lists.
+pub fn calendar(app: &App) -> Element<'_, Message> {
+    use chrono::Datelike;
+    let k = t();
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let rows = d["rows"].as_array().cloned().unwrap_or_default();
+    let today = chrono::Local::now().date_naive();
+    let first_this = chrono::NaiveDate::from_ymd_opt(today.year(), today.month(), 1).unwrap();
+    let first = crate::ui::add_months_date(first_this, app.desk.cal_offset);
+    let next_first = crate::ui::add_months_date(first, 1);
+    // Grid starts on the Sunday on or before the 1st.
+    let start = first - chrono::Duration::days(first.weekday().num_days_from_sunday() as i64);
+    let due_on = |day: chrono::NaiveDate| -> Vec<&Value> {
+        let key = iso(day);
+        rows.iter().filter(|r| r["due_date"].as_str() == Some(key.as_str())).collect()
+    };
+    let mut grid = column![row(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"].iter().map(|h| text(*h).size(11).font(BOLD).color(k.muted).width(Fill).into())).spacing(4)].spacing(4);
+    let mut day = start;
+    for _ in 0..6 {
+        let mut week = row![].spacing(4);
+        for _ in 0..7 {
+            let inside = day >= first && day < next_first;
+            let is_today = day == today;
+            let items = due_on(day);
+            let (inv, bills): (Vec<&Value>, Vec<&Value>) = items.iter().partition(|r| r["type"] == "ACCREC");
+            let mut cell = column![text(day.day().to_string()).size(12).font(if is_today { BOLD } else { iced::Font::DEFAULT }).color(if inside { k.text } else { k.faint })].spacing(2);
+            if !inv.is_empty() { cell = cell.push(text(format!("Invoices due ({})", inv.len())).size(11).color(k.info)); }
+            if !bills.is_empty() { cell = cell.push(text(format!("Bills due ({})", bills.len())).size(11).color(k.warn)); }
+            week = week.push(container(cell).padding(6).width(Fill).height(Length::Fixed(84.0)).style(move |_: &iced::Theme| container::Style {
+                background: Some(iced::Background::Color(if is_today { k.accent_soft } else if inside { k.panel } else { k.bg2 })),
+                border: iced::Border { color: if is_today { k.accent } else { k.line }, width: 1.0, radius: 3.0.into() }, ..Default::default() }));
+            day += chrono::Duration::days(1);
+        }
+        grid = grid.push(week);
+        if day >= next_first { break; }
+    }
+    let today_s = iso(today);
+    let week_s = iso(today + chrono::Duration::days(7));
+    let entry = |r: &Value| -> Element<'_, Message> {
+        let kind = r["type"].as_str().unwrap_or("").to_string();
+        button(column![
+            text(format!("{} {} · {}", if kind == "ACCREC" { "Invoice" } else { "Bill" }, r["number"].as_str().unwrap_or(""), r["contact_name"].as_str().unwrap_or(""))).size(12),
+            text(format!("Due {} · {}", app.d(r["due_date"].as_str().unwrap_or("")), ui::money(r["amount_due"].as_i64().unwrap_or(0)))).size(11).color(k.muted),
+        ].spacing(1)).style(theme::ghost).padding([3, 4]).width(Fill).on_press(Message::Nav(Route::Doc { kind, id: r["id"].as_i64() })).into()
+    };
+    let mut upcoming = column![text("UPCOMING: NEXT 7 DAYS").size(11).font(BOLD).color(k.info)].spacing(2);
+    let mut past = column![text("DUE: PAST DUE").size(11).font(BOLD).color(k.bad)].spacing(2);
+    let mut sorted = rows.clone();
+    sorted.sort_by(|a, b| a["due_date"].as_str().cmp(&b["due_date"].as_str()));
+    for r in &sorted {
+        let due = r["due_date"].as_str().unwrap_or("");
+        if due >= today_s.as_str() && due <= week_s.as_str() { upcoming = upcoming.push(entry(r)); }
+        if !due.is_empty() && due < today_s.as_str() { past = past.push(entry(r)); }
+    }
+    let side = container(scrollable(column![upcoming, ui::hr(), past].spacing(10)).style(theme::scroll).height(Fill)).padding(10).width(300).height(Fill).style(theme::card);
+    let month_name = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][first.month0() as usize];
+    let head = row![
+        ui::btn("<", Some(Message::Desk(Msg::CalMonth(-1)))), text(format!("{month_name} {}", first.year())).size(18).font(BOLD), ui::btn(">", Some(Message::Desk(Msg::CalMonth(1)))),
+        ui::btn("Today", Some(Message::Desk(Msg::CalMonth(0)))), ui::hspace(),
+        text("Invoices due").size(12).color(k.info), text("Bills due").size(12).color(k.warn),
+    ].spacing(10).align_y(Alignment::Center);
+    column![head, row![scrollable(grid).style(theme::scroll).height(Fill).width(Fill), side].spacing(12).height(Fill)].spacing(10).padding(12).height(Fill).into()
 }
 
 // ---------------- Employee Center ----------------
@@ -897,7 +982,7 @@ pub fn home(app: &App) -> Element<'_, Message> {
     ]);
     let company = band("COMPANY", vec![
         row![node("accounting", "Chart of Accounts", nav(Route::Chart)), node("box", "Items & Services", nav(Route::Products))].into(),
-        row![node("calendar", "Calendar", None), node("mileage", "Vehicle Mileage", nav(Route::Mileage))].into(),
+        row![node("calendar", "Calendar", nav(Route::Calendar)), node("mileage", "Vehicle Mileage", nav(Route::Mileage))].into(),
     ]);
     let banking = band("BANKING", vec![
         row![node("deposit", "Record Deposits", nav(Route::Deposit)), node("reconcile", "Reconcile", nav(Route::Reconcile))].into(),
