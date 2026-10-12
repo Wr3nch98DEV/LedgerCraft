@@ -802,6 +802,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::BuildAssemblies => "Build Assemblies".into(),
         Route::InventoryCenter => "Inventory Center".into(),
         Route::EditItem(_) => "Edit Item".into(),
+        Route::EditAccount(_) => "Edit Account".into(),
         Route::EditContact(id) => if app.lk.contacts.iter().find(|c| c["id"].as_i64() == Some(*id)).is_some_and(|c| c["is_supplier"].as_i64() == Some(1) && c["is_customer"].as_i64() != Some(1)) { "Edit Vendor".into() } else { "Edit Customer".into() },
         Route::EnterTime => "Time/Enter Single Activity".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
@@ -2367,10 +2368,10 @@ pub fn doc_list(app: &App) -> Element<'_, Message> {
 /// Lists ▸ Chart of Accounts.
 pub fn chart(app: &App) -> Element<'_, Message> {
     let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
-    let mut accts: Vec<Value> = d.as_array().cloned().unwrap_or_default().into_iter().filter(|a| a["status"] == "ACTIVE").collect();
+    let mut accts: Vec<Value> = d.as_array().cloned().unwrap_or_default().into_iter().filter(|a| a["status"] == "ACTIVE" || (app.desk.show_inactive && a["status"] == "ARCHIVED")).collect();
     let s = |a: &Value, k: &str| a[k].as_str().unwrap_or("").to_string();
     accts.sort_by_key(|a| (crate::coa::desktop_type(a["type"].as_str().unwrap_or(""), a["bank_type"].as_str().unwrap_or(""), a["system_account"].as_str().unwrap_or("")).1, s(a, "code")));
-    let cols: Vec<(&str, u16, bool)> = vec![("Name", 40), ("Type", 22), ("Balance Total", 16)].into_iter().map(|(h, w)| (h, w, h == "Balance Total")).collect();
+    let cols: Vec<(&str, u16, bool)> = vec![("Name", 40), ("Type", 22), ("Balance Total", 16), ("", 6)].into_iter().map(|(h, w)| (h, w, h == "Balance Total")).collect();
     let rows = accts.iter().map(|a| {
         let kind = a["type"].as_str().unwrap_or("");
         let (ty, _) = crate::coa::desktop_type(kind, a["bank_type"].as_str().unwrap_or(""), a["system_account"].as_str().unwrap_or(""));
@@ -2378,11 +2379,15 @@ pub fn chart(app: &App) -> Element<'_, Message> {
         let bs = matches!(a["class"].as_str(), Some("ASSET" | "LIABILITY" | "EQUITY"));
         let sign = if matches!(a["class"].as_str(), Some("LIABILITY" | "EQUITY")) { -1 } else { 1 };
         let bal: Element<Message> = if bs { ui::cell_money(sign * a["ytd_balance"].as_i64().unwrap_or(0)) } else { Space::new().into() };
-        let msg = if kind == "BANK" { a["id"].as_i64().map(|id| Message::Nav(Route::Register(Some(id)))) } else { None };
-        (vec![ui::cell(format!("{} · {}", s(a, "code"), s(a, "name"))), ui::cell_muted(ty), bal], msg)
+        let id = a["id"].as_i64().unwrap_or(0);
+        // Bank accounts open their register; others open Edit Account (also on every row's Edit link).
+        let msg = Some(Message::Nav(if kind == "BANK" { Route::Register(Some(id)) } else { Route::EditAccount(id) }));
+        let inactive = if a["status"] == "ACTIVE" { "" } else { " (inactive)" };
+        (vec![ui::cell(format!("{} · {}{inactive}", s(a, "code"), s(a, "name"))), ui::cell_muted(ty), bal, ui::link("Edit", Message::Nav(Route::EditAccount(id)))], msg)
     }).collect();
     list_window(&cols, rows, vec![
         ui::btn("Account: New", nav(Route::NewAccount)),
+        iced::widget::checkbox(app.desk.show_inactive).label("Include inactive").on_toggle(|v| Message::Desk(Msg::ShowInactive(v))).text_size(13).into(),
         ui::btn("Activities: Write Checks", nav(Route::Check(None))), ui::btn("Make Deposits", nav(Route::Deposit)), ui::btn("Use Register", nav(Route::Register(None))),
         ui::btn("Make General Journal Entries", nav(Route::Journal)), ui::btn("Reconcile", nav(Route::Reconcile)),
         ui::hspace(), ui::btn("Reports: Trial Balance", rep("trial-balance")),

@@ -33,6 +33,7 @@ pub fn view<'a>(app: &'a App, s: &'a State) -> Element<'a, Message> {
         Route::NewContact(customer) => contact(app, s, *customer),
         Route::EditContact(_) => contact(app, s, s.customer),
         Route::NewProduct | Route::EditItem(_) => item(app, s),
+        Route::EditAccount(_) => account(app, s),
         Route::Transfer => transfer(app, s),
         _ => journal(app, s),
     };
@@ -95,6 +96,25 @@ fn item<'a>(app: &'a App, s: &'a State) -> Element<'a, Message> {
             if s.orig.is_some() { Element::from(checkbox(s.inactive).label("Item is inactive").on_toggle(|v| Message::Form(Msg::Inactive(v))).text_size(13)) } else { Space::new().into() },
         ].spacing(12)).padding(16).width(Fill).style(theme::card),
         buttons(s, s.orig.is_none()),
+    ].spacing(14).into()
+}
+
+/// Lists ▸ Chart of Accounts ▸ Edit Account.
+fn account<'a>(app: &'a App, s: &'a State) -> Element<'a, Message> {
+    let k = t();
+    let Some(a) = &s.orig else { return ui::muted("Loading…") };
+    let (ty, _) = crate::coa::desktop_type(a["type"].as_str().unwrap_or(""), a["bank_type"].as_str().unwrap_or(""), a["system_account"].as_str().unwrap_or(""));
+    column![
+        row![column![label("Account Type"), container(text(ty).size(13)).padding([5, 7]).width(260).style(theme::soft)].spacing(3),
+            text("The type can't be changed once an account is in use.").size(12).color(k.muted)].spacing(16).align_y(Alignment::End),
+        container(column![
+            row![input("Number", &s.code, 120.0, Msg::Code), input("Account Name", &s.name, 360.0, Msg::Name)].spacing(14),
+            input("Description", &s.memo, 500.0, Msg::Memo),
+            column![label("Tax-Line / Tax Code"), pick_list(app.lk.tax_opts(), s.tax.clone(), |o| Message::Form(Msg::Tax(o))).placeholder("None").padding([5, 7]).text_size(13).style(theme::pick).width(260)].spacing(3),
+            if a["system_account"].is_string() { Element::from(text("A system account — used by LedgerCraft itself, so it can't be made inactive.").size(12).color(k.muted)) }
+            else { checkbox(s.inactive).label("Account is inactive").on_toggle(|v| Message::Form(Msg::Inactive(v))).text_size(13).into() },
+        ].spacing(12)).padding(16).width(Fill).style(theme::card),
+        buttons(s, false),
     ].spacing(14).into()
 }
 

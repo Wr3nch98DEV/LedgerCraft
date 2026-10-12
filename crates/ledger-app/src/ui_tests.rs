@@ -2694,3 +2694,38 @@ fn desktop_new_inventory_part_and_edit_item() {
     assert!(app.lk.item_opts().iter().all(|o| o.id != id), "inactive items leave the pickers");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_edit_account_and_inactive() {
+    use crate::forms::Msg as F;
+    let (mut app, dir) = desktop_app("editacct");
+    let t = app.update(Message::Nav(Route::Chart)); settle(&mut app, t);
+    let acct = app.lk.accounts.iter().find(|a| a["type"] == "EXPENSE" && a["system_account"].is_null() && a["status"] == "ACTIVE").unwrap().clone();
+    let id = acct["id"].as_i64().unwrap();
+    let t = app.update(Message::Nav(Route::EditAccount(id))); settle(&mut app, t);
+    assert_eq!(app.form.as_ref().unwrap().name, acct["name"].as_str().unwrap());
+    for m in [F::Name("Staff amenities".into()), F::Memo("Coffee, tea, fruit".into())] { let _ = app.update(Message::Form(m)); }
+    press(&mut app, "OK");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let after = app.be.call_now("accounts.get", json!({"id": id})).unwrap();
+    assert_eq!((after["name"].as_str(), after["description"].as_str(), after["type"].as_str(), after["code"].as_str()),
+        (Some("Staff amenities"), Some("Coffee, tea, fruit"), acct["type"].as_str(), acct["code"].as_str()));
+    // Make inactive: gone from the chart and pickers; Include inactive brings it back to reactivate.
+    let t = app.update(Message::Nav(Route::EditAccount(id))); settle(&mut app, t);
+    let _ = app.update(Message::Form(F::Inactive(true)));
+    press(&mut app, "OK");
+    assert_eq!(app.be.call_now("accounts.get", json!({"id": id})).unwrap()["status"], "ARCHIVED");
+    let t = app.load_lookups(); settle(&mut app, t);
+    assert!(app.lk.account_opts(|_| true).iter().all(|o| o.id != id));
+    // A system account can't be made inactive (the checkbox isn't offered).
+    let sys = app.lk.accounts.iter().find(|a| a["system_account"].is_string()).unwrap()["id"].as_i64().unwrap();
+    let t = app.update(Message::Nav(Route::EditAccount(sys))); settle(&mut app, t);
+    assert!(click_fails(&app, "Account is inactive"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+fn click_fails(app: &App, label: &str) -> bool {
+    let _g = sim_lock();
+    let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 1400.0), app.view());
+    ui.click(label).is_err()
+}

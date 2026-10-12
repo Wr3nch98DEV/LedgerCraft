@@ -54,7 +54,7 @@ pub struct State {
 #[derive(Debug, Clone)]
 pub enum Msg {
     Name(String), Email(String), Phone(String), Code(String), Price(String), Cost(String),
-    SaleAccount(Opt), PurchaseAccount(Opt), Tax(Opt), Service(bool), Track1099(bool), PriceLevel(Opt), EditLoaded(crate::backend::Reply), ItemType(String), Reorder(String), Inactive(bool), ItemLoaded(crate::backend::Reply),
+    SaleAccount(Opt), PurchaseAccount(Opt), Tax(Opt), Service(bool), Track1099(bool), PriceLevel(Opt), EditLoaded(crate::backend::Reply), ItemType(String), Reorder(String), Inactive(bool), ItemLoaded(crate::backend::Reply), AccountLoaded(crate::backend::Reply),
     Date(String), Memo(String), From(Opt), To(Opt), Amount(String), First(String), Last(String), Address(String), SaveNew, AcctType(String), Detail(String), JAccount(usize, Opt), JDesc(usize, String), JDebit(usize, String), JCredit(usize, String), AddLine,
     Save, Saved(Result<Value, String>),
 }
@@ -86,6 +86,13 @@ pub fn open_edit_item(app: &mut App, id: i64) -> Task<Message> {
     app.form = Some(State { service: true, date: ui::date(&ui::today_iso(), app.date_style()), busy: true, ..Default::default() });
     app.data = Some(json!({}));
     app.be.call("items.get", json!({"id": id}), |r| Message::Form(Msg::ItemLoaded(r)))
+}
+
+/// Edit Account: load the account into the form.
+pub fn open_edit_account(app: &mut App, id: i64) -> Task<Message> {
+    app.form = Some(State { service: true, date: ui::date(&ui::today_iso(), app.date_style()), busy: true, ..Default::default() });
+    app.data = Some(json!({}));
+    app.be.call("accounts.get", json!({"id": id}), |r| Message::Form(Msg::AccountLoaded(r)))
 }
 
 /// An e4 quantity/price as typed text ("12.5", "89.00").
@@ -163,6 +170,20 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                 Err(e) => app.toast(e, true),
             }
         }
+        Msg::AccountLoaded(r) => {
+            s.busy = false;
+            match r {
+                Ok(a) => {
+                    let st = |k: &str| a[k].as_str().unwrap_or("").to_string();
+                    s.name = st("name"); s.code = st("code"); s.memo = st("description");
+                    s.tax = a["tax_rate_id"].as_i64().and_then(|id| app.lk.tax_opts().into_iter().find(|o| o.id == id));
+                    s.inactive = a["status"] != "ACTIVE";
+                    s.orig = Some(a);
+                    Task::none()
+                }
+                Err(e) => app.toast(e, true),
+            }
+        }
         Msg::ItemType(t) => { s.tracked = t == "Inventory Part"; s.service = t == "Service"; Task::none() }
         Msg::Reorder(v) => { s.reorder = v; Task::none() }
         Msg::Inactive(v) => { s.inactive = v; Task::none() }
@@ -202,6 +223,19 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::Save => {
             if s.busy { app.form = Some(s); return Task::none(); }
             let call = match &app.route {
+                Route::EditAccount(id) => {
+                    let Some(orig) = s.orig.clone() else { app.form = Some(s); return Task::none() };
+                    if s.name.trim().is_empty() { app.form = Some(s); return app.toast("Enter the account name", true); }
+                    let id = *id;
+                    let status = if s.inactive { "ARCHIVED" } else { "ACTIVE" };
+                    if orig["status"].as_str() != Some(status) {
+                        if let Err(e) = app.be.call_now("accounts.setStatus", json!({"id": id, "status": status})) { app.form = Some(s); return app.toast(e, true); }
+                    }
+                    let b = |k: &str| orig[k].as_i64() == Some(1);
+                    ("accounts.update", json!({"id": id, "account": {"code": s.code.trim(), "name": s.name.trim(), "type": orig["type"], "tax_rate_id": s.tax.as_ref().map(|t| t.id),
+                        "description": s.memo.trim(), "enable_payments": b("enable_payments"), "show_in_expense_claims": b("show_in_expense_claims"), "dashboard_watch": b("dashboard_watch"),
+                        "detail_type": orig["detail_type"]}}))
+                }
                 Route::EditItem(id) => {
                     let Some(orig) = s.orig.clone() else { app.form = Some(s); return Task::none() };
                     if s.name.trim().is_empty() { app.form = Some(s); return app.toast("Enter a name", true); }
@@ -276,6 +310,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                         Route::NewContact(c) => ("Saved", v["id"].as_i64().map(Route::Contact).unwrap_or(if *c { Route::Customers } else { Route::Vendors })),
                         Route::EditContact(id) => ("Changes saved", Route::Contact(*id)),
                         Route::EditItem(_) => ("Item saved", Route::Products),
+                        Route::EditAccount(_) => ("Account saved", Route::Chart),
                         Route::NewProduct => ("Product saved", Route::Products),
                         Route::NewAccount => ("Account created", Route::Chart),
                         Route::Transfer => ("Transfer recorded", Route::Banking(None)),
