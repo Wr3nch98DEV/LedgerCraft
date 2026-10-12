@@ -99,6 +99,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::Register(_) => crate::desktop::register(app),
         Route::Calendar => crate::desktop::calendar(app),
         Route::Statements => crate::desktop::statements(app),
+        Route::Memorized => crate::desktop::memorized(app),
         Route::Doc { .. } => doc::view(app),
         Route::ReceivePayment(_) | Route::PayBills | Route::Spend(_) | Route::Check(_) | Route::Deposit => payments::view(app),
         Route::NewContact(_) | Route::NewProduct | Route::NewAccount | Route::Journal | Route::Transfer => forms::view(app),

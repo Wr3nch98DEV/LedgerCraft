@@ -50,7 +50,7 @@ pub struct State {
 }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str) }
 
 impl App {
     /// Keep the current screen's unsaved state with its window.
@@ -128,6 +128,16 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, move |r| Message::Desk(Msg::Detail(id, r)))
         }
         Msg::ReportCat(c) => { app.desk.report_cat = Some(c); Task::none() }
+        Msg::MemDelete(id) => app.be.call("repeating.setStatus", serde_json::json!({"id": id, "status": "DELETED"}), |r| Message::Desk(Msg::MemDone(r, "deleted"))),
+        Msg::MemRun => app.be.call("repeating.run", serde_json::json!({}), |r| Message::Desk(Msg::MemDone(r, "run"))),
+        Msg::MemDone(r, what) => match r {
+            Ok(v) => {
+                let msg = if what == "run" { format!("{} transaction(s) entered", v.as_array().map(|a| a.iter().filter(|x| x["error"].is_null()).count()).unwrap_or(0)) } else { "Memorized transaction deleted".into() };
+                let t1 = app.toast(msg, false);
+                Task::batch([t1, app.load()])
+            }
+            Err(e) => app.toast(e, true),
+        },
         Msg::StmtOne(o) => { app.desk.stmt_one = o; Task::none() }
         Msg::StmtDate(v) => { app.desk.stmt_date = v; Task::none() }
         Msg::StmtDone(r) => { app.desk.stmt_busy = false; match r { Ok(m) => app.toast(m, false), Err(e) => app.toast(e, true) } }
@@ -206,6 +216,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::Reconcile => "Reconcile".into(),
         Route::Calendar => "Calendar".into(),
         Route::Statements => "Create Statements".into(),
+        Route::Memorized => "Memorized Transaction List".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
             "ACCREC" => "Create Invoices", "QUOTE" => "Create Estimates", "ACCRECCREDIT" => "Create Credit Memos/Refunds", "SALESRECEIPT" => "Enter Sales Receipts",
@@ -255,7 +266,7 @@ fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Messag
             e("My Shortcuts", "", Some(Message::Desk(Msg::Pane(Pane::Shortcuts)))), sep(), e(if app.dark { "Light Mode" } else { "Dark Mode" }, "Alt+T", Some(Message::ToggleTheme)), sep(),
             e("Switch to QuickBooks Online-style layout", "", Some(Message::SetLayout(theme::Layout::Online))), e("Switch to Xero-style layout", "", Some(Message::SetLayout(theme::Layout::Xero)))],
         "Lists" => vec![e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)), e("Item List", "", nav(Route::Products)), e("Fixed Asset Item List", "", None), e("Price Level List", "", None),
-            e("Sales Tax Code List", "", nav(Route::Taxes)), e("Payroll Item List", "", None), e("Class List", "", None), e("Other Names List", "", None), e("Templates", "", None), e("Memorized Transaction List", "Ctrl+T", None)],
+            e("Sales Tax Code List", "", nav(Route::Taxes)), e("Payroll Item List", "", None), e("Class List", "", None), e("Other Names List", "", None), e("Templates", "", None), e("Memorized Transaction List", "Ctrl+T", nav(Route::Memorized))],
         "Favorites" => vec![e("Customize Favorites…", "", None)],
         "Company" => vec![e("Home Page", "", nav(Route::Dashboard)), e("Company Snapshot", "", Some(Message::Desk(Msg::Insights(true)))), sep(), e("My Company", "", nav(Route::Settings)),
             e("Company Information…", "", nav(Route::Settings)), e("Set Up Users and Roles…", "", nav(Route::Settings)), sep(), e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)),
@@ -435,6 +446,31 @@ pub fn frame<'a>(app: &'a App, content: Element<'a, Message>) -> Element<'a, Mes
         layers = layers.push(container(opaque(container(list).padding(8).width(400).style(theme::menu))).padding(Padding { top: 72.0, left: 8.0, ..Padding::ZERO }));
     }
     layers.into()
+}
+
+// ---------------- Memorized Transaction List ----------------
+
+/// Lists ▸ Memorized Transaction List.
+pub fn memorized(app: &App) -> Element<'_, Message> {
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let cols: Vec<(&str, u16, bool)> = vec![("Transaction Name", 24, false), ("Type", 10, false), ("Amount", 11, true), ("Frequency", 14, false), ("Auto", 6, false), ("Next Date", 11, false), ("", 8, false)];
+    let rows = d.as_array().cloned().unwrap_or_default().iter().map(|r| {
+        let id = r["id"].as_i64().unwrap_or(0);
+        let count = r["period_count"].as_i64().unwrap_or(1);
+        let freq = match (r["period_unit"].as_str().unwrap_or(""), count) { ("WEEKLY", 1) => "Weekly".to_string(), ("WEEKLY", 2) => "Every two weeks".into(), ("MONTHLY", 1) => "Monthly".into(),
+            ("MONTHLY", 3) => "Quarterly".into(), ("MONTHLY", 12) => "Annually".into(), (u, n) => format!("Every {n} {}", if u == "WEEKLY" { "weeks" } else { "months" }) };
+        let kind = match r["kind"].as_str().unwrap_or("") { "ACCREC" => "Invoice", "ACCPAY" => "Bill", "MJ" => "General Journal", _ => "Transaction" };
+        let status = r["status"].as_str().unwrap_or("");
+        (vec![ui::cell(r["contact_name"].as_str().unwrap_or("").to_string()), ui::cell_muted(kind), ui::cell_money(r["estimated_total"].as_i64().unwrap_or(0)),
+            ui::cell_muted(freq), ui::cell(if r["save_as"].as_str().unwrap_or("").starts_with("AUTHORISED") { "✓" } else { "" }),
+            ui::cell(if status == "ACTIVE" { app.d(r["next_date"].as_str().unwrap_or("")) } else { status.to_lowercase() }),
+            ui::link("Delete", Message::Desk(Msg::MemDelete(id)))], None)
+    }).collect();
+    list_window(&cols, rows, vec![
+        ui::btn("Enter All Due Now", Some(Message::Desk(Msg::MemRun))),
+        ui::hspace(),
+        text("Memorize a transaction from the Memorize button on Create Invoices or Enter Bills.").size(12).color(t().muted).into(),
+    ])
 }
 
 // ---------------- Create Statements ----------------

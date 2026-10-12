@@ -1174,3 +1174,49 @@ fn desktop_create_statements() {
     assert_eq!(app.desk.stmt_one.as_ref().unwrap().id, owing[0]);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_memorize_transaction() {
+    use crate::doc::Msg as D;
+    let (mut app, dir) = desktop_app("deskmemo");
+    let _ = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None }));
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    let _ = app.update(Message::Doc(D::Contact(cust)));
+    let _ = app.update(Message::Doc(D::Desc(0, "Monthly retainer".into())));
+    let _ = app.update(Message::Doc(D::Price(0, "500".into())));
+    let msgs = click(&app, "Memorize");
+    assert!(matches!(msgs.as_slice(), [Message::Doc(D::Memorize)]), "{msgs:?}");
+    let _ = app.update(Message::Doc(D::Memorize));
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["Memorize Transaction", "HOW OFTEN", "NEXT DATE"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    // Schedule it for today so it can be entered now.
+    let _ = app.update(Message::Doc(D::MemoNext(crate::ui::date(&crate::ui::today_iso(), app.date_style()))));
+    let _ = app.update(Message::Doc(D::MemoFreq("Quarterly")));
+    let _ = app.update(Message::Doc(D::MemoAuto(true)));
+    let _ = app.update(Message::Doc(D::MemoSave));
+    // The call the panel makes:
+    let e = app.doc.as_ref().unwrap();
+    let p = e.payload(&app, "AUTHORISED").unwrap();
+    assert_eq!(crate::doc::memo_schedule("Quarterly"), ("MONTHLY", 3));
+    app.be.call_now("repeating.save", json!({"repeating": {"kind": "ACCREC", "template": p["doc"], "period_unit": "MONTHLY", "period_count": 3,
+        "start_date": crate::ui::today_iso(), "next_date": crate::ui::today_iso(), "save_as": "AUTHORISED"}})).unwrap();
+    let _ = app.update(Message::Doc(D::Memorized(Ok(json!({"id": 1})))));
+    assert!(!app.doc.as_ref().unwrap().memo_open);
+    // Memorized Transaction List shows it; Enter All Due Now creates the invoice.
+    let _ = app.update(Message::Nav(Route::Memorized));
+    app.data = Some(app.be.call_now("repeating.list", json!({"kind": "ALL"})).unwrap());
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["Quarterly", "Enter All Due Now", "Invoice"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    let before = app.be.call_now("docs.list", json!({"type": "ACCREC", "limit": 1000})).unwrap()["rows"].as_array().unwrap().len();
+    let ran = app.be.call_now("repeating.run", json!({})).unwrap();
+    assert!(ran.as_array().unwrap().iter().any(|x| x["kind"] == "ACCREC"));
+    let after = app.be.call_now("docs.list", json!({"type": "ACCREC", "limit": 1000})).unwrap()["rows"].as_array().unwrap().len();
+    assert!(after > before, "the memorized invoice was entered");
+    let _ = std::fs::remove_dir_all(dir);
+}

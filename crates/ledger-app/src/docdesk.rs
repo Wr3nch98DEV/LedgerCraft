@@ -70,7 +70,7 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
         if saved && matches!(status, "DRAFT" | "SUBMITTED" | "SENT") && !ledger_doc(&e.kind) || saved && status == "DRAFT" { rib("trash", "Delete", m(Msg::Action("delete"))) }
             else if saved && ledger_doc(&e.kind) && matches!(status, "AUTHORISED" | "PAID") { rib("trash", "Void", m(Msg::Action("void"))) } else { rib("trash", "Delete", None) },
         rib("docs", "Create a Copy", if saved { m(Msg::Action("copy")) } else { None }),
-        rib("list", "Memorize", None),
+        rib("list", "Memorize", if matches!(e.kind.as_str(), "ACCREC" | "ACCPAY") { m(Msg::Memorize) } else { None }),
         container(Space::new()).width(1).height(36).style(theme::rule),
         rib("file", "Print", if saved { m(Msg::Print) } else { None }),
         rib("docs", "Email", if saved && is_sales && matches!(status, "AUTHORISED" | "SENT" | "PAID") { m(Msg::Send) } else { None }),
@@ -215,6 +215,7 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
     let form = column![
         error,
         header,
+        memorize_panel(e),
         doc_extra(app, e),
         grid_area,
         add,
@@ -222,6 +223,26 @@ pub fn view<'a>(app: &'a App, e: &'a Editor) -> Element<'a, Message> {
         buttons,
     ].spacing(12).padding(Padding { top: 12.0, left: 16.0, right: 16.0, bottom: 16.0 });
     column![ribbon, row![scrollable(container(form).max_width(1250)).style(theme::scroll).height(Fill).width(Fill), history_panel(app, e)]].into()
+}
+
+/// Memorize Transaction: how often, next date, and whether to enter it automatically.
+fn memorize_panel(e: &Editor) -> Element<'_, Message> {
+    if !e.memo_open { return Space::new().into(); }
+    let k = t();
+    let freqs: Vec<&'static str> = crate::doc::MEMO_FREQS.to_vec();
+    container(column![
+        text("Memorize Transaction").size(15).font(BOLD),
+        row![
+            column![label("How Often"), pick_list(freqs, Some(e.memo_freq), |f| Message::Doc(Msg::MemoFreq(f))).padding([5, 7]).text_size(13).style(theme::pick).width(180)].spacing(3),
+            column![label("Next Date"), text_input("", &e.memo_next).on_input(|v| Message::Doc(Msg::MemoNext(v))).padding([5, 7]).size(13).style(theme::input).width(130)].spacing(3),
+            column![label("Entry"), row![
+                button(text(if e.memo_auto { "● Automate Transaction Entry" } else { "○ Automate Transaction Entry" }).size(13)).style(theme::ghost).padding([3, 4]).on_press(Message::Doc(Msg::MemoAuto(true))),
+                button(text(if e.memo_auto { "○ Add to my Reminders List (as a draft)" } else { "● Add to my Reminders List (as a draft)" }).size(13)).style(theme::ghost).padding([3, 4]).on_press(Message::Doc(Msg::MemoAuto(false))),
+            ].spacing(8)].spacing(3),
+        ].spacing(16).align_y(Alignment::End),
+        row![text("LedgerCraft creates it on each date while the app is open (checked every few minutes).").size(12).color(k.muted), ui::hspace(),
+            ui::btn("Cancel", Some(Message::Doc(Msg::Memorize))), ui::btn_primary("OK", Some(Message::Doc(Msg::MemoSave)))].spacing(8).align_y(Alignment::Center),
+    ].spacing(10)).padding(14).width(Fill).style(theme::accent_soft).into()
 }
 
 /// The history panel down the right of a form: summary and recent transactions for the name.

@@ -55,6 +55,11 @@ pub struct Editor {
     pub close_after: bool,
     /// Desktop history panel: the customer's/vendor's recent transactions.
     pub history: Vec<Value>,
+    /// Desktop "Memorize": the schedule panel.
+    pub memo_open: bool,
+    pub memo_freq: &'static str,
+    pub memo_next: String,
+    pub memo_auto: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +107,8 @@ pub enum Msg {
     SaveClose,
     /// Desktop history panel data.
     History(Result<Value, String>),
+    /// Desktop Memorize panel.
+    Memorize, MemoFreq(&'static str), MemoNext(String), MemoAuto(bool), MemoSave, Memorized(Result<Value, String>),
     /// Desktop Expenses tab: an amount typed straight in (quantity 1).
     Amount(usize, String),
 }
@@ -120,6 +127,12 @@ const LATS: [LatOpt; 3] = [LatOpt("EXCLUSIVE"), LatOpt("INCLUSIVE"), LatOpt("NOT
 pub(crate) fn div_round(n: i128, d: i128) -> i64 { let q = (n.abs() + d.abs() / 2) / d.abs(); (if (n < 0) != (d < 0) { -q } else { q }) as i64 }
 /// Line amount in cents from e4 quantity × e4 price.
 pub(crate) fn line_cents(q: i64, p: i64) -> i64 { div_round(q as i128 * p as i128, 1_000_000) }
+
+/// Memorize "How Often" choices → engine schedule (unit, count).
+pub const MEMO_FREQS: [&str; 5] = ["Weekly", "Every two weeks", "Monthly", "Quarterly", "Annually"];
+pub fn memo_schedule(f: &str) -> (&'static str, i64) {
+    match f { "Weekly" => ("WEEKLY", 1), "Every two weeks" => ("WEEKLY", 2), "Quarterly" => ("MONTHLY", 3), "Annually" => ("MONTHLY", 12), _ => ("MONTHLY", 1) }
+}
 
 pub(crate) fn sales(kind: &str) -> bool { matches!(kind, "ACCREC" | "QUOTE" | "ACCRECCREDIT" | "SALESRECEIPT" | "DELAYEDCHARGE" | "DELAYEDCREDIT") }
 pub(crate) fn delayed(kind: &str) -> bool { matches!(kind, "DELAYEDCHARGE" | "DELAYEDCREDIT") }
@@ -166,7 +179,7 @@ impl Editor {
             lines: vec![Line { qty: "1".into(), ..Default::default() }, Line { qty: "1".into(), ..Default::default() }],
             terms: String::new(), busy: false, editing: true,
             pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false,
-            delayed: vec![], added: vec![], items_tab: false, close_after: false, history: vec![],
+            delayed: vec![], added: vec![], items_tab: false, close_after: false, history: vec![], memo_open: false, memo_freq: "Monthly", memo_next: String::new(), memo_auto: false,
         };
         if let Some(a) = default_account(app, kind) { for l in &mut e.lines { l.account = Some(a.clone()); l.tax = default_tax(app, Some(a.id)); } }
         e
@@ -306,6 +319,36 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.doc = Some(e);
             return t;
         }
+        Msg::Memorize => {
+            e.memo_open = !e.memo_open;
+            if e.memo_next.is_empty() {
+                // Next occurrence: a month after this transaction's date.
+                let d = ui::to_iso(&e.date, style).unwrap_or_else(ui::today_iso);
+                e.memo_next = ui::date(&chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok().and_then(|x| x.checked_add_months(chrono::Months::new(1))).map(|x| x.to_string()).unwrap_or(d), style);
+            }
+            Task::none()
+        }
+        Msg::MemoFreq(f) => { e.memo_freq = f; Task::none() }
+        Msg::MemoNext(v) => { e.memo_next = v; Task::none() }
+        Msg::MemoAuto(v) => { e.memo_auto = v; Task::none() }
+        Msg::MemoSave => {
+            let Some(next) = ui::to_iso(&e.memo_next, style) else { app.doc = Some(e); return app.toast("Check the next date", true) };
+            let p = match e.payload(app, "AUTHORISED") { Ok(p) => p, Err(err) => { app.doc = Some(e); return app.toast(err, true) } };
+            let kind = if sales(&e.kind) { "ACCREC" } else { "ACCPAY" };
+            let (unit, count) = memo_schedule(e.memo_freq);
+            let days = match (ui::to_iso(&e.date, style), ui::to_iso(&e.due, style)) {
+                (Some(a), Some(b)) => chrono::NaiveDate::parse_from_str(&b, "%Y-%m-%d").ok().zip(chrono::NaiveDate::parse_from_str(&a, "%Y-%m-%d").ok()).map(|(b, a)| (b - a).num_days()).unwrap_or(14),
+                _ => 14,
+            };
+            let body = json!({"repeating": {"kind": kind, "template": p["doc"], "period_unit": unit, "period_count": count, "start_date": next, "next_date": next,
+                "due_terms_type": "DAYSAFTERBILLDATE", "due_terms_days": days.max(0), "save_as": if e.memo_auto { "AUTHORISED" } else { "DRAFT" }}});
+            app.doc = Some(e);
+            return app.be.call("repeating.save", body, |r| Message::Doc(Msg::Memorized(r)));
+        }
+        Msg::Memorized(r) => match r {
+            Ok(_) => { e.memo_open = false; app.toast("Memorized — it's in Lists ▸ Memorized Transaction List", false) }
+            Err(err) => app.toast(err, true),
+        },
         Msg::History(r) => { e.history = r.ok().and_then(|v| v["rows"].as_array().cloned()).unwrap_or_default(); Task::none() }
         Msg::Loaded(Err(err)) => { app.error = Some(err); Task::none() }
         Msg::Contact(c) => {
