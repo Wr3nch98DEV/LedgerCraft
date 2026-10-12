@@ -1767,7 +1767,7 @@ fn every_screen_in_every_layout_loads() {
         Route::ReceivePayment(None), Route::PayBills, Route::Spend(None), Route::Check(None), Route::Deposit, Route::Transfer, Route::Journal,
         Route::NewContact(true), Route::NewProduct, Route::NewAccount, Route::Payroll, Route::Taxes, Route::Projects, Route::Mileage, Route::Reconcile,
         Route::Register(None), Route::Calendar, Route::Statements, Route::Memorized, Route::PaySalesTax, Route::AdjustInventory, Route::Help, Route::DocCenter,
-        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates, Route::PriceLevels, Route::PrintForms];
+        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates, Route::PriceLevels, Route::PrintForms, Route::PayrollForms];
     for layout in Layout::ALL {
         let (mut app, dir) = desktop_app(&format!("all-{}", layout.key()));
         let t = app.update(Message::SetLayout(layout));
@@ -2201,5 +2201,27 @@ fn end_to_end_print_forms() {
     let pages = String::from_utf8_lossy(&bytes).matches("/Type /Page /").count();
     assert!(pages >= before.len() - 1, "one page per invoice ({pages})");
     let _ = std::fs::remove_file(pdf);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn end_to_end_payroll_forms() {
+    let (mut app, dir) = desktop_app("e2e-payrollforms");
+    // Run and post a pay run first.
+    let cal = app.be.call_now("payroll.settings", json!({})).unwrap()["calendars"][0]["id"].as_i64().unwrap();
+    let run = app.be.call_now("payroll.createPayRun", json!({"calendar_id": cal})).unwrap()["id"].as_i64().unwrap();
+    let bank = app.lk.bank_opts()[0].id;
+    app.be.call_now("payroll.post", json!({"id": run, "bank_account_id": bank})).unwrap();
+    let t = app.update(Message::Nav(Route::PayrollForms)); settle(&mut app, t);
+    let runs = app.data.clone().unwrap();
+    let posted = runs.as_array().unwrap().iter().find(|r| r["status"] == "POSTED").expect("demo data has a posted pay run").clone();
+    let id = posted["id"].as_i64().unwrap();
+    let file = std::env::temp_dir().join("lc-test-output").join(format!("payroll-filing-{id}.json"));
+    let _ = std::fs::remove_file(&file);
+    let t = app.update(Message::Desk(crate::desktop::Msg::PrFile(id))); settle(&mut app, t);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert!(v["format"].is_string());
+    let _ = std::fs::remove_file(file);
     let _ = std::fs::remove_dir_all(dir);
 }

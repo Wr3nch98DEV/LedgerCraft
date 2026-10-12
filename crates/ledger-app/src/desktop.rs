@@ -109,7 +109,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
     /// Remember the Desktop view choices (One Window, icon bar pane).
@@ -225,6 +225,20 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             if name.is_empty() { return app.toast("Enter the name", true); }
             app.be.call("contacts.create", serde_json::json!({"name": name}), |r| Message::Desk(Msg::ClassDone(r)))
         }
+        Msg::PrFile(id) => {
+            let be = app.be.clone();
+            let open = !cfg!(test);
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<String, String> {
+                    let payload = be.call_now("payroll.filing", serde_json::json!({"id": id}))?;
+                    let path = crate::pdf::output_dir().join(["payroll-filing-", &id.to_string(), ".json"].concat());
+                    std::fs::write(&path, serde_json::to_vec_pretty(&payload).unwrap_or_default()).map_err(|e| e.to_string())?;
+                    if open { crate::pdf::open_file(&path); }
+                    Ok(path.display().to_string())
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Desk(Msg::PrSaved(r)))
+        }
+        Msg::PrSaved(r) => match r { Ok(p) => app.toast(format!("Saved the filing file to {p}"), false), Err(e) => app.toast(e, true) },
         Msg::PfPick(id, on) => { app.desk.pf_skip.retain(|x| *x != id); if !on { app.desk.pf_skip.push(id); } Task::none() }
         Msg::PfAll(on) => { app.desk.pf_skip = if on { vec![] } else { to_print(app).iter().filter_map(|d| d["id"].as_i64()).collect() }; Task::none() }
         Msg::PfPrint => {
@@ -679,6 +693,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::Templates => "Templates".into(),
         Route::PriceLevels => "Price Level List".into(),
         Route::PrintForms => "Select Invoices to Print".into(),
+        Route::PayrollForms => "Process Payroll Forms".into(),
         Route::EnterTime => "Time/Enter Single Activity".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
@@ -744,9 +759,9 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
             e("Create Credit Memos/Refunds", "", doc_new("ACCRECCREDIT")), sep(), e("Income Tracker", "", nav(Route::AllSales)), e("Item List", "", nav(Route::Products))],
         "Vendors" => vec![e("Vendor Center", "", nav(Route::Vendors)), sep(), e("Enter Bills", "", doc_new("ACCPAY")), e("Pay Bills", "", nav(Route::PayBills)), e("Bill Tracker", "", nav(Route::Bills)),
             sep(), e("Sales Tax: Manage Sales Tax…", "", nav(Route::Taxes)), e("Sales Tax: Pay Sales Tax…", "", nav(Route::PaySalesTax)), sep(), e("Create Purchase Orders", "", doc_new("PO")), e("Purchase Orders List", "", nav(Route::PurchaseOrders)),
-            sep(), e("Print/E-file 1099s: 1099 Summary", "", rep("contractor-1099")), e("Enter Bills for Received Items", "", None)],
+            sep(), e("Print/E-file 1099s: 1099 Summary", "", rep("contractor-1099")), e("Enter Bills for Received Items", "", nav(Route::PurchaseOrders))],
         "Employees" => vec![e("Employee Center", "", nav(Route::Payroll)), e("Payroll Center", "", nav(Route::Payroll)), sep(), e("Pay Employees", "", nav(Route::Payroll)),
-            e("Pay Liabilities", "", nav(Route::PayLiabilities)), e("Process Payroll Forms", "", None), sep(), e("Enter Time", "", nav(Route::EnterTime))],
+            e("Pay Liabilities", "", nav(Route::PayLiabilities)), e("Process Payroll Forms", "", nav(Route::PayrollForms)), sep(), e("Enter Time", "", nav(Route::EnterTime))],
         "Banking" => vec![e("Write Checks", "Ctrl+W", nav(Route::Check(None))), e("Order Checks & Envelopes", "", None), e("Enter Credit Card Charges", "", nav(Route::Spend(None))), sep(),
             e("Use Register", "Ctrl+R", nav(Route::Register(None))), e("Make Deposits", "", nav(Route::Deposit)), e("Transfer Funds", "", nav(Route::Transfer)), e("Reconcile", "", nav(Route::Reconcile)),
             sep(), e("Bank Feeds Center", "", nav(Route::Banking(None)))],
@@ -979,6 +994,27 @@ pub fn other_names(app: &App) -> Element<'_, Message> {
         ui::btn_primary("New Name", Some(Message::Desk(Msg::OnAdd))),
         ui::hspace(),
         text("Owners, partners and one-off payees. A name becomes a customer or vendor once you transact with it.").size(12).color(k.muted).into(),
+    ])
+}
+
+/// Employees ▸ Process Payroll Forms: a filing file for each posted pay run, plus the payroll summary.
+pub fn payroll_forms(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let rows = d.as_array().cloned().unwrap_or_default().iter().map(|r| {
+        let id = r["id"].as_i64().unwrap_or(0);
+        let posted = r["status"] == "POSTED";
+        (vec![ui::cell(r["number"].as_str().unwrap_or("").to_string()), ui::cell_muted(format!("{} – {}", app.d(r["period_start"].as_str().unwrap_or("")), app.d(r["period_end"].as_str().unwrap_or("")))),
+            ui::cell_muted(app.d(r["payment_date"].as_str().unwrap_or(""))), ui::cell_muted(if posted { "Posted" } else { "Draft" }),
+            ui::num(r["employees"].as_i64().unwrap_or(0).to_string()), ui::cell_money(r["wages"].as_i64().unwrap_or(0)), ui::cell_money(r["tax"].as_i64().unwrap_or(0)),
+            if posted { ui::link("Save Filing File", Message::Desk(Msg::PrFile(id))) } else { ui::cell_muted("Post the pay run first".to_string()) }],
+         Some(Message::Nav(Route::PayRun(id))))
+    }).collect();
+    let cols: Vec<(&str, u16, bool)> = vec![("Pay Run", 10, false), ("Period", 22, false), ("Paid", 12, false), ("Status", 8, false), ("Employees", 9, true), ("Gross", 12, true), ("Tax", 12, true), ("", 18, false)];
+    list_window(&cols, rows, vec![
+        ui::btn("Payroll Summary", Some(Message::Nav(Route::Report("payroll-activity".into())))),
+        ui::hspace(),
+        text("LedgerCraft prepares the figures; lodge them with your tax office yourself (direct e-filing needs government registration).").size(12).color(k.muted).into(),
     ])
 }
 
@@ -1904,6 +1940,7 @@ fn list_window<'a>(cols: &[(&str, u16, bool)], rows: Vec<(Vec<Element<'a, Messag
         container(if *r { tx.align_x(iced::alignment::Horizontal::Right).width(Fill) } else { tx.width(Fill) }).width(Length::FillPortion(*w)).into()
     })).spacing(8).padding([6, 10])).style(theme::header_row).width(Fill);
     let mut list = column![].spacing(0);
+    if rows.is_empty() { list = list.push(container(text("There's nothing in this list yet.").size(13).color(k.muted)).padding([14, 12])); }
     for (n, (cells, msg)) in rows.into_iter().enumerate() {
         let shade = n % 2 == 1;
         let r = row(cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into())).spacing(8).align_y(Alignment::Center).padding([4, 10]);
@@ -2349,7 +2386,7 @@ pub fn home(app: &App) -> Element<'_, Message> {
         row![node("receive", "Create Sales Receipts", doc_new("SALESRECEIPT")), gap(), node("list", "Statement Charges", doc_new("DELAYEDCHARGE")), arrow(), node("docs", "Statements", nav(Route::Statements)), gap(), node("refresh", "Refunds & Credits", doc_new("ACCRECCREDIT"))].align_y(Alignment::Start).into(),
     ]);
     let employees = band("EMPLOYEES", vec![
-        row![node("payroll", "Payroll Center", nav(Route::Payroll)), gap(), node("check-write", "Pay Employees", nav(Route::Payroll)), arrow(), node("taxes", "Pay Liabilities", nav(Route::PayLiabilities)), arrow(), node("docs", "Process Payroll Forms", None)].align_y(Alignment::Start).into(),
+        row![node("payroll", "Payroll Center", nav(Route::Payroll)), gap(), node("check-write", "Pay Employees", nav(Route::Payroll)), arrow(), node("taxes", "Pay Liabilities", nav(Route::PayLiabilities)), arrow(), node("docs", "Process Payroll Forms", nav(Route::PayrollForms))].align_y(Alignment::Start).into(),
     ]);
     let company = band("COMPANY", vec![
         row![node("accounting", "Chart of Accounts", nav(Route::Chart)), node("box", "Items & Services", nav(Route::Products))].into(),
