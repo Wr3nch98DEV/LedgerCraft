@@ -148,7 +148,16 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::Chart => "Chart of Accounts".into(),
         Route::Banking(_) => "Bank Feeds".into(),
         Route::Reports => "Report Center".into(),
-        Route::Report(k) => crate::reports::name(app.skin, k, "Report"),
+        Route::Report(k) => match k.as_str() {
+            "profit-and-loss" => "Profit & Loss".into(), "balance-sheet" => "Balance Sheet".into(), "cash-flow-statement" => "Statement of Cash Flows".into(),
+            "trial-balance" => "Trial Balance".into(), "general-ledger-detail" => "General Ledger".into(), "general-ledger" => "General Ledger Summary".into(),
+            _ => {
+                // The report's own title once it's loaded, else the QuickBooks name.
+                let loaded = app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["title"].as_str()).map(String::from);
+                let n = crate::reports::name(app.skin, k, "");
+                if n.is_empty() { loaded.unwrap_or_else(|| "Report".into()) } else { n }
+            }
+        },
         Route::Settings => "Preferences".into(),
         Route::Reconcile => "Reconcile".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
@@ -376,6 +385,79 @@ pub fn frame<'a>(app: &'a App, content: Element<'a, Message>) -> Element<'a, Mes
         layers = layers.push(container(opaque(container(list).padding(8).width(400).style(theme::menu))).padding(Padding { top: 72.0, left: 8.0, ..Padding::ZERO }));
     }
     layers.into()
+}
+
+// ---------------- Lists ----------------
+
+/// A Desktop list window: header row, rows, and the button bar along the bottom.
+fn list_window<'a>(cols: &[(&str, u16, bool)], rows: Vec<(Vec<Element<'a, Message>>, Option<Message>)>, bottom: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+    let k = t();
+    let head = container(row(cols.iter().map(|(h, w, r)| {
+        let tx = text(h.to_uppercase()).size(11).font(BOLD).color(k.muted);
+        container(if *r { tx.align_x(iced::alignment::Horizontal::Right).width(Fill) } else { tx.width(Fill) }).width(Length::FillPortion(*w)).into()
+    })).spacing(8).padding([6, 10])).style(theme::header_row).width(Fill);
+    let mut list = column![].spacing(0);
+    for (n, (cells, msg)) in rows.into_iter().enumerate() {
+        let shade = n % 2 == 1;
+        let r = row(cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into())).spacing(8).align_y(Alignment::Center).padding([4, 10]);
+        list = list.push(button(r).padding(0).width(Fill).on_press_maybe(msg)
+            .style(move |_, s| button::Style { background: Some(iced::Background::Color(if matches!(s, button::Status::Hovered) { k.hover } else if shade { k.panel2 } else { k.panel })),
+                text_color: k.text, border: iced::Border::default(), shadow: Default::default(), snap: true }));
+    }
+    column![
+        container(column![head, scrollable(list).style(theme::scroll).height(Fill)]).style(theme::card).width(Fill).height(Fill).clip(true),
+        row(bottom).spacing(8).align_y(Alignment::Center),
+    ].spacing(8).padding(12).height(Fill).into()
+}
+
+/// Lists ▸ Chart of Accounts.
+pub fn chart(app: &App) -> Element<'_, Message> {
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let mut accts: Vec<Value> = d.as_array().cloned().unwrap_or_default().into_iter().filter(|a| a["status"] == "ACTIVE").collect();
+    let s = |a: &Value, k: &str| a[k].as_str().unwrap_or("").to_string();
+    accts.sort_by_key(|a| (crate::coa::desktop_type(a["type"].as_str().unwrap_or(""), a["bank_type"].as_str().unwrap_or(""), a["system_account"].as_str().unwrap_or("")).1, s(a, "code")));
+    let cols: Vec<(&str, u16, bool)> = vec![("Name", 40), ("Type", 22), ("Balance Total", 16)].into_iter().map(|(h, w)| (h, w, h == "Balance Total")).collect();
+    let rows = accts.iter().map(|a| {
+        let kind = a["type"].as_str().unwrap_or("");
+        let (ty, _) = crate::coa::desktop_type(kind, a["bank_type"].as_str().unwrap_or(""), a["system_account"].as_str().unwrap_or(""));
+        // Desktop shows balances only for balance sheet accounts.
+        let bs = matches!(a["class"].as_str(), Some("ASSET" | "LIABILITY" | "EQUITY"));
+        let sign = if matches!(a["class"].as_str(), Some("LIABILITY" | "EQUITY")) { -1 } else { 1 };
+        let bal: Element<Message> = if bs { ui::cell_money(sign * a["ytd_balance"].as_i64().unwrap_or(0)) } else { Space::new().into() };
+        let msg = if kind == "BANK" { a["id"].as_i64().map(|id| Message::Nav(Route::Register(Some(id)))) } else { None };
+        (vec![ui::cell(format!("{} · {}", s(a, "code"), s(a, "name"))), ui::cell_muted(ty), bal], msg)
+    }).collect();
+    list_window(&cols, rows, vec![
+        ui::btn("Account: New", nav(Route::NewAccount)),
+        ui::btn("Activities: Write Checks", nav(Route::Check(None))), ui::btn("Make Deposits", nav(Route::Deposit)), ui::btn("Use Register", nav(Route::Register(None))),
+        ui::btn("Make General Journal Entries", nav(Route::Journal)), ui::btn("Reconcile", nav(Route::Reconcile)),
+        ui::hspace(), ui::btn("Reports: Trial Balance", rep("trial-balance")),
+    ])
+}
+
+/// Lists ▸ Item List.
+pub fn item_list(app: &App) -> Element<'_, Message> {
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let items = d.as_array().cloned().unwrap_or_default();
+    let acct = |id: Option<i64>| id.and_then(|id| app.lk.accounts.iter().find(|a| a["id"].as_i64() == Some(id))).map(|a| format!("{} · {}", a["code"].as_str().unwrap_or(""), a["name"].as_str().unwrap_or(""))).unwrap_or_default();
+    let cols: Vec<(&str, u16, bool)> = vec![("Name", 20, false), ("Description", 28, false), ("Type", 12, false), ("Account", 22, false), ("On Hand", 8, true), ("Price", 10, true)];
+    let rows = items.iter().map(|x| {
+        let tracked = x["is_tracked"].as_i64() == Some(1);
+        let ty = if tracked { "Inventory Part" } else if x["is_purchased"].as_i64() == Some(1) && x["is_sold"].as_i64() == Some(1) { "Non-inventory Part" } else { "Service" };
+        (vec![
+            ui::cell(x["name"].as_str().unwrap_or("").to_string()),
+            ui::cell_muted(x["sales_description"].as_str().unwrap_or("").to_string()),
+            ui::cell_muted(ty),
+            ui::cell_muted(acct(x["sale_account_id"].as_i64())),
+            if tracked { ui::num(format!("{}", x["qty_on_hand_e4"].as_i64().unwrap_or(0) as f64 / 10000.0)) } else { Space::new().into() },
+            ui::num(ui::money(x["sale_unit_e2"].as_i64().unwrap_or(0) / 100)),
+        ], None)
+    }).collect();
+    list_window(&cols, rows, vec![
+        ui::btn("Item: New", nav(Route::NewProduct)),
+        ui::btn("Activities: Create Invoices", doc_new("ACCREC")), ui::btn("Enter Sales Receipts", doc_new("SALESRECEIPT")), ui::btn("Create Purchase Orders", doc_new("PO")),
+        ui::hspace(), ui::btn("Reports: Sales by Item", rep("sales-by-item")),
+    ])
 }
 
 // ---------------- Register ----------------

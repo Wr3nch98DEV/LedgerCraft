@@ -59,6 +59,27 @@ pub fn detail_type<'a>(kind: &str, bank_type: &str, chosen: &'a str) -> &'a str 
     }
 }
 
+/// QuickBooks Desktop account type (singular, with A/R and A/P), and its sort order in lists.
+pub fn desktop_type(kind: &str, bank_type: &str, system: &str) -> (&'static str, u8) {
+    match (kind, system) {
+        ("BANK", _) if bank_type == "CREDITCARD" => ("Credit Card", 6),
+        ("BANK", _) => ("Bank", 0),
+        (_, "AR") => ("Accounts Receivable", 1),
+        (_, "AP") => ("Accounts Payable", 5),
+        ("CURRENT" | "PREPAYMENT" | "INVENTORY", _) => ("Other Current Asset", 2),
+        ("FIXED", _) => ("Fixed Asset", 3),
+        ("NONCURRENT", _) => ("Other Asset", 4),
+        ("CURRLIAB", _) => ("Other Current Liability", 7),
+        ("TERMLIAB" | "LIABILITY", _) => ("Long Term Liability", 8),
+        ("EQUITY", _) => ("Equity", 9),
+        ("REVENUE" | "SALES", _) => ("Income", 10),
+        ("DIRECTCOSTS", _) => ("Cost of Goods Sold", 11),
+        ("EXPENSE", _) => ("Expense", 12),
+        ("OTHERINCOME", _) => ("Other Income", 13),
+        _ => ("Other Expense", 14),
+    }
+}
+
 /// Xero's name for an engine account type.
 pub fn xero_type(kind: &str) -> &'static str { XERO_TYPES.iter().find(|(k, _)| *k == kind).map(|(_, n)| *n).unwrap_or("Other") }
 

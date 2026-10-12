@@ -930,3 +930,35 @@ fn render_desktop_reconcile() {
     ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join("lc-deskrec.png")).unwrap();
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_lists_and_report_window() {
+    use crate::reports::Msg as Rp;
+    let (mut app, dir) = desktop_app("desklists");
+    let _ = app.update(Message::Nav(Route::Chart));
+    app.data = Some(app.be.call_now("accounts.list", json!({})).unwrap());
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["Accounts Receivable", "Other Current Liability", "BALANCE TOTAL", "Account: New", "Use Register"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    let _ = app.update(Message::Nav(Route::Products));
+    app.data = Some(app.be.call_now("items.list", json!({})).unwrap());
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["Item List", "Item: New", "DESCRIPTION"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    let _ = app.update(Message::Nav(Route::Report("profit-and-loss".into())));
+    assert_eq!(crate::desktop::title(&app, &app.route.clone()), "Profit & Loss");
+    let p = crate::reports::params(&app);
+    app.data = Some(app.be.call_now("reports.run", json!({"name": "profit-and-loss", "params": p})).unwrap());
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["Customize Report", "Memorize", "Hide Header", "Refresh", "Dates", "Columns"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    let _ = app.update(Message::Report(Rp::HideHeader));
+    assert!(app.report.hide_header);
+    let _ = std::fs::remove_dir_all(dir);
+}

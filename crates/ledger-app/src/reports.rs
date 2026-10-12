@@ -67,12 +67,14 @@ pub struct State {
     pub negative: Negative,
     pub show_zero: bool,
     pub contact: Option<Opt>,
+    /// Desktop "Hide Header".
+    pub hide_header: bool,
 }
 
 #[derive(Debug, Clone)]
 pub enum Msg {
     Period(Period), Basis(bool), Export(bool), Exported(Result<String, String>),
-    Customize, From(String), To(String), Columns(Columns), Negative(Negative), ShowZero(bool), Contact(Option<Opt>), Run,
+    Customize, From(String), To(String), Columns(Columns), Negative(Negative), ShowZero(bool), Contact(Option<Opt>), Run, HideHeader,
 }
 
 /// The report's dates: the chosen period, or the custom dates when they parse.
@@ -126,6 +128,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         }
         Msg::Basis(c) => app.report.cash = c,
         Msg::Customize => { app.report.customize = !app.report.customize; return Task::none(); }
+        Msg::HideHeader => { app.report.hide_header = !app.report.hide_header; return Task::none(); }
         Msg::From(v) => { app.report.from = v; app.report.period = Period::Custom; return Task::none(); }
         Msg::To(v) => { app.report.to = v; app.report.period = Period::Custom; return Task::none(); }
         Msg::Columns(c) => app.report.columns = c,
@@ -269,7 +272,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
             ui::btn("Back to report list", Some(Message::Nav(Route::Reports))),
         ].spacing(6)],
     ].spacing(14).align_y(Alignment::End);
-    let controls: Element<Message> = if app.report.customize { column![controls, customize(app, key)].spacing(12).into() } else { controls.into() };
+    let controls: Element<Message> = if app.desktop() { desk_toolbar(app, key) } else { controls.into() };
+    let controls: Element<Message> = if app.report.customize { column![controls, customize(app, key)].spacing(12).into() } else { controls };
     let Some(d) = &app.data else {
         let body: Element<Message> = match &app.error { Some(e) => ui::card(column![ui::h2("Couldn't run this report"), ui::muted(e.clone())].spacing(6)), None => ui::muted("Running report…") };
         return ui::page(ui::h1(name(app.skin, key, "Report")), vec![], column![controls, body].spacing(16).into());
@@ -322,8 +326,38 @@ pub fn view(app: &App) -> Element<'_, Message> {
         text(title.clone()).size(20).font(BOLD),
         ui::muted(format!("{}{}", d["subtitle"].as_str().unwrap_or(""), d["basis"].as_str().map(|b| format!(" · {b} basis")).unwrap_or_default())),
     ].spacing(2).align_x(Alignment::Center).width(Fill);
+    let header: Element<Message> = if app.report.hide_header { Space::new().into() } else { header.into() };
     let report = container(column![header, ui::gap(8.0), body].spacing(4)).padding([20, 0]).style(theme::card).width(Fill);
+    if app.desktop() {
+        return column![container(controls).padding([8, 12]), iced::widget::scrollable(container(report).padding(iced::Padding { top: 0.0, left: 12.0, right: 12.0, bottom: 16.0 })).style(theme::scroll).height(Fill)].into();
+    }
     ui::page(ui::h1(title), vec![], column![controls, report].spacing(16).into())
+}
+
+/// QuickBooks Desktop report window bar: buttons, then Dates / From / To / Columns.
+fn desk_toolbar<'a>(app: &'a App, key: &str) -> Element<'a, Message> {
+    let k = t();
+    let has = app.data.is_some();
+    let b = |l: &'static str, m: Option<Message>| ui::btn(l, m);
+    let buttons = row![
+        b("Customize Report", Some(Message::Report(Msg::Customize))), b("Comment on Report", None), b("Memorize", None),
+        b("Print", if has { Some(Message::Report(Msg::Export(true))) } else { None }), b("E-mail", None),
+        b("Excel", if has { Some(Message::Report(Msg::Export(false))) } else { None }),
+        b(if app.report.hide_header { "Show Header" } else { "Hide Header" }, Some(Message::Report(Msg::HideHeader))),
+        b("Refresh", Some(Message::Report(Msg::Run))),
+    ].spacing(6);
+    let lbl = |s: &'static str| text(s).size(12).color(k.info);
+    let mut dates = row![
+        lbl("Dates"), pick_list(&Period::ALL[..], Some(app.report.period), |p| Message::Report(Msg::Period(p))).padding([4, 7]).text_size(13).style(theme::pick).width(190),
+        lbl("From"), iced::widget::text_input("", &app.report.from).on_input(|v| Message::Report(Msg::From(v))).on_submit(Message::Report(Msg::Run)).padding([4, 7]).size(13).style(theme::input).width(110),
+        lbl("To"), iced::widget::text_input("", &app.report.to).on_input(|v| Message::Report(Msg::To(v))).on_submit(Message::Report(Msg::Run)).padding([4, 7]).size(13).style(theme::input).width(110),
+    ].spacing(8).align_y(Alignment::Center);
+    if by_period(key) {
+        dates = dates.push(lbl("Columns")).push(pick_list(&Columns::ALL[..], Some(app.report.columns), |c| Message::Report(Msg::Columns(c))).padding([4, 7]).text_size(13).style(theme::pick).width(210));
+    }
+    dates = dates.push(lbl("Basis")).push(
+        button(text(if app.report.cash { "Cash" } else { "Accrual" }).size(13)).style(theme::secondary).padding([4, 10]).on_press(Message::Report(Msg::Basis(!app.report.cash))));
+    column![buttons, dates].spacing(8).into()
 }
 
 /// Reports that can be filtered to one customer or vendor.
