@@ -52,6 +52,8 @@ pub struct State {
     /// Customer/Vendor Center Transactions tab: the chosen type and its rows.
     pub tx_type: Option<&'static str>,
     pub tx_rows: Vec<Value>,
+    /// View ▸ One Window: each screen replaces the last (no window list).
+    pub one_window: bool,
 }
 
 /// A transaction typed straight into the register.
@@ -62,7 +64,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool) }
 
 impl App {
     /// Keep the current screen's unsaved state with its window.
@@ -92,6 +94,8 @@ impl App {
     /// Make sure the current route has a window and it's the active one.
     pub fn ensure_window(&mut self) {
         if matches!(self.route, Route::Setup | Route::Login) { return; }
+        // One Window view: the new screen replaces whatever was showing.
+        if self.desk.one_window { self.desk.windows = vec![Win::new(self.route.clone())]; self.desk.active = 0; return; }
         match self.desk.windows.iter().position(|w| w.route == self.route) {
             Some(i) => self.desk.active = i,
             None => { self.desk.windows.push(Win::new(self.route.clone())); self.desk.active = self.desk.windows.len() - 1; }
@@ -140,6 +144,12 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, move |r| Message::Desk(Msg::Detail(id, r)))
         }
         Msg::ReportCat(c) => { app.desk.report_cat = Some(c); Task::none() }
+        Msg::OneWindow(on) => {
+            app.desk.one_window = on;
+            app.menu = None;
+            if on { let i = app.desk.active; let keep = app.desk.windows.remove(i); app.desk.windows = vec![keep]; app.desk.active = 0; }
+            Task::none()
+        }
         Msg::TxType(t) => {
             app.desk.tx_type = t;
             app.desk.tx_rows.clear();
@@ -330,7 +340,9 @@ fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Messag
         "File" => vec![e("New Company…", "", nav(Route::Setup)), e("Open or Restore Company…", "", nav(Route::Setup)), e("Open Previous Company", "", nav(Route::Setup)), sep(),
             e("Back Up Company", "", None), e("Print Forms", "", None), sep(), e("Exit", "Alt+F4", Some(Message::Desk(Msg::Exit)))],
         "Edit" => vec![e("Undo", "Ctrl+Z", None), sep(), e("Find…", "Ctrl+F", Some(Message::FocusSearch)), e("Search…", "F3", None), sep(), e("Preferences…", "", nav(Route::Settings))],
-        "View" => vec![e("Open Window List", "", Some(Message::Desk(Msg::Pane(Pane::Windows)))), e("View Balances", "", Some(Message::Desk(Msg::Pane(Pane::Balances)))),
+        "View" => vec![e(if app.desk.one_window { "✓ One Window" } else { "   One Window" }, "", Some(Message::Desk(Msg::OneWindow(true)))),
+            e(if app.desk.one_window { "   Multiple Windows" } else { "✓ Multiple Windows" }, "", Some(Message::Desk(Msg::OneWindow(false)))), sep(),
+            e("Open Window List", "", Some(Message::Desk(Msg::Pane(Pane::Windows)))), e("View Balances", "", Some(Message::Desk(Msg::Pane(Pane::Balances)))),
             e("My Shortcuts", "", Some(Message::Desk(Msg::Pane(Pane::Shortcuts)))), sep(), e(if app.dark { "Light Mode" } else { "Dark Mode" }, "Alt+T", Some(Message::ToggleTheme)), sep(),
             e("Switch to QuickBooks Online-style layout", "", Some(Message::SetLayout(theme::Layout::Online))), e("Switch to Xero-style layout", "", Some(Message::SetLayout(theme::Layout::Xero)))],
         "Lists" => vec![e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)), e("Item List", "", nav(Route::Products)), e("Fixed Asset Item List", "", None), e("Price Level List", "", None),

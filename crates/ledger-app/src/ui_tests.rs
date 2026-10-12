@@ -1360,3 +1360,22 @@ fn desktop_center_transactions_tab() {
     assert!(app.desk.tx_type.is_none());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_one_window_view() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("onewin");
+    let _ = app.update(Message::Nav(Route::Chart));
+    let _ = app.update(Message::Nav(Route::Products));
+    assert_eq!(app.desk.windows.len(), 3);
+    let _ = app.update(Message::Desk(W::OneWindow(true)));
+    assert_eq!(app.desk.windows.len(), 1, "only the current window stays");
+    assert_eq!(app.desk.windows[0].route, Route::Products);
+    let _ = app.update(Message::Nav(Route::Customers));
+    assert_eq!(app.desk.windows.len(), 1);
+    assert_eq!(app.desk.windows[0].route, Route::Customers);
+    let _ = app.update(Message::Desk(W::OneWindow(false)));
+    let _ = app.update(Message::Nav(Route::Chart));
+    assert_eq!(app.desk.windows.len(), 2, "multiple windows again");
+    let _ = std::fs::remove_dir_all(dir);
+}
