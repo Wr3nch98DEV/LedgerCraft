@@ -49,6 +49,9 @@ pub struct State {
     pub stmt_busy: bool,
     /// Register: the blank entry row at the bottom.
     pub reg: RegEntry,
+    /// Customer/Vendor Center Transactions tab: the chosen type and its rows.
+    pub tx_type: Option<&'static str>,
+    pub tx_rows: Vec<Value>,
 }
 
 /// A transaction typed straight into the register.
@@ -59,7 +62,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply) }
 
 impl App {
     /// Keep the current screen's unsaved state with its window.
@@ -137,6 +140,21 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, move |r| Message::Desk(Msg::Detail(id, r)))
         }
         Msg::ReportCat(c) => { app.desk.report_cat = Some(c); Task::none() }
+        Msg::TxType(t) => {
+            app.desk.tx_type = t;
+            app.desk.tx_rows.clear();
+            let Some(t) = t else { return Task::none() };
+            let (kind, _) = tx_kind(t);
+            app.be.call("docs.list", serde_json::json!({"type": kind, "limit": 1000}), move |r| Message::Desk(Msg::TxRows(t, r)))
+        }
+        Msg::TxRows(t, r) => {
+            if app.desk.tx_type == Some(t) {
+                let (_, receipts) = tx_kind(t);
+                app.desk.tx_rows = r.ok().and_then(|v| v["rows"].as_array().cloned()).unwrap_or_default().into_iter()
+                    .filter(|d| match receipts { Some(true) => d["subtype"] == "RECEIPT", Some(false) => d["subtype"] != "RECEIPT", None => true }).collect();
+            }
+            Task::none()
+        }
         Msg::Reg(f, v) => {
             let r = &mut app.desk.reg;
             match f { RegField::Date => r.date = v, RegField::Number => r.number = v, RegField::Payee => r.payee = v, RegField::Memo => r.memo = v,
@@ -1065,6 +1083,64 @@ pub fn register(app: &App) -> Element<'_, Message> {
 
 // ---------------- Customer / Vendor Center ----------------
 
+const CUSTOMER_TX: [&str; 5] = ["Estimates", "Invoices", "Statement Charges", "Sales Receipts", "Credit Memos"];
+const VENDOR_TX: [&str; 3] = ["Purchase Orders", "Bills", "Vendor Credits"];
+
+/// Engine list type for a Transactions-tab entry, and whether to keep only (or drop) sales receipts.
+fn tx_kind(t: &str) -> (&'static str, Option<bool>) {
+    match t {
+        "Estimates" => ("QUOTE", None), "Statement Charges" => ("DELAYED", None), "Sales Receipts" => ("ACCREC", Some(true)), "Invoices" => ("ACCREC", Some(false)),
+        "Credit Memos" => ("ACCRECCREDIT", None), "Purchase Orders" => ("PO", None), "Bills" => ("ACCPAY", None), _ => ("ACCPAYCREDIT", None),
+    }
+}
+
+/// The Center's Transactions tab: every transaction of the chosen type.
+fn center_transactions(app: &App, customers: bool) -> Element<'_, Message> {
+    let types: &[&'static str] = if customers { &CUSTOMER_TX } else { &VENDOR_TX };
+    let sel = app.desk.tx_type.filter(|t| types.contains(t));
+    let mut list = column![].spacing(1);
+    for ty in types {
+        let on = sel == Some(*ty);
+        list = list.push(button(text(*ty).size(13).font(if on { BOLD } else { iced::Font::DEFAULT })).style(theme::nav_item(on)).padding([5, 10]).width(Fill).on_press(Message::Desk(Msg::TxType(Some(ty)))));
+    }
+    let left = container(column![tabs_row(customers, true), list].spacing(8)).padding(6).width(340).height(Fill).style(theme::card);
+    let right: Element<Message> = match sel {
+        None => container(ui::muted("Choose a transaction type on the left.")).padding(16).width(Fill).style(theme::card).into(),
+        Some(ty) => {
+            let rows: Vec<(Vec<Element<Message>>, Option<Message>)> = app.desk.tx_rows.iter().map(|r| {
+                let kind = r["type"].as_str().unwrap_or("");
+                let sub = r["subtype"].as_str().unwrap_or("");
+                let route_kind = if sub.starts_with("DELAYED") { sub.to_string() } else { kind.to_string() };
+                let st = crate::vocab::status(app.skin, if sub.starts_with("DELAYED") { sub } else { kind }, r["status"].as_str().unwrap_or(""), r["overdue"].as_i64() == Some(1));
+                (vec![ui::cell(r["contact_name"].as_str().unwrap_or("").to_string()), ui::cell(r["number"].as_str().unwrap_or("").to_string()), ui::cell(app.d(r["date"].as_str().unwrap_or(""))),
+                    ui::cell_muted(app.d(r["due_date"].as_str().unwrap_or(""))), ui::cell_money(r["total"].as_i64().unwrap_or(0)), ui::cell_money(r["amount_due"].as_i64().unwrap_or(0)),
+                    text(st).size(13).color(crate::lists::status_color(st)).into()],
+                 Some(Message::Nav(Route::Doc { kind: route_kind, id: r["id"].as_i64() })))
+            }).collect();
+            column![
+                text(ty).size(15).font(BOLD),
+                ui::table(&[ui::col(if customers { "Customer:Job" } else { "Vendor" }, 20), ui::col("Num", 10), ui::col("Date", 11), ui::col("Due Date", 11), ui::coln("Amount", 12), ui::coln("Open Balance", 12), ui::col("Status", 10)],
+                    rows, "None yet."),
+            ].spacing(8).width(Fill).into()
+        }
+    };
+    row![left, scrollable(right).style(theme::scroll).height(Fill)].spacing(10).height(Fill).into()
+}
+
+/// "Customers & Jobs | Transactions" (or "Vendors | Transactions") tabs at the top of a Center's left pane.
+fn tabs_row(customers: bool, tx: bool) -> Element<'static, Message> {
+    let k = t();
+    let tab = move |label: &'static str, on: bool, m: Message| -> Element<'static, Message> {
+        column![
+            button(text(label).size(13).font(if on { BOLD } else { iced::Font::DEFAULT })).style(theme::tab(on)).padding([5, 10]).on_press(m),
+            container(Space::new()).width(Fill).height(2).style(move |_: &iced::Theme| container::Style { background: if on { Some(iced::Background::Color(k.accent)) } else { None }, ..Default::default() }),
+        ].width(iced::Shrink).into()
+    };
+    let first = if customers { "Customers & Jobs" } else { "Vendors" };
+    let default_type = if customers { "Invoices" } else { "Bills" };
+    row![tab(first, !tx, Message::Desk(Msg::TxType(None))), tab("Transactions", tx, Message::Desk(Msg::TxType(Some(default_type))))].spacing(4).into()
+}
+
 fn type_name(kind: &str, sub: &str) -> &'static str {
     match (kind, sub) {
         (_, "RECEIPT") => "Sales Receipt", (_, "DELAYEDCHARGE") => "Statement Charge", (_, "DELAYEDCREDIT") => "Statement Credit",
@@ -1099,8 +1175,12 @@ pub fn center(app: &App, customers: bool) -> Element<'_, Message> {
                 text_color: k.text, border: iced::Border::default(), shadow: Default::default(), snap: true })
             .on_press(Message::Desk(Msg::Select(id))));
     }
+    if app.desk.tx_type.is_some() {
+        return column![toolbar, center_transactions(app, customers)].spacing(10).padding(12).height(Fill).into();
+    }
     let left = container(column![
-        row![text(if customers { "Customers & Jobs" } else { "Vendors" }).size(13).font(BOLD), ui::hspace(), text(if customers { "Active Customers" } else { "Active Vendors" }).size(12).color(k.muted)].padding([8, 10]),
+        tabs_row(customers, false),
+        row![text(if customers { "Active Customers" } else { "Active Vendors" }).size(12).color(k.muted)].padding([4, 10]),
         container(text_input("Search", &app.list_q).on_input(Message::ListQuery).padding([5, 8]).size(13).style(theme::input)).padding([0, 10]),
         scrollable(names).style(theme::scroll).height(Fill),
     ].spacing(6)).width(340).height(Fill).style(theme::card);

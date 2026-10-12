@@ -1336,3 +1336,27 @@ fn report_quickzoom_to_account() {
     assert_eq!(detail["sections"][0]["account_id"], acc);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_center_transactions_tab() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("centertx");
+    let _ = app.update(Message::Nav(Route::Customers));
+    app.data = Some(app.be.call_now("contacts.list", json!({"filter": "customers"})).unwrap());
+    let msgs = click(&app, "Transactions");
+    assert!(matches!(msgs.as_slice(), [Message::Desk(W::TxType(Some("Invoices")))]), "{msgs:?}");
+    let _ = app.update(Message::Desk(W::TxType(Some("Invoices"))));
+    let rows = app.be.call_now("docs.list", json!({"type": "ACCREC", "limit": 1000}));
+    let _ = app.update(Message::Desk(W::TxRows("Invoices", rows)));
+    assert!(!app.desk.tx_rows.is_empty());
+    assert!(app.desk.tx_rows.iter().all(|r| r["subtype"] != "RECEIPT"), "sales receipts have their own entry");
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["Estimates", "Statement Charges", "Sales Receipts", "Credit Memos", "OPEN BALANCE"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    // Back to the names tab.
+    let _ = app.update(Message::Desk(W::TxType(None)));
+    assert!(app.desk.tx_type.is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}
