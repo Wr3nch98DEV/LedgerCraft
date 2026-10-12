@@ -72,6 +72,8 @@ pub struct State {
     pub jobs: Vec<Value>,
     /// Customer Center ▸ Add Job: the job name being typed.
     pub job_new: Option<String>,
+    /// Reminders: sections expanded to show their items.
+    pub rem_open: Vec<&'static str>,
     /// Build Assemblies: the assembly, its components/builds (from items.components), quantity, date, memo,
     /// and the component list being edited (item, quantity per assembly).
     pub ba_item: Option<crate::app::Opt>,
@@ -136,7 +138,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), ShowInactive(bool), JobNew(Option<String>), JobSave(i64), JobSaved(crate::backend::Reply), BiCust(i64, bool), BiAll(bool), BiItem(usize, crate::app::Opt), BiField(usize, u8, String), BiAddLine, BiDate(String), BiCreate, BiDone(crate::backend::Reply), InvSelect(i64), InvDetail(crate::backend::Reply), JobsLoaded(crate::backend::Reply), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), ShowInactive(bool), RemToggle(&'static str), JobNew(Option<String>), JobSave(i64), JobSaved(crate::backend::Reply), BiCust(i64, bool), BiAll(bool), BiItem(usize, crate::app::Opt), BiField(usize, u8, String), BiAddLine, BiDate(String), BiCreate, BiDone(crate::backend::Reply), InvSelect(i64), InvDetail(crate::backend::Reply), JobsLoaded(crate::backend::Reply), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
     /// Remember the Desktop view choices (One Window, icon bar pane).
@@ -382,6 +384,8 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }
             Err(e) => app.toast(e, true),
         },
+        Msg::RemToggle("__none") => { app.desk.rem_open.clear(); Task::none() }
+        Msg::RemToggle(s) => { if app.desk.rem_open.contains(&s) { app.desk.rem_open.retain(|x| *x != s); } else { app.desk.rem_open.push(s); } Task::none() }
         Msg::ShowInactive(v) => { app.desk.show_inactive = v; Task::none() }
         Msg::OpenPrefs(cat) => { app.settings.cat = Some(cat); app.go(Route::Settings) }
         Msg::FavAdd(f) => { if !app.desk.favorites.contains(&f) { app.desk.favorites.push(f); app.save_desk_prefs(); } Task::none() }
@@ -878,6 +882,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::EditItem(_) => "Edit Item".into(),
         Route::EditAccount(_) => "Edit Account".into(),
         Route::BatchInvoices => "Batch Invoice".into(),
+        Route::Reminders => "Reminders".into(),
         Route::BankTx(_) => if app.pay.as_ref().is_some_and(|s| !s.check) { "Enter Credit Card Charges".into() } else { "Write Checks".into() },
         Route::EditContact(id) => if app.lk.contacts.iter().find(|c| c["id"].as_i64() == Some(*id)).is_some_and(|c| c["is_supplier"].as_i64() == Some(1) && c["is_customer"].as_i64() != Some(1)) { "Edit Vendor".into() } else { "Edit Customer".into() },
         Route::EnterTime => "Time/Enter Single Activity".into(),
@@ -941,7 +946,7 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
         }
         "Company" => vec![e("Home Page", "", nav(Route::Dashboard)), e("Company Snapshot", "", Some(Message::Desk(Msg::Insights(true)))), sep(), e("My Company", "", nav(Route::Settings)),
             e("Company Information…", "", nav(Route::Settings)), e("Set Up Users and Roles…", "", Some(Message::Desk(Msg::OpenPrefs("Users & Roles")))), e("Set Closing Date…", "", Some(Message::Desk(Msg::OpenPrefs("Accounting")))), sep(), e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)),
-            e("Make General Journal Entries…", "", nav(Route::Journal)), e("Enter Vehicle Mileage…", "", nav(Route::Mileage)), e("Calendar", "", nav(Route::Calendar)), e("Documents", "", nav(Route::DocCenter))],
+            e("Make General Journal Entries…", "", nav(Route::Journal)), e("Enter Vehicle Mileage…", "", nav(Route::Mileage)), e("Calendar", "", nav(Route::Calendar)), e("Reminders", "", nav(Route::Reminders)), e("Documents", "", nav(Route::DocCenter))],
         "Inventory" => vec![e("Inventory Center", "", nav(Route::InventoryCenter)), e("Item List", "", nav(Route::Products)), sep(), e("Create Purchase Orders", "", doc_new("PO")),
             e("Purchase Orders List", "", nav(Route::PurchaseOrders)), e("Receive Items", "", Some(Message::ReceiveItems)), e("Enter Bills Against Inventory", "", nav(Route::PurchaseOrders)), e("Adjust Quantity/Value on Hand…", "", nav(Route::AdjustInventory)), sep(), e("Build Assemblies…", "", nav(Route::BuildAssemblies))],
         "Customers" => vec![e("Customer Center", "Ctrl+J", nav(Route::Customers)), sep(), e("Create Estimates", "", doc_new("QUOTE")), e("Create Sales Orders", "", doc_new("SALESORDER")),
@@ -1227,6 +1232,69 @@ pub fn other_names(app: &App) -> Element<'_, Message> {
 fn dkey(app: &App, old: &str, new: String) -> String {
     let shown = if old.is_empty() { app.d(&ui::today_iso()) } else { old.to_string() };
     ui::date_keys(&shown, &new, app.date_style())
+}
+
+/// Everything Reminders shows, gathered in one go.
+pub fn load_reminders(app: &mut App) -> Task<Message> {
+    let be = app.be.clone();
+    let g = app.page_gen;
+    Task::perform(async move {
+        tokio::task::spawn_blocking(move || -> Result<Value, String> {
+            let rows = |kind: &str, tab: &str| be.call_now("docs.list", serde_json::json!({"type": kind, "tab": tab, "limit": 2000})).map(|v| v["rows"].as_array().cloned().unwrap_or_default());
+            Ok(serde_json::json!({
+                "overdue": rows("ACCREC", "overdue")?,
+                "bills": rows("ACCPAY", "all")?,
+                "pos": rows("PO", "all")?,
+                "orders": rows("SALESORDER", "all")?,
+                "undeposited": be.call_now("deposits.undeposited", serde_json::json!({})).map(|v| v["payments"].clone()).unwrap_or(Value::Null),
+                "memorized": be.call_now("repeating.list", serde_json::json!({"kind": "ALL"}))?,
+            }))
+        }).await.unwrap_or_else(|e| Err(e.to_string()))
+    }, move |r| Message::Loaded(g, r))
+}
+
+/// Company ▸ Reminders: overdue invoices, bills to pay, money to deposit, memorized transactions
+/// due, purchase orders and sales orders still open. Each section opens to its items.
+pub fn reminders(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = app.data.as_ref().filter(|d| d["overdue"].is_array()) else { return container(ui::muted("Loading…")).padding(20).into() };
+    let today = ui::today_iso();
+    let soon = ui::add_days_iso(&today, 10);
+    let arr = |key: &str| d[key].as_array().cloned().unwrap_or_default();
+    let doc_item = |r: &Value, kind: &str| -> (String, String, i64, Option<Message>) {
+        let label = format!("{} {}", r["contact_name"].as_str().unwrap_or(""), r["number"].as_str().unwrap_or("")).trim().to_string();
+        (label, r["due_date"].as_str().or(r["date"].as_str()).unwrap_or("").to_string(), r["amount_due"].as_i64().or(r["total"].as_i64()).unwrap_or(0),
+         r["id"].as_i64().map(|id| Message::Nav(Route::Doc { kind: kind.to_string(), id: Some(id) })))
+    };
+    let mut sections: Vec<(&'static str, Vec<(String, String, i64, Option<Message>)>)> = vec![];
+    sections.push(("Overdue Invoices", arr("overdue").iter().map(|r| doc_item(r, "ACCREC")).collect()));
+    sections.push(("Bills to Pay", arr("bills").iter().filter(|r| r["status"] == "AUTHORISED" && r["due_date"].as_str().is_some_and(|x| x <= soon.as_str())).map(|r| doc_item(r, "ACCPAY")).collect()));
+    sections.push(("Money to Deposit", arr("undeposited").iter().map(|p| (p["contact"].as_str().unwrap_or("Payment").to_string(), p["date"].as_str().unwrap_or("").to_string(), p["amount"].as_i64().unwrap_or(0), Some(Message::Nav(Route::Deposit)))).collect()));
+    sections.push(("Memorized Transactions Due", arr("memorized").iter().filter(|m| m["status"] == "ACTIVE" && m["next_date"].as_str().is_some_and(|x| x <= today.as_str()))
+        .map(|m| (m["template"]["contact_name"].as_str().or(m["name"].as_str()).unwrap_or("Memorized transaction").to_string(), m["next_date"].as_str().unwrap_or("").to_string(), m["template"]["total"].as_i64().unwrap_or(0), Some(Message::Nav(Route::Memorized)))).collect()));
+    sections.push(("Purchase Orders to Receive", arr("pos").iter().filter(|r| r["status"] == "AUTHORISED").map(|r| doc_item(r, "PO")).collect()));
+    sections.push(("Sales Orders to Invoice", arr("orders").iter().filter(|r| r["status"] != "DELETED" && r["status"] != "INVOICED" && r["status"] != "DECLINED").map(|r| doc_item(r, "SALESORDER")).collect()));
+    let mut list = column![row![text("DUE DATE").size(11).font(BOLD).color(k.muted).width(130), text("DESCRIPTION").size(11).font(BOLD).color(k.muted).width(Fill), text("AMOUNT").size(11).font(BOLD).color(k.muted)].padding([6, 12])].spacing(0);
+    for (title, items) in sections {
+        let open = app.desk.rem_open.contains(&title);
+        let total: i64 = items.iter().map(|x| x.2).sum();
+        let head = button(row![text(if open { "▾" } else { "▸" }).size(13).width(18), text(format!("{title} ({})", items.len())).size(14).font(BOLD).width(Fill),
+            text(if items.is_empty() { String::new() } else { ui::money(total) }).size(14).font(BOLD)].spacing(6).align_y(Alignment::Center))
+            .padding([8, 12]).width(Fill).style(theme::row_btn).on_press(Message::Desk(Msg::RemToggle(title)));
+        list = list.push(head);
+        if open {
+            if items.is_empty() { list = list.push(container(ui::muted("Nothing here.")).padding(Padding { left: 36.0, top: 2.0, bottom: 8.0, right: 0.0 })); }
+            for (label, date, amt, msg) in items {
+                list = list.push(button(row![text(app.d(&date)).size(13).color(k.muted).width(112), text(label).size(13).width(Fill), text(ui::money(amt)).size(13)].spacing(6))
+                    .padding(Padding { left: 36.0, right: 12.0, top: 4.0, bottom: 4.0 }).width(Fill).style(theme::row_btn).on_press_maybe(msg));
+            }
+        }
+        list = list.push(ui::hr());
+    }
+    container(column![
+        row![text("Reminders").size(22).font(BOLD), ui::hspace(), ui::btn("Collapse All", Some(Message::Desk(Msg::RemToggle("__none")))), ui::btn("Refresh", Some(Message::Refresh))].spacing(8).align_y(Alignment::Center),
+        container(scrollable(list).style(theme::scroll).height(Fill)).style(theme::card).width(Fill).height(Fill).clip(true),
+    ].spacing(12)).padding(18).max_width(1100).height(Fill).into()
 }
 
 fn bi_ensure(app: &mut App, n: usize) {

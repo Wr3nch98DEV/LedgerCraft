@@ -1767,7 +1767,7 @@ fn every_screen_in_every_layout_loads() {
         Route::ReceivePayment(None), Route::PayBills, Route::Spend(None), Route::Check(None), Route::Deposit, Route::Transfer, Route::Journal,
         Route::NewContact(true), Route::NewProduct, Route::NewAccount, Route::Payroll, Route::Taxes, Route::Projects, Route::Mileage, Route::Reconcile,
         Route::Register(None), Route::Calendar, Route::Statements, Route::Memorized, Route::PaySalesTax, Route::AdjustInventory, Route::Help, Route::DocCenter,
-        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates, Route::PriceLevels, Route::PrintForms, Route::PayrollForms, Route::CustomizeFavorites, Route::BuildAssemblies, Route::InventoryCenter, Route::BatchInvoices];
+        Route::PayLiabilities, Route::ClassList, Route::EnterTime, Route::MemorizedReports, Route::PayrollItems, Route::OtherNames, Route::FinanceCharges, Route::Templates, Route::PriceLevels, Route::PrintForms, Route::PayrollForms, Route::CustomizeFavorites, Route::BuildAssemblies, Route::InventoryCenter, Route::BatchInvoices, Route::Reminders];
     for layout in Layout::ALL {
         let (mut app, dir) = desktop_app(&format!("all-{}", layout.key()));
         let t = app.update(Message::SetLayout(layout));
@@ -2882,5 +2882,25 @@ fn register_opens_edits_and_voids_a_check() {
     press(&mut app, "Void Check");
     assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
     assert_ne!(app.be.call_now("banktx.get", json!({"id": id})).unwrap()["status"], "AUTHORISED");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn desktop_reminders() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("reminders");
+    let t = app.update(Message::Nav(Route::Reminders)); settle(&mut app, t);
+    assert!(app.data.as_ref().unwrap()["overdue"].as_array().map_or(0, |a| a.len()) > 0, "demo has overdue invoices");
+    // The section header shows the count; opening it lists invoices that open their form.
+    let n = app.data.as_ref().unwrap()["overdue"].as_array().unwrap().len();
+    let label = format!("Overdue Invoices ({n})");
+    press(&mut app, &label);
+    assert!(app.desk.rem_open.contains(&"Overdue Invoices"));
+    let first = app.data.as_ref().unwrap()["overdue"][0].clone();
+    let text = format!("{} {}", first["contact_name"].as_str().unwrap(), first["number"].as_str().unwrap());
+    let msgs = click(&app, &text);
+    assert!(matches!(msgs.first(), Some(Message::Nav(Route::Doc { id: Some(_), .. }))), "{msgs:?}");
+    let _ = app.update(Message::Desk(W::RemToggle("__none")));
+    assert!(app.desk.rem_open.is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
