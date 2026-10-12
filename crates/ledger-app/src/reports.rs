@@ -69,12 +69,14 @@ pub struct State {
     pub contact: Option<Opt>,
     /// Desktop "Hide Header".
     pub hide_header: bool,
+    /// QuickZoom: the account shown on the Account QuickReport.
+    pub account: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Msg {
     Period(Period), Basis(bool), Export(bool), Exported(Result<String, String>),
-    Customize, From(String), To(String), Columns(Columns), Negative(Negative), ShowZero(bool), Contact(Option<Opt>), Run, HideHeader,
+    Customize, From(String), To(String), Columns(Columns), Negative(Negative), ShowZero(bool), Contact(Option<Opt>), Run, HideHeader, Zoom(i64),
 }
 
 /// The report's dates: the chosen period, or the custom dates when they parse.
@@ -103,6 +105,8 @@ pub fn params(app: &App) -> Value {
         }
     }
     if let Some(c) = &r.contact { p["contact_id"] = json!(c.id); }
+    // Account QuickReport: the account picked by QuickZoom.
+    if matches!(&app.route, Route::Report(k) if k == "account-transactions") { if let Some(a) = r.account { p["account_id"] = json!(a); } }
     p
 }
 
@@ -128,6 +132,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         }
         Msg::Basis(c) => app.report.cash = c,
         Msg::Customize => { app.report.customize = !app.report.customize; return Task::none(); }
+        Msg::Zoom(id) => { app.report.account = Some(id); return app.go(Route::Report("account-transactions".into())); }
         Msg::HideHeader => { app.report.hide_header = !app.report.hide_header; return Task::none(); }
         Msg::From(v) => { app.report.from = v; app.report.period = Period::Custom; return Task::none(); }
         Msg::To(v) => { app.report.to = v; app.report.period = Period::Custom; return Task::none(); }
@@ -305,7 +310,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
         for r in s["rows"].as_array().cloned().unwrap_or_default() {
             let date = r["date"].as_str().map(|x| format!("{}  ", app.d(x))).unwrap_or_default();
             let lbl: Element<'static, Message> = text(format!("{date}{}", qb_label(app.skin, r["label"].as_str().unwrap_or("")))).size(14).into();
-            let msg = r["document_id"].as_i64().map(|id| Message::Nav(Route::Doc { kind: "ACCREC".into(), id: Some(id) }));
+            // QuickZoom: a document row opens it; an account row opens that account's transactions.
+            let msg = r["document_id"].as_i64().map(|id| Message::Nav(Route::Doc { kind: "ACCREC".into(), id: Some(id) }))
+                .or_else(|| r["account_id"].as_i64().filter(|_| key != "account-transactions").map(|a| Message::Report(Msg::Zoom(a))));
             body = body.push(val_row(lbl, &r["values"], false, msg));
             for c in r["children"].as_array().cloned().unwrap_or_default() {
                 let date = c["date"].as_str().map(|x| format!("{}  ", app.d(x))).unwrap_or_default();

@@ -1312,3 +1312,27 @@ fn desktop_register_entry_row() {
     assert!(rows.as_array().unwrap().iter().any(|r| r["description"] == "Check 1050"));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn report_quickzoom_to_account() {
+    use crate::reports::Msg as Rp;
+    let (mut app, dir) = desktop_app("zoom");
+    let _ = app.update(Message::Nav(Route::Report("profit-and-loss".into())));
+    let _ = app.update(Message::Report(Rp::Period(crate::reports::Period::Last12Months)));
+    let p = crate::reports::params(&app);
+    let rep = app.be.call_now("reports.run", json!({"name": "profit-and-loss", "params": p})).unwrap();
+    let row = rep["sections"].as_array().unwrap().iter().flat_map(|s| s["rows"].as_array().cloned().unwrap_or_default()).find(|r| r["account_id"].is_i64()).unwrap();
+    app.data = Some(rep.clone());
+    let label = row["label"].as_str().unwrap().to_string();
+    let msgs = click(&app, &label);
+    let acc = row["account_id"].as_i64().unwrap();
+    assert!(matches!(msgs.as_slice(), [Message::Report(Rp::Zoom(x))] if *x == acc), "{msgs:?}");
+    let _ = app.update(Message::Report(Rp::Zoom(acc)));
+    assert_eq!(app.route, Route::Report("account-transactions".into()));
+    let p = crate::reports::params(&app);
+    assert_eq!(p["account_id"], acc);
+    let detail = app.be.call_now("reports.run", json!({"name": "account-transactions", "params": p})).unwrap();
+    assert_eq!(detail["sections"].as_array().unwrap().len(), 1, "just that account");
+    assert_eq!(detail["sections"][0]["account_id"], acc);
+    let _ = std::fs::remove_dir_all(dir);
+}
