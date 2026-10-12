@@ -250,7 +250,7 @@ fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Messag
     match name {
         "File" => vec![e("New Company…", "", nav(Route::Setup)), e("Open or Restore Company…", "", nav(Route::Setup)), e("Open Previous Company", "", nav(Route::Setup)), sep(),
             e("Back Up Company", "", None), e("Print Forms", "", None), sep(), e("Exit", "Alt+F4", Some(Message::Desk(Msg::Exit)))],
-        "Edit" => vec![e("Undo", "Ctrl+Z", None), sep(), e("Find…", "Ctrl+F", None), e("Search…", "F3", None), sep(), e("Preferences…", "", nav(Route::Settings))],
+        "Edit" => vec![e("Undo", "Ctrl+Z", None), sep(), e("Find…", "Ctrl+F", Some(Message::FocusSearch)), e("Search…", "F3", None), sep(), e("Preferences…", "", nav(Route::Settings))],
         "View" => vec![e("Open Window List", "", Some(Message::Desk(Msg::Pane(Pane::Windows)))), e("View Balances", "", Some(Message::Desk(Msg::Pane(Pane::Balances)))),
             e("My Shortcuts", "", Some(Message::Desk(Msg::Pane(Pane::Shortcuts)))), sep(), e(if app.dark { "Light Mode" } else { "Dark Mode" }, "Alt+T", Some(Message::ToggleTheme)), sep(),
             e("Switch to QuickBooks Online-style layout", "", Some(Message::SetLayout(theme::Layout::Online))), e("Switch to Xero-style layout", "", Some(Message::SetLayout(theme::Layout::Xero)))],
@@ -321,6 +321,9 @@ fn dropdown<'a>(app: &'a App, name: &'static str) -> Element<'a, Message> {
     container(opaque(container(scrollable(c).style(theme::scroll)).max_height(620).padding(4).style(theme::menu))).padding(Padding { top: 28.0, left, ..Padding::ZERO }).into()
 }
 
+/// The icon bar search box (Ctrl+F / Edit ▸ Find focuses it).
+pub const SEARCH_ID: &str = "desk-search";
+
 // ---------------- left icon bar ----------------
 
 fn icon_bar(app: &App) -> Element<'_, Message> {
@@ -377,7 +380,7 @@ fn icon_bar(app: &App) -> Element<'_, Message> {
         button(row![icon(ic, 15.0, if active { k.nav_active } else { k.nav_muted }), text(label).size(12).color(if active { k.nav_text } else { k.nav_muted })].spacing(8).align_y(Alignment::Center))
             .style(theme::nav_item(active)).padding([5, 10]).width(Fill).on_press(Message::Desk(Msg::Pane(p))).into()
     };
-    let search = text_input("Search Company or Help", &app.search).on_input(Message::Search).on_submit(Message::SearchGo).padding([5, 8]).size(12).style(theme::input);
+    let search = text_input("Search Company or Help", &app.search).id(SEARCH_ID).on_input(Message::Search).on_submit(Message::SearchGo).padding([5, 8]).size(12).style(theme::input);
     container(column![
         container(search).padding(8),
         scrollable(container(body).padding([4, 8])).style(theme::scroll).height(Fill),

@@ -141,6 +141,8 @@ pub enum Message {
     Set1099(i64, bool),
     /// Show an engine error as a toast.
     Failed(String),
+    /// Put the cursor in the search box (Desktop Ctrl+F / Edit ▸ Find).
+    FocusSearch,
     Noop,
 }
 
@@ -562,6 +564,7 @@ impl App {
             Message::Settings(m) => crate::settings::update(self, m),
             Message::NewDocFor(kind, cid) => { self.prefill_contact = Some(cid); self.go(Route::Doc { kind, id: None }) }
             Message::Failed(e) => self.toast(e, true),
+            Message::FocusSearch => { self.menu = None; iced::widget::operation::focus(crate::desktop::SEARCH_ID) }
             Message::Set1099(cid, on) => {
                 if let Some(d) = self.data.as_mut() { d["contact"]["track_1099"] = json!(on as i64); }
                 self.be.call("contacts.set1099", json!({"id": cid, "on": on}), |r| match r { Ok(_) => Message::Noop, Err(e) => Message::Failed(e) })
@@ -585,6 +588,7 @@ impl App {
                     let r = match c { "i" => Some(Route::Doc { kind: "ACCREC".into(), id: None }), "w" => Some(Route::Check(None)), "a" => Some(Route::Chart),
                         "j" => Some(Route::Customers), "r" => Some(Route::Register(None)), "e" => Some(Route::Doc { kind: "ACCPAY".into(), id: None }), _ => None };
                     if let Some(r) = r { return self.go(r); }
+                    if c == "f" { return self.update(Message::FocusSearch); }
                 }
                 _ => {}
             }
