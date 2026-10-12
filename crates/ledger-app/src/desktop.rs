@@ -43,10 +43,14 @@ pub struct State {
     pub emp: Option<i64>,
     /// Calendar: months away from the current month.
     pub cal_offset: i32,
+    /// Create Statements: one customer (None = all customers with a balance) and the statement date.
+    pub stmt_one: Option<crate::app::Opt>,
+    pub stmt_date: String,
+    pub stmt_busy: bool,
 }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>) }
 
 impl App {
     /// Keep the current screen's unsaved state with its window.
@@ -124,6 +128,33 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, move |r| Message::Desk(Msg::Detail(id, r)))
         }
         Msg::ReportCat(c) => { app.desk.report_cat = Some(c); Task::none() }
+        Msg::StmtOne(o) => { app.desk.stmt_one = o; Task::none() }
+        Msg::StmtDate(v) => { app.desk.stmt_date = v; Task::none() }
+        Msg::StmtDone(r) => { app.desk.stmt_busy = false; match r { Ok(m) => app.toast(m, false), Err(e) => app.toast(e, true) } }
+        Msg::StmtEmail => {
+            let ids = statement_ids(app);
+            if ids.is_empty() { return app.toast("No customers with an open balance", true); }
+            app.desk.stmt_busy = true;
+            app.be.call("statements.email", serde_json::json!({"contact_ids": ids}), |r| Message::Desk(Msg::StmtDone(r.map(|v| format!("{} statement(s) queued to email (customers without an email address are skipped)", v["queued"].as_i64().unwrap_or(0))))))
+        }
+        Msg::StmtPrint => {
+            let ids = statement_ids(app);
+            if ids.is_empty() { return app.toast("No customers with an open balance", true); }
+            let Some(date) = ui::to_iso(&app.desk.stmt_date, app.date_style()).or_else(|| Some(ui::today_iso())) else { return Task::none() };
+            app.desk.stmt_busy = true;
+            let be = app.be.clone();
+            let style = app.date_style();
+            let letter = matches!(app.country().as_str(), "US" | "CA");
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<String, String> {
+                    let rep = statement_report(&be, &ids, &date, style)?;
+                    let path = crate::pdf::output_dir().join(format!("Statements {date}.pdf"));
+                    std::fs::write(&path, crate::pdf::report(&rep, "Statement", letter, &|s: &str| s.to_string())).map_err(|e| format!("Couldn't save: {e}"))?;
+                    crate::pdf::open_file(&path);
+                    Ok(format!("Saved {}", path.display()))
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Desk(Msg::StmtDone(r)))
+        }
         Msg::CalMonth(d) => { app.desk.cal_offset = if d == 0 { 0 } else { app.desk.cal_offset + d }; Task::none() }
         Msg::Employee(id) => { app.desk.emp = Some(id); Task::none() }
         Msg::Tracker(f) => { app.desk.tracker = if app.desk.tracker == f { "all" } else { f }; Task::none() }
@@ -174,6 +205,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::Settings => "Preferences".into(),
         Route::Reconcile => "Reconcile".into(),
         Route::Calendar => "Calendar".into(),
+        Route::Statements => "Create Statements".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
         Route::Doc { kind, .. } => match kind.as_str() {
             "ACCREC" => "Create Invoices", "QUOTE" => "Create Estimates", "ACCRECCREDIT" => "Create Credit Memos/Refunds", "SALESRECEIPT" => "Enter Sales Receipts",
@@ -232,7 +264,7 @@ fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Option<Messag
             e("Purchase Orders List", "", nav(Route::PurchaseOrders)), e("Receive Items", "", None), e("Adjust Quantity/Value on Hand…", "", None)],
         "Customers" => vec![e("Customer Center", "Ctrl+J", nav(Route::Customers)), sep(), e("Create Estimates", "", doc_new("QUOTE")), e("Create Sales Orders", "", None),
             e("Create Invoices", "Ctrl+I", doc_new("ACCREC")), e("Enter Sales Receipts", "", doc_new("SALESRECEIPT")), e("Enter Statement Charges", "", doc_new("DELAYEDCHARGE")),
-            e("Create Statements…", "", None), e("Assess Finance Charges…", "", None), sep(), e("Receive Payments", "", nav(Route::ReceivePayment(None))),
+            e("Create Statements…", "", nav(Route::Statements)), e("Assess Finance Charges…", "", None), sep(), e("Receive Payments", "", nav(Route::ReceivePayment(None))),
             e("Create Credit Memos/Refunds", "", doc_new("ACCRECCREDIT")), sep(), e("Income Tracker", "", nav(Route::AllSales)), e("Item List", "", nav(Route::Products))],
         "Vendors" => vec![e("Vendor Center", "", nav(Route::Vendors)), sep(), e("Enter Bills", "", doc_new("ACCPAY")), e("Pay Bills", "", nav(Route::PayBills)), e("Bill Tracker", "", nav(Route::Bills)),
             sep(), e("Sales Tax: Manage Sales Tax…", "", nav(Route::Taxes)), sep(), e("Create Purchase Orders", "", doc_new("PO")), e("Purchase Orders List", "", nav(Route::PurchaseOrders)),
@@ -400,6 +432,77 @@ pub fn frame<'a>(app: &'a App, content: Element<'a, Message>) -> Element<'a, Mes
         layers = layers.push(container(opaque(container(list).padding(8).width(400).style(theme::menu))).padding(Padding { top: 72.0, left: 8.0, ..Padding::ZERO }));
     }
     layers.into()
+}
+
+// ---------------- Create Statements ----------------
+
+/// Customers the statements are for: the chosen one, or everyone with an open balance.
+fn statement_ids(app: &App) -> Vec<i64> {
+    if let Some(o) = &app.desk.stmt_one { return vec![o.id]; }
+    app.data.as_ref().and_then(|d| d.as_array().cloned()).unwrap_or_default().iter()
+        .filter(|c| c["receivable"].as_i64().unwrap_or(0) > 0).filter_map(|c| c["id"].as_i64()).collect()
+}
+
+/// Statements as a printable report: one section per customer listing their open invoices.
+pub fn statement_report(be: &crate::backend::Backend, ids: &[i64], date: &str, style: ui::DateStyle) -> Result<Value, String> {
+    let org = be.call_now("session.get", serde_json::json!({}))?["org"]["name"].clone();
+    let mut sections = vec![];
+    for id in ids {
+        let c = be.call_now("contacts.get", serde_json::json!({"id": id}))?;
+        let docs = be.call_now("docs.list", serde_json::json!({"type": "SALES", "contact_id": id, "tab": "awaiting", "limit": 500}))?;
+        let mut rows = vec![];
+        let mut total = 0;
+        for d in docs["rows"].as_array().cloned().unwrap_or_default() {
+            if d["date"].as_str().unwrap_or("") > date { continue; }
+            let due = d["amount_due"].as_i64().unwrap_or(0) * if d["type"] == "ACCRECCREDIT" { -1 } else { 1 };
+            total += due;
+            rows.push(serde_json::json!({"label": format!("{}  {}  {}  due {}", ui::date(d["date"].as_str().unwrap_or(""), style), if d["type"] == "ACCRECCREDIT" { "Credit Memo" } else { "Invoice" },
+                d["number"].as_str().unwrap_or(""), ui::date(d["due_date"].as_str().unwrap_or(""), style)), "values": [due]}));
+        }
+        let addr = c["postal_address"].as_str().unwrap_or("").replace('\n', ", ");
+        sections.push(serde_json::json!({"title": if addr.is_empty() { c["name"].clone() } else { serde_json::json!(format!("{} — {}", c["name"].as_str().unwrap_or(""), addr)) },
+            "rows": rows, "total": {"label": "Amount Due", "values": [total]}}));
+    }
+    Ok(serde_json::json!({"title": "Statement", "org": org, "subtitle": format!("Statement date {}", ui::date(date, style)), "columns": ["Amount"], "sections": sections}))
+}
+
+/// Customers ▸ Create Statements.
+pub fn statements(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
+    let list = d.as_array().cloned().unwrap_or_default();
+    let with_balance: Vec<&Value> = list.iter().filter(|c| c["receivable"].as_i64().unwrap_or(0) > 0).collect();
+    let opts: Vec<crate::app::Opt> = list.iter().map(|c| crate::app::Opt { id: c["id"].as_i64().unwrap_or(0), label: c["name"].as_str().unwrap_or("").to_string() }).collect();
+    let date = if app.desk.stmt_date.is_empty() { app.d(&ui::today_iso()) } else { app.desk.stmt_date.clone() };
+    let all = app.desk.stmt_one.is_none();
+    let radio = |on: bool, label: &'static str, m: Message| -> Element<'_, Message> {
+        button(row![text(if on { "●" } else { "○" }).size(14).color(if on { k.accent } else { k.muted }), text(label).size(13)].spacing(8).align_y(Alignment::Center)).style(theme::ghost).padding([3, 4]).on_press(m).into()
+    };
+    let n = statement_ids(app).len();
+    let busy = app.desk.stmt_busy;
+    container(column![
+        text("Create Statements").size(22).font(BOLD),
+        row![
+            container(column![
+                text("SELECT STATEMENT OPTIONS").size(11).font(BOLD).color(k.info),
+                row![text("Statement Date").size(13).width(140), text_input("", &date).on_input(|v| Message::Desk(Msg::StmtDate(v))).padding([5, 7]).size(13).style(theme::input).width(140)].spacing(10).align_y(Alignment::Center),
+                radio(true, "Statement period: all open transactions as of the statement date", Message::Noop),
+                text("SELECT TEMPLATE").size(11).font(BOLD).color(k.info),
+                container(text("LedgerCraft Statement (open items)").size(13)).padding([5, 7]).width(280).style(theme::soft),
+            ].spacing(10)).padding(14).width(Fill).style(theme::card),
+            container(column![
+                text("SELECT CUSTOMERS").size(11).font(BOLD).color(k.info),
+                radio(all, "All Customers (with an open balance)", Message::Desk(Msg::StmtOne(None))),
+                radio(!all, "One Customer", Message::Desk(Msg::StmtOne(app.desk.stmt_one.clone().or_else(|| opts.first().cloned())))),
+                if all { Element::from(text(format!("{} customer(s) will get a statement", with_balance.len())).size(12).color(k.muted)) }
+                else { pick_list(opts.clone(), app.desk.stmt_one.clone(), |o| Message::Desk(Msg::StmtOne(Some(o)))).padding([5, 7]).text_size(13).style(theme::pick).width(280).into() },
+            ].spacing(10)).padding(14).width(Fill).style(theme::card),
+        ].spacing(14),
+        row![ui::hspace(), text(format!("{n} statement(s)")).size(13).color(k.muted),
+            ui::btn("E-mail", if busy || n == 0 { None } else { Some(Message::Desk(Msg::StmtEmail)) }),
+            ui::btn_primary("Print", if busy || n == 0 { None } else { Some(Message::Desk(Msg::StmtPrint)) }),
+            ui::btn("Close", Some(Message::Back))].spacing(8).align_y(Alignment::Center),
+    ].spacing(14)).padding(18).max_width(1100).into()
 }
 
 // ---------------- Calendar ----------------
@@ -975,7 +1078,7 @@ pub fn home(app: &App) -> Element<'_, Message> {
     ]);
     let customers = band("CUSTOMERS", vec![
         row![node("file", "Estimates", doc_new("QUOTE")), arrow(), node("sales", "Create Invoices", doc_new("ACCREC")), arrow(), node("receive", "Receive Payments", nav(Route::ReceivePayment(None))), arrow(), node("deposit", "Record Deposits", nav(Route::Deposit))].align_y(Alignment::Start).into(),
-        row![node("receive", "Create Sales Receipts", doc_new("SALESRECEIPT")), gap(), node("list", "Statement Charges", doc_new("DELAYEDCHARGE")), arrow(), node("docs", "Statements", None), gap(), node("refresh", "Refunds & Credits", doc_new("ACCRECCREDIT"))].align_y(Alignment::Start).into(),
+        row![node("receive", "Create Sales Receipts", doc_new("SALESRECEIPT")), gap(), node("list", "Statement Charges", doc_new("DELAYEDCHARGE")), arrow(), node("docs", "Statements", nav(Route::Statements)), gap(), node("refresh", "Refunds & Credits", doc_new("ACCRECCREDIT"))].align_y(Alignment::Start).into(),
     ]);
     let employees = band("EMPLOYEES", vec![
         row![node("payroll", "Payroll Center", nav(Route::Payroll)), gap(), node("check-write", "Pay Employees", nav(Route::Payroll)), arrow(), node("taxes", "Pay Liabilities", None), arrow(), node("docs", "Process Payroll Forms", None)].align_y(Alignment::Start).into(),

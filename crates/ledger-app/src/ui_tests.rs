@@ -1142,3 +1142,35 @@ fn desktop_calendar() {
     assert_eq!(crate::ui::add_months_date(d, -11), chrono::NaiveDate::from_ymd_opt(2025, 12, 1).unwrap());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_create_statements() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("deskstmt");
+    let _ = app.update(Message::Nav(Route::Statements));
+    let list = app.be.call_now("contacts.list", json!({"filter": "customers"})).unwrap();
+    app.data = Some(list.clone());
+    let owing: Vec<i64> = list.as_array().unwrap().iter().filter(|c| c["receivable"].as_i64().unwrap_or(0) > 0).map(|c| c["id"].as_i64().unwrap()).collect();
+    assert!(!owing.is_empty());
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["SELECT CUSTOMERS", "All Customers (with an open balance)", "Print", "E-mail"] { assert!(ui.find(t).is_ok(), "missing {t}"); }
+    }
+    // The statements: one section per customer, totals equal what they owe.
+    let rep = crate::desktop::statement_report(&app.be, &owing, &crate::ui::today_iso(), crate::ui::DateStyle::Us).unwrap();
+    let secs = rep["sections"].as_array().unwrap();
+    assert_eq!(secs.len(), owing.len());
+    for (s, id) in secs.iter().zip(&owing) {
+        let want = list.as_array().unwrap().iter().find(|c| c["id"].as_i64() == Some(*id)).unwrap()["receivable"].as_i64().unwrap();
+        let credits: i64 = app.be.call_now("docs.list", json!({"type": "ACCRECCREDIT", "contact_id": id, "tab": "awaiting"})).unwrap()["rows"].as_array().unwrap().iter().map(|r| r["amount_due"].as_i64().unwrap_or(0)).sum();
+        assert_eq!(s["total"]["values"][0].as_i64().unwrap(), want - credits);
+    }
+    let pdf = crate::pdf::report(&rep, "Statement", true, &|s: &str| s.to_string());
+    assert!(pdf.starts_with(b"%PDF"));
+    // One customer.
+    let one = crate::app::Opt { id: owing[0], label: "x".into() };
+    let _ = app.update(Message::Desk(W::StmtOne(Some(one))));
+    assert_eq!(app.desk.stmt_one.as_ref().unwrap().id, owing[0]);
+    let _ = std::fs::remove_dir_all(dir);
+}
