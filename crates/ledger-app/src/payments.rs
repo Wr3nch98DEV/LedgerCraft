@@ -153,6 +153,8 @@ pub fn open_deposit(app: &mut App) -> Task<Message> {
     let mut s = base(app, Mode::Deposit, true);
     let banks = bank_only(app);
     s.account = banks.into_iter().next();
+    // Desktop: rows for other amounts (owner contributions, loans, refunds…).
+    if app.desktop() { s.lines = vec![SpendLine::default(), SpendLine::default()]; }
     app.pay = Some(s);
     app.data = Some(json!({}));
     app.be.call("deposits.undeposited", json!({}), |r| Message::Pay(Msg::Undeposited(r)))
@@ -247,9 +249,24 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             match s.mode {
                 Mode::Deposit => {
                     let ids: Vec<i64> = s.docs.iter().filter(|d| d.pick).map(|d| d.id).collect();
-                    if ids.is_empty() { app.pay = Some(s); return app.toast("Tick the payments to deposit", true); }
+                    let other: Vec<Value> = s.lines.iter().filter(|l| l.account.is_some() && ui::parse_money(&l.amount).unwrap_or(0) != 0)
+                        .map(|l| json!({"account_id": l.account.as_ref().map(|a| a.id), "description": l.description, "amount": l.amount.replace(',', "")})).collect();
+                    if s.lines.iter().any(|l| l.account.is_none() && ui::parse_money(&l.amount).unwrap_or(0) != 0) { app.pay = Some(s); return app.toast("Choose the From Account for each other amount", true); }
+                    if ids.is_empty() && other.is_empty() { app.pay = Some(s); return app.toast("Tick the payments to deposit, or list other amounts", true); }
                     s.busy = true;
-                    app.be.call("deposits.create", json!({"account_id": acc.id, "date": date, "reference": s.reference, "payment_ids": ids}), |r| Message::Pay(Msg::Saved(r)))
+                    let be = app.be.clone();
+                    let (acc_id, reference) = (acc.id, s.reference.clone());
+                    // Customer payments go in as one deposit; other amounts as money received into the same account.
+                    return { app.pay = Some(s); Task::perform(async move {
+                        tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                            if !ids.is_empty() { be.call_now("deposits.create", json!({"account_id": acc_id, "date": date, "reference": reference, "payment_ids": ids}))?; }
+                            if !other.is_empty() {
+                                be.call_now("banktx.save", json!({"tx": {"type": "RECEIVE", "account_id": acc_id, "date": date, "reference": if reference.is_empty() { "Deposit".to_string() } else { reference.clone() },
+                                    "line_amount_type": "NOTAX", "lines": other}}))?;
+                            }
+                            Ok(json!({}))
+                        }).await.unwrap_or_else(|e| Err(e.to_string()))
+                    }, |r| Message::Pay(Msg::Saved(r))) };
                 }
                 Mode::Receive | Mode::PayBills => {
                     let mut items = vec![];

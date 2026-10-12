@@ -2833,3 +2833,19 @@ fn pay_bills_select_all_and_clear() {
     assert!(app.pay.as_ref().unwrap().docs.iter().all(|d| !d.pick));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn make_deposits_with_other_amounts() {
+    use crate::payments::Msg as P;
+    let (mut app, dir) = desktop_app("deposit-other");
+    let t = app.update(Message::Nav(Route::Deposit)); settle(&mut app, t);
+    let bank = app.pay.as_ref().unwrap().account.clone().unwrap();
+    let equity = app.lk.account_opts(|a| a["type"] == "EQUITY")[0].clone();
+    let bal = |app: &App| app.be.call_now("accounts.list", json!({})).unwrap().as_array().unwrap().iter().find(|a| a["id"].as_i64() == Some(bank.id)).unwrap()["ytd_balance"].as_i64().unwrap();
+    let before = bal(&app);
+    for m in [P::LineAccount(0, equity), P::LineDesc(0, "Owner contribution".into()), P::LineAmount(0, "5000".into())] { let t = app.update(Message::Pay(m)); settle(&mut app, t); }
+    press(&mut app, "Save & Close");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert_eq!(bal(&app), before + 500_000);
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -4,6 +4,7 @@
 
 use crate::app::{App, Message, Opt};
 use crate::payments::{Mode, Msg, State};
+use crate::icons::icon;
 use crate::theme::{self, t};
 use crate::ui::{self, BOLD};
 use iced::widget::{Space, button, checkbox, column, combo_box, container, pick_list, row, scrollable, text, text_input};
@@ -227,6 +228,24 @@ fn deposit<'a>(app: &'a App, s: &'a State) -> Element<'a, Message> {
     for (n, d) in s.docs.iter().enumerate() {
         grid = grid.push(grid_row(vec![checkbox(d.pick).on_toggle(move |v| Message::Pay(Msg::Pick(n, v))).into(), ui::cell(d.contact.clone()), ui::cell(app.d(&d.date)), ui::cell_muted(d.number.clone()), ui::cell_muted("Check"), ui::cell_money(d.due)], &cols));
     }
+    // Other amounts: From Account, Memo, Amount (QuickFill on the account).
+    let accounts = app.lk.account_opts(|a| a["type"] != "BANK");
+    let ocols: Vec<(&str, u16, bool)> = vec![("From Account", 26, false), ("Memo", 30, false), ("Amount", 13, true), ("", 3, false)];
+    let mut other = column![grid_head(&ocols)];
+    let mut other_total = 0i64;
+    for (n, l) in s.lines.iter().enumerate() {
+        other_total += ui::parse_money(&l.amount).unwrap_or(0);
+        other = other.push(grid_row(vec![
+            match s.acct_boxes.get(n) {
+                Some(st) => combo_box(st, "", l.account.as_ref(), move |a| Message::Pay(Msg::LineAccount(n, a))).padding([4, 5]).size(13).input_style(theme::cell_input).width(Fill).into(),
+                None => pick_list(accounts.clone(), l.account.clone(), move |a| Message::Pay(Msg::LineAccount(n, a))).padding([4, 5]).text_size(13).style(theme::pick).width(Fill).into(),
+            },
+            text_input("", &l.description).on_input(move |v| Message::Pay(Msg::LineDesc(n, v))).padding([4, 5]).size(13).style(theme::cell_input).into(),
+            text_input("", &l.amount).on_input(move |v| Message::Pay(Msg::LineAmount(n, v))).padding([4, 5]).size(13).align_x(iced::alignment::Horizontal::Right).style(theme::cell_input).into(),
+            button(icon("trash", 13.0, k.faint)).style(theme::ghost).padding(3).on_press(Message::Pay(Msg::RemoveLine(n))).into(),
+        ], &ocols));
+    }
+    let total = total + other_total;
     column![
         row![
             column![label("Deposit To"), pick_list(banks, s.account.clone(), |a| Message::Pay(Msg::Account(a))).padding([5, 7]).text_size(13).style(theme::pick).width(280)].spacing(3),
@@ -234,8 +253,10 @@ fn deposit<'a>(app: &'a App, s: &'a State) -> Element<'a, Message> {
             column![label("Memo"), input(&s.reference, 260.0, Msg::Reference)].spacing(3),
         ].spacing(16).align_y(Alignment::End),
         text("Click Payments to select customer payments that you have received. List any other amounts to deposit below.").size(13).color(k.muted),
-        container(scrollable(grid).style(theme::scroll)).height(Length::Fixed(260.0)).style(theme::card).width(Fill).clip(true),
-        row![ui::hspace(), text("Deposit Total").size(13).font(BOLD), text(ui::money(total)).size(15).font(BOLD)].spacing(16),
+        container(scrollable(grid).style(theme::scroll)).height(Length::Fixed(200.0)).style(theme::card).width(Fill).clip(true),
+        text("Other amounts").size(13).font(BOLD),
+        container(scrollable(other).style(theme::scroll)).height(Length::Fixed(150.0)).style(theme::card).width(Fill).clip(true),
+        row![ui::btn("Add lines", Some(Message::Pay(Msg::AddLine))), ui::hspace(), text("Deposit Total").size(13).font(BOLD), text(ui::money(total)).size(15).font(BOLD)].spacing(16).align_y(Alignment::Center),
         buttons(s, "Save & Close"),
     ].spacing(12).into()
 }
