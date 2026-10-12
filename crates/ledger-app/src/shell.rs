@@ -15,6 +15,10 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if app.route == Route::Setup {
         return with_toasts(app, container(setup::view(app)).style(theme::page).width(Fill).height(Fill).into());
     }
+    if app.desktop() {
+        let content = container(page(app)).style(theme::page).width(Fill).height(Fill);
+        return with_toasts(app, crate::desktop::frame(app, content.into()));
+    }
     let content = container(page(app)).style(theme::page).width(Fill).height(Fill);
     let base: Element<Message> = match app.skin {
         Skin::QuickBooks => row![qb_sidebar(app), column![qb_topbar(app), content]].into(),
@@ -72,6 +76,7 @@ fn with_toasts<'a>(app: &'a App, base: Element<'a, Message>) -> Element<'a, Mess
 /// Routes to the screen for the current route.
 fn page(app: &App) -> Element<'_, Message> {
     match &app.route {
+        Route::Dashboard if app.desktop() => crate::desktop::home(app),
         Route::Dashboard => dashboard::view(app),
         Route::AllSales | Route::Invoices | Route::Quotes | Route::CreditNotes | Route::Bills | Route::Expenses | Route::PurchaseOrders => lists::docs(app),
         Route::Customers | Route::Vendors | Route::Contacts => lists::contacts(app),
@@ -269,7 +274,8 @@ fn gear_menu(app: &App) -> Element<'_, Message> {
         menu_col("Lists", vec![("All lists", None), ("Products and services", Some(Message::Nav(Route::Products))), ("Recurring transactions", None), ("Attachments", None)]),
         menu_col("Tools", vec![("Import data", None), ("Export data", None), ("Reconcile", Some(Message::Nav(Route::Reconcile))), ("Budgeting", None), ("Audit log", None)]),
         menu_col("Profile", vec![
-            (if other == Skin::Xero { "Switch to Xero-style layout" } else { "Switch to QuickBooks-style layout" }, Some(Message::SetSkin(other))),
+            (if other == Skin::Xero { "Switch to Xero-style layout" } else { "Switch to QuickBooks Online-style layout" }, Some(Message::SetSkin(other))),
+            ("Switch to QuickBooks Desktop-style layout", Some(Message::SetLayout(crate::theme::Layout::Desktop))),
             (if app.dark { "Light mode" } else { "Dark mode" }, Some(Message::ToggleTheme)),
             ("Switch company", Some(Message::Nav(Route::Setup))),
         ]),

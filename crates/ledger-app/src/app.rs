@@ -1,7 +1,7 @@
 //! Application state, messages, routing and data loading shared by both layouts.
 
 use crate::backend::{Backend, Reply};
-use crate::theme::{self, Skin};
+use crate::theme::{self, Layout, Skin};
 use crate::ui::DateStyle;
 use crate::{banking, doc, forms, payments, people, reports, setup, shell};
 use iced::{Element, Subscription, Task, keyboard};
@@ -105,6 +105,9 @@ pub enum Message {
     Refresh,
     ToggleTheme,
     SetSkin(Skin),
+    SetLayout(Layout),
+    /// QuickBooks Desktop layout: windows, icon bar panes, Home tabs.
+    Desk(crate::desktop::Msg),
     ToggleNew,
     ToggleGear,
     OpenMenu(Option<&'static str>),
@@ -137,7 +140,10 @@ pub enum Message {
 
 pub struct App {
     pub be: Backend,
+    /// Vocabulary family (QuickBooks or Xero); always `layout.skin()`.
     pub skin: Skin,
+    pub layout: Layout,
+    pub desk: crate::desktop::State,
     pub dark: bool,
     pub route: Route,
     pub history: Vec<Route>,
@@ -189,12 +195,31 @@ pub fn parse_route(s: &str) -> Option<Route> {
 
 fn prefs_path(be: &Backend) -> std::path::PathBuf { be.st.data_dir.join("ui-preferences.json") }
 
+/// A saved layout. Files written before the Desktop layout existed ("v" < 2) said "quickbooks" for
+/// the only QuickBooks layout there was; those now open in Desktop, the new default.
+fn saved_layout(prefs: &Value, v: &Value) -> Layout {
+    match v.as_str() {
+        None => Layout::Desktop,
+        Some("quickbooks") if prefs["v"].as_i64().unwrap_or(1) < 2 => Layout::Desktop,
+        Some(k) => Layout::from_key(k),
+    }
+}
+
 impl App {
+    /// Boot with an optional layout family override (tests use this: QuickBooks → the Online layout).
+    #[cfg(test)]
     pub fn boot(data_dir: std::path::PathBuf, start: Option<Route>, skin: Option<Skin>) -> (App, Task<Message>) {
+        Self::boot_layout(data_dir, start, skin.map(Layout::from))
+    }
+
+    pub fn boot_layout(data_dir: std::path::PathBuf, start: Option<Route>, layout: Option<Layout>) -> (App, Task<Message>) {
         let be = Backend::new(data_dir);
         let prefs: Value = std::fs::read_to_string(prefs_path(&be)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}));
+        let saved = saved_layout(&prefs, &prefs["layout"]);
         let app = App {
-            skin: Skin::from_key(prefs["layout"].as_str().unwrap_or("quickbooks")),
+            skin: saved.skin(),
+            layout: saved,
+            desk: Default::default(),
             dark: prefs["dark"].as_bool().unwrap_or(true),
             be,
             route: Route::Dashboard,
@@ -225,10 +250,10 @@ impl App {
             setup: setup::State::default(),
             start_route: start,
             pending_nav: None,
-            skin_locked: skin.is_some(),
+            skin_locked: layout.is_some(),
         };
         let mut app = app;
-        if let Some(s) = skin { app.skin = s; }
+        if let Some(l) = layout { app.set_layout(l); }
         let t = app.be.call("session.get", json!({}), Message::Session);
         (app, t)
     }
@@ -238,7 +263,14 @@ impl App {
         format!("{org} — LedgerCraft")
     }
 
-    pub fn theme(&self) -> iced::Theme { theme::iced_theme(theme::tokens(self.skin, self.dark)) }
+    pub fn theme(&self) -> iced::Theme { theme::iced_theme(theme::tokens_for(self.layout, self.dark)) }
+    pub fn desktop(&self) -> bool { self.layout == Layout::Desktop }
+    pub fn set_layout(&mut self, l: Layout) {
+        self.layout = l;
+        self.skin = l.skin();
+        // Desktop keeps a list of open windows; other layouts show one screen at a time.
+        if l != Layout::Desktop { self.desk.windows.clear(); }
+    }
 
     pub fn setting(&self, k: &str) -> String { self.session.as_ref().and_then(|s| s["settings"][k].as_str()).unwrap_or("").to_string() }
     pub fn country(&self) -> String { self.setting("country") }
@@ -255,11 +287,12 @@ impl App {
     pub fn save_prefs(&self) {
         let path = prefs_path(&self.be);
         let mut prefs: Value = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str(&s).ok()).filter(Value::is_object).unwrap_or(json!({}));
-        prefs["layout"] = json!(self.skin.key());
+        prefs["layout"] = json!(self.layout.key());
         prefs["dark"] = json!(self.dark);
+        prefs["v"] = json!(2);
         if let Some(u) = self.user_key() {
             if !prefs["users"].is_object() { prefs["users"] = json!({}); }
-            prefs["users"][u] = json!({"layout": self.skin.key(), "dark": self.dark});
+            prefs["users"][u] = json!({"layout": self.layout.key(), "dark": self.dark});
         }
         let _ = std::fs::write(path, prefs.to_string());
     }
@@ -275,7 +308,7 @@ impl App {
         let Some(u) = self.user_key() else { return };
         let prefs: Value = std::fs::read_to_string(prefs_path(&self.be)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}));
         let mine = &prefs["users"][u.as_str()];
-        if let Some(l) = mine["layout"].as_str() { if !self.skin_locked { self.skin = Skin::from_key(l); } }
+        if !mine["layout"].is_null() && !self.skin_locked { let l = saved_layout(&prefs, &mine["layout"]); self.set_layout(l); }
         if let Some(d) = mine["dark"].as_bool() { self.dark = d; }
     }
 
@@ -303,6 +336,24 @@ impl App {
 
     /// Navigate, remembering where we came from.
     pub fn go(&mut self, r: Route) -> Task<Message> {
+        if self.desktop() && !matches!(r, Route::Setup | Route::Login) && !matches!(self.route, Route::Setup | Route::Login) {
+            self.new_menu = false; self.gear_menu = false; self.menu = None;
+            let same = self.desk.windows.get(self.desk.active).map(|w| w.route == r).unwrap_or(false);
+            if !same {
+                // A new document that's just been saved keeps its window.
+                let saved_new = matches!((&self.route, &r), (Route::Doc { kind: a, id: None }, Route::Doc { kind: b, id: Some(_) }) if a == b);
+                if saved_new {
+                    let i = self.desk.active;
+                    if let Some(w) = self.desk.windows.get_mut(i) { w.route = r.clone(); }
+                } else {
+                    self.stash_window();
+                    if let Some(i) = self.desk.windows.iter().position(|w| w.route == r) {
+                        self.history.push(self.route.clone());
+                        if self.restore_window(i) { return Task::none(); }
+                    }
+                }
+            }
+        }
         if self.route != r { self.history.push(self.route.clone()); if self.history.len() > 50 { self.history.remove(0); } }
         self.route = r;
         self.list_q.clear();
@@ -315,6 +366,7 @@ impl App {
 
     /// Fetch the data for the current route.
     pub fn load(&mut self) -> Task<Message> {
+        if self.desktop() { self.ensure_window(); }
         self.page_gen += 1;
         self.data = None;
         self.error = None;
@@ -368,7 +420,18 @@ impl App {
             Message::Noop => Task::none(),
             Message::Nav(r) => self.go(r),
             Message::Back => {
+                // Desktop: Cancel/Back closes the window.
+                if self.desktop() && !matches!(self.route, Route::Setup | Route::Login) { let i = self.desk.active; return self.close_window(i); }
                 if let Some(r) = self.history.pop() { self.route = r; self.load() } else { Task::none() }
+            }
+            Message::Desk(m) => crate::desktop::update(self, m),
+            Message::SetLayout(l) => {
+                self.set_layout(l);
+                self.save_prefs();
+                self.gear_menu = false;
+                self.menu = None;
+                let t = self.toast(format!("Switched to the {} layout — same books, same data.", l.label()), false);
+                Task::batch([t, self.load()])
             }
             Message::Session(r) => match r {
                 Ok(v) if v["login_required"] == true => {
@@ -412,7 +475,7 @@ impl App {
             Message::Refresh => { let a = self.load(); Task::batch([a, self.load_lookups()]) }
             Message::ToggleTheme => { self.dark = !self.dark; self.save_prefs(); Task::none() }
             Message::SetSkin(s) => {
-                self.skin = s;
+                self.set_layout(Layout::from(s));
                 self.save_prefs();
                 self.gear_menu = false;
                 let t = self.toast(format!("Switched to the {} layout — same books, same data.", s.label()), false);
@@ -482,6 +545,12 @@ impl App {
                 keyboard::Key::Character("s") if modifiers.command() => {
                     if matches!(self.route, Route::Doc { .. }) { return doc::update(self, doc::Msg::Save(false)); }
                 }
+                // QuickBooks Desktop shortcuts.
+                keyboard::Key::Character(c) if modifiers.command() && self.desktop() && self.session.is_some() => {
+                    let r = match c { "i" => Some(Route::Doc { kind: "ACCREC".into(), id: None }), "w" => Some(Route::Check(None)), "a" => Some(Route::Chart),
+                        "j" => Some(Route::Customers), "r" => Some(Route::Banking(None)), "e" => Some(Route::Doc { kind: "ACCPAY".into(), id: None }), _ => None };
+                    if let Some(r) = r { return self.go(r); }
+                }
                 _ => {}
             }
         }
@@ -491,7 +560,7 @@ impl App {
     pub fn subscription(&self) -> Subscription<Message> { keyboard::listen().map(Message::Key) }
 
     pub fn view(&self) -> Element<'_, Message> {
-        theme::set_current(theme::tokens(self.skin, self.dark));
+        theme::set_current(theme::tokens_for(self.layout, self.dark));
         shell::view(self)
     }
 }

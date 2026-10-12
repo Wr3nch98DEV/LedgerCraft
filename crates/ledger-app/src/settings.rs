@@ -169,16 +169,16 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
     }
 }
 
-fn layout_card<'a>(app: &App, skin: Skin, desc: &'a str) -> Element<'a, Message> {
+fn layout_card<'a>(app: &App, layout: crate::theme::Layout, desc: &'a str) -> Element<'a, Message> {
     let k = t();
-    let active = app.skin == skin;
+    let active = app.layout == layout;
     button(column![
-        row![icon("layout", 20.0, if active { k.accent } else { k.muted }), text(skin.label()).size(16).font(BOLD), ui::hspace(), if active { ui::chip("In use", k.accent) } else { ui::chip("Switch", k.muted) }].spacing(10).align_y(Alignment::Center),
+        row![icon("layout", 20.0, if active { k.accent } else { k.muted }), text(layout.label()).size(16).font(BOLD), ui::hspace(), if active { ui::chip("In use", k.accent) } else { ui::chip("Switch", k.muted) }].spacing(10).align_y(Alignment::Center),
         ui::muted(desc),
     ].spacing(8))
     .padding(16)
     .width(Fill)
-    .on_press(Message::SetSkin(skin))
+    .on_press(Message::SetLayout(layout))
     .style(move |_, s| {
         let hover = matches!(s, button::Status::Hovered);
         button::Style { background: Some(iced::Background::Color(if hover { k.hover } else { k.panel })), text_color: k.text,
@@ -260,10 +260,11 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let body = column![
         ui::card(column![
             ui::h2("Layout"),
-            ui::muted("Choose the layout you're used to. Both work on the same books: switching never changes your data, and each person on the team can use their own."),
+            ui::muted("Choose the layout you're used to. All three work on the same books: switching never changes your data, and each person on the team can use their own."),
             row![
-                layout_card(app, Skin::QuickBooks, "Left-hand menu, + New with Customers / Vendors / Employees / Other, Business overview, Banking For review, US-style terms (Estimates, Vendors, Credit memos)."),
-                layout_card(app, Skin::Xero, "Top menu bar (Business, Accounting, Contacts), dashboard with bank account cards, Reconcile, Xero terms (Quotes, Suppliers, Credit notes)."),
+                layout_card(app, crate::theme::Layout::Desktop, "Menu bar (File, Edit, Lists, Company, Customers, Vendors, Banking, Reports…), left icon bar, Home page workflow, Customer and Vendor Centers, several windows open at once, Ctrl+I / Ctrl+W shortcuts."),
+                layout_card(app, crate::theme::Layout::Online, "Left-hand menu, + New with Customers / Vendors / Employees / Other, Business overview, Banking For review, US-style terms (Estimates, Vendors, Credit memos)."),
+                layout_card(app, crate::theme::Layout::Xero, "Top menu bar (Business, Accounting, Contacts), dashboard with bank account cards, Reconcile, Xero terms (Quotes, Suppliers, Credit notes)."),
             ].spacing(14),
         ].spacing(12)),
         ui::card(column![

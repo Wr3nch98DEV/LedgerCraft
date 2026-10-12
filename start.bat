@@ -6,8 +6,11 @@ cd /d "%~dp0"
 rem ---------------------------------------------------------------------------
 rem  LedgerCraft launcher
 rem    start.bat              build (if needed) and open the NATIVE app (100% Rust, iced)
-rem    start.bat xero         same, opening in the Xero-style layout (switch any time in the gear menu)
-rem    start.bat quickbooks   same, opening in the QuickBooks-style layout
+rem                           in your last layout (QuickBooks Desktop-style the first time)
+rem    start.bat desktop      same, opening in the QuickBooks Desktop-style layout
+rem    start.bat online       same, opening in the QuickBooks Online-style layout
+rem    start.bat xero         same, opening in the Xero-style layout
+rem                           (switch any time: View menu / gear menu / Preferences)
 rem    start.bat web          the previous web version (full feature set while the native app is built)
 rem    start.bat browser      the web version in your default browser
 rem    start.bat server       the web version's server only (no window), e.g. for testing
@@ -53,6 +56,8 @@ echo [2/2] Starting LedgerCraft...
 set "SKINARG="
 if /I "%MODE%"=="xero" set "SKINARG=--skin xero"
 if /I "%MODE%"=="quickbooks" set "SKINARG=--skin quickbooks"
+if /I "%MODE%"=="online" set "SKINARG=--skin quickbooks"
+if /I "%MODE%"=="desktop" set "SKINARG=--skin desktop"
 start "" "%APP%" %SKINARG%
 endlocal
 exit /b

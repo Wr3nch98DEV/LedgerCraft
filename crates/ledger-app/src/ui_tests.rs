@@ -714,3 +714,64 @@ fn render_agencies() {
     ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join("lc-agencies.png")).unwrap();
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A booted app in the QuickBooks Desktop layout on a demo company.
+fn desktop_app(tag: &str) -> (App, std::path::PathBuf) {
+    let dir = std::env::temp_dir().join(format!("lc-ui-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (mut app, _) = App::boot_layout(dir.clone(), None, Some(crate::theme::Layout::Desktop));
+    app.be.call_now("orgs.create", json!({"org_name": "Demo Co", "country": "US", "demo": true, "owner_name": "Alex Morgan"})).unwrap();
+    let session = app.be.call_now("session.get", json!({})).unwrap();
+    let _ = app.update(Message::Session(Ok(session)));
+    let get = |m: &str, p: Value| app.be.call_now(m, p).unwrap().as_array().cloned().unwrap();
+    let lk = Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})) };
+    let _ = app.update(Message::LookupsLoaded(Box::new(lk)));
+    (app, dir)
+}
+
+#[test]
+fn desktop_menus_windows_and_shortcuts() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("desk");
+    assert!(app.desktop());
+    assert_eq!(app.desk.windows.len(), 1, "Home is open");
+    // Lists ▸ Chart of Accounts, then Customers ▸ Create Invoices (from a window without its own Create Invoices icon).
+    let _ = app.update(Message::Nav(Route::Chart));
+    app.data = Some(app.be.call_now("accounts.list", json!({})).unwrap());
+    let msgs = click(&app, "Customers");
+    assert!(matches!(msgs.as_slice(), [Message::OpenMenu(Some("Customers"))]), "{msgs:?}");
+    let _ = app.update(Message::OpenMenu(Some("Customers")));
+    let msgs = click(&app, "Create Invoices");
+    let Some(Message::Nav(r)) = msgs.into_iter().next() else { panic!("no navigation") };
+    let _ = app.update(Message::Nav(r));
+    assert_eq!(app.desk.windows.len(), 3);
+    // Type something, open another window, come back: the unsaved invoice is still there.
+    app.doc.as_mut().unwrap().reference = "PO-778".into();
+    let _ = app.update(Message::Nav(Route::Products));
+    assert_eq!(app.desk.windows.len(), 4);
+    {
+        let _g = sim_lock();
+        let mut ui = simulator(app.view());
+        for t in ["Home", "Create Invoices", "Chart of Accounts", "Item List"] { assert!(ui.find(t).is_ok(), "missing tab {t}"); }
+    }
+    let _ = app.update(Message::Desk(W::Activate(2)));
+    assert_eq!(app.doc.as_ref().unwrap().reference, "PO-778", "unsaved form kept with its window");
+    // Opening the same screen again brings its window forward instead of a duplicate.
+    let _ = app.update(Message::Nav(Route::Chart));
+    let _ = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None }));
+    assert_eq!(app.desk.windows.len(), 4);
+    assert_eq!(app.doc.as_ref().unwrap().reference, "PO-778");
+    // Cancel closes the window.
+    let _ = app.update(Message::Back);
+    assert_eq!(app.desk.windows.len(), 3);
+    // Ctrl+W opens Write Checks.
+    let key = iced::keyboard::Event::KeyPressed { key: iced::keyboard::Key::Character("w".into()), modified_key: iced::keyboard::Key::Character("w".into()),
+        physical_key: iced::keyboard::key::Physical::Code(iced::keyboard::key::Code::KeyW), location: iced::keyboard::Location::Standard, modifiers: iced::keyboard::Modifiers::CTRL, text: None, repeat: false };
+    let _ = app.update(Message::Key(key));
+    assert_eq!(app.route, Route::Check(None));
+    // Close All leaves Home.
+    let _ = app.update(Message::Desk(W::CloseAll));
+    assert_eq!(app.desk.windows.len(), 1);
+    assert_eq!(app.route, Route::Dashboard);
+    let _ = std::fs::remove_dir_all(dir);
+}

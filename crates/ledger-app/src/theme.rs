@@ -11,9 +11,42 @@ use std::cell::Cell;
 pub enum Skin { QuickBooks, Xero }
 
 impl Skin {
-    pub fn key(self) -> &'static str { match self { Skin::QuickBooks => "quickbooks", Skin::Xero => "xero" } }
-    pub fn from_key(s: &str) -> Skin { if s == "xero" { Skin::Xero } else { Skin::QuickBooks } }
     pub fn label(self) -> &'static str { match self { Skin::QuickBooks => "QuickBooks-style", Skin::Xero => "Xero-style" } }
+}
+
+/// The screen layout. Desktop and Online are both QuickBooks (same terms, `Skin::QuickBooks`);
+/// they differ in navigation and screen design.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Layout { Desktop, Online, Xero }
+
+impl Layout {
+    pub const ALL: [Layout; 3] = [Layout::Desktop, Layout::Online, Layout::Xero];
+    pub fn key(self) -> &'static str { match self { Layout::Desktop => "desktop", Layout::Online => "quickbooks", Layout::Xero => "xero" } }
+    pub fn from_key(s: &str) -> Layout { match s { "xero" => Layout::Xero, "quickbooks" | "online" | "qbo" => Layout::Online, _ => Layout::Desktop } }
+    pub fn skin(self) -> Skin { if self == Layout::Xero { Skin::Xero } else { Skin::QuickBooks } }
+    pub fn label(self) -> &'static str { match self { Layout::Desktop => "QuickBooks Desktop-style", Layout::Online => "QuickBooks Online-style", Layout::Xero => "Xero-style" } }
+}
+impl From<Skin> for Layout { fn from(s: Skin) -> Layout { match s { Skin::QuickBooks => Layout::Online, Skin::Xero => Layout::Xero } } }
+
+/// Colours for a layout. Desktop has its own: charcoal icon bar and menu chrome, flat panels.
+pub fn tokens_for(layout: Layout, dark: bool) -> Tokens {
+    match (layout, dark) {
+        (Layout::Desktop, true) => Tokens {
+            dark, bg: hex(0x16181a), bg2: hex(0x1c1f22), panel: hex(0x212427), panel2: hex(0x292d31), hover: hex(0x30353a),
+            line: hex(0x353a40), line2: hex(0x474e55), text: hex(0xe9ecef), muted: hex(0xa3abb3), faint: hex(0x6f7780),
+            accent: hex(0x3cb04a), accent_ink: hex(0xffffff), accent_soft: hexa(0x3cb04a, 0.16), ok: hex(0x4cc35a), warn: hex(0xf0b43c),
+            bad: hex(0xf06a6a), info: hex(0x6ab0f3), nav_bg: hex(0x101214), nav_text: hex(0xe9ecef), nav_muted: hex(0xa3abb3),
+            nav_active: hex(0x3cb04a), nav_hover: hex(0x24282c),
+        },
+        (Layout::Desktop, false) => Tokens {
+            dark, bg: hex(0xe6e9ec), bg2: hex(0xdde1e5), panel: hex(0xffffff), panel2: hex(0xf1f3f5), hover: hex(0xe3ecf7),
+            line: hex(0xc5cbd1), line2: hex(0xa9b1b9), text: hex(0x1d2124), muted: hex(0x5a6168), faint: hex(0x8a9198),
+            accent: hex(0x2ca01c), accent_ink: hex(0xffffff), accent_soft: hexa(0x2ca01c, 0.12), ok: hex(0x2a8a1c), warn: hex(0xb06d00),
+            bad: hex(0xc8281e), info: hex(0x0b5fa5), nav_bg: hex(0x2f3439), nav_text: hex(0xffffff), nav_muted: hex(0xc3c9cf),
+            nav_active: hex(0x6fd15f), nav_hover: hex(0x40464c),
+        },
+        _ => tokens(layout.skin(), dark),
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

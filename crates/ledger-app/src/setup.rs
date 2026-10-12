@@ -1,7 +1,7 @@
 //! Company picker and new-company wizard.
 
 use crate::app::{App, Message};
-use crate::theme::{self, Skin, t};
+use crate::theme::{self, t};
 use crate::ui::{self, BOLD};
 use iced::widget::{Space, button, checkbox, column, container, pick_list, row, scrollable, text, text_input};
 use iced::{Alignment, Element, Fill, Task};
@@ -17,7 +17,7 @@ pub struct State {
     pub name: String,
     pub owner: String,
     pub country: Country,
-    pub skin: Skin,
+    pub layout: crate::theme::Layout,
     pub demo: bool,
     pub busy: bool,
     pub email: String,
@@ -27,7 +27,7 @@ pub struct State {
     pub login_org: String,
 }
 impl Default for State {
-    fn default() -> Self { State { orgs: vec![], name: String::new(), owner: String::new(), country: COUNTRIES[0], skin: Skin::QuickBooks, demo: false, busy: false, email: String::new(), password: String::new(), code: String::new(), login_org: String::new() } }
+    fn default() -> Self { State { orgs: vec![], name: String::new(), owner: String::new(), country: COUNTRIES[0], layout: crate::theme::Layout::Desktop, demo: false, busy: false, email: String::new(), password: String::new(), code: String::new(), login_org: String::new() } }
 }
 
 #[derive(Debug, Clone)]
@@ -38,7 +38,7 @@ pub enum Msg {
     Name(String),
     Owner(String),
     Country(Country),
-    Skin(Skin),
+    Layout(crate::theme::Layout),
     Demo(bool),
     Create,
     QuickDemo,
@@ -50,7 +50,7 @@ pub enum Msg {
 }
 
 pub fn load(app: &mut App) -> Task<Message> {
-    app.setup.skin = app.skin;
+    app.setup.layout = app.layout;
     app.data = Some(json!({}));
     app.be.call("orgs.list", json!({}), |r| Message::Setup(Msg::Orgs(r)))
 }
@@ -70,7 +70,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::Name(s) => { app.setup.name = s; Task::none() }
         Msg::Owner(s) => { app.setup.owner = s; Task::none() }
         Msg::Country(c) => { app.setup.country = c; Task::none() }
-        Msg::Skin(s) => { app.setup.skin = s; Task::none() }
+        Msg::Layout(l) => { app.setup.layout = l; Task::none() }
         Msg::Demo(d) => { app.setup.demo = d; Task::none() }
         Msg::Email(v) => { app.setup.email = v; Task::none() }
         Msg::Password(v) => { app.setup.password = v; Task::none() }
@@ -101,7 +101,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::Create => {
             if app.setup.name.trim().is_empty() { return app.toast("Enter your company name", true); }
             app.setup.busy = true;
-            if app.skin != app.setup.skin { app.skin = app.setup.skin; app.save_prefs(); }
+            if app.layout != app.setup.layout { let l = app.setup.layout; app.set_layout(l); app.save_prefs(); }
             let country = if app.setup.country.0 == "XX" { "" } else { app.setup.country.0 };
             app.be.call("orgs.create", json!({"org_name": app.setup.name.trim(), "country": country, "demo": app.setup.demo, "owner_name": app.setup.owner.trim()}), |r| Message::Setup(Msg::Opened(r)))
         }
@@ -128,10 +128,10 @@ pub fn view(app: &App) -> Element<'_, Message> {
         ].spacing(10).align_y(Alignment::Center)).style(theme::row_btn).padding([10, 12]).width(Fill).on_press_maybe(if s.busy { None } else { Some(Message::Setup(Msg::Open(file))) }));
     }
 
-    let layouts = row![
-        button(text("QuickBooks-style").size(14)).style(if s.skin == Skin::QuickBooks { theme::primary } else { theme::secondary }).padding([7, 14]).on_press(Message::Setup(Msg::Skin(Skin::QuickBooks))),
-        button(text("Xero-style").size(14)).style(if s.skin == Skin::Xero { theme::primary } else { theme::secondary }).padding([7, 14]).on_press(Message::Setup(Msg::Skin(Skin::Xero))),
-    ].spacing(6);
+    let layouts = row(crate::theme::Layout::ALL.iter().map(|l| {
+        let name = match l { crate::theme::Layout::Desktop => "QuickBooks Desktop", crate::theme::Layout::Online => "QuickBooks Online", crate::theme::Layout::Xero => "Xero" };
+        button(text(name).size(14)).style(if s.layout == *l { theme::primary } else { theme::secondary }).padding([7, 14]).on_press(Message::Setup(Msg::Layout(*l))).into()
+    })).spacing(6);
     let create = column![
         ui::h2("Set up a new company"),
         ui::muted("Everything is stored in one file on this computer. You can change these later."),
