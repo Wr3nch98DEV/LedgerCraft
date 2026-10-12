@@ -153,7 +153,8 @@ fn receive<'a>(app: &'a App, s: &'a State) -> Element<'a, Message> {
             column![label("Customer Balance"), container(text(ui::money(cust_bal)).size(14)).padding([5, 0])].spacing(3),
         ].spacing(30).align_y(Alignment::End),
         row![
-            column![label("Payment Amount"), container(text(ui::money(applied)).size(16).font(BOLD)).padding([4, 7]).width(160).style(theme::soft)].spacing(3),
+            column![label("Payment Amount"), text_input(&ui::plain(applied), &s.pay_total).on_input(|v| Message::Pay(Msg::PayTotal(v))).padding([5, 7]).size(16)
+                .align_x(iced::alignment::Horizontal::Right).style(theme::input).width(160)].spacing(3),
             column![label("Date"), input(&s.date, 120.0, Msg::Date)].spacing(3),
             column![label("Reference #"), input(&s.reference, 140.0, Msg::Reference)].spacing(3),
             column![label("Deposit To"), pick_list(app.lk.bank_opts(), s.account.clone(), |a| Message::Pay(Msg::Account(a))).padding([5, 7]).text_size(13).style(theme::pick).width(240)].spacing(3),
@@ -173,10 +174,13 @@ fn receive<'a>(app: &'a App, s: &'a State) -> Element<'a, Message> {
         row![text("Amount Due").size(13).width(140), text(ui::money(due)).size(13)],
         row![text("Applied").size(13).width(140), text(ui::money(applied)).size(13)],
     ].spacing(4);
+    let typed = ui::parse_money(&s.pay_total).unwrap_or(0);
+    let unapplied: Element<Message> = if typed > applied { text(format!("{} is more than the open invoices — only {} will be recorded.", ui::money(typed), ui::money(applied))).size(12).color(k.bad).into() } else { Space::new().into() };
+    let summary = row![column![ui::btn("Un-Apply Payment", Some(Message::Pay(Msg::Unapply))), unapplied].spacing(6), ui::hspace(), summary].align_y(Alignment::Start);
     column![
         head,
         container(scrollable(grid).style(theme::scroll)).height(Length::Fixed(240.0)).style(theme::card).width(Fill).clip(true),
-        row![ui::hspace(), summary],
+        summary,
         buttons(s, "Save & Close"),
     ].spacing(12).into()
 }

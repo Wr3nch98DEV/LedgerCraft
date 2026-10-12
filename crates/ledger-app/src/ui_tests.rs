@@ -2796,3 +2796,28 @@ fn desktop_add_job() {
     assert!(app.desk.job_new.is_none());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn receive_payment_auto_applies_oldest_first() {
+    use crate::payments::Msg as P;
+    let (mut app, dir) = desktop_app("autoapply");
+    // A customer with at least two open invoices.
+    let list = app.be.call_now("contacts.list", json!({"filter": "customers"})).unwrap();
+    let rows = app.be.call_now("docs.list", json!({"type": "ACCREC", "tab": "all", "limit": 5000})).unwrap()["rows"].as_array().unwrap().clone();
+    let cust = list.as_array().unwrap().iter().find(|c| rows.iter().filter(|r| r["contact_id"] == c["id"] && r["status"] == "AUTHORISED").count() >= 2).expect("demo customer with 2 open invoices").clone();
+    let t = app.update(Message::Nav(Route::ReceivePayment(cust["id"].as_i64()))); settle(&mut app, t);
+    let mut docs = app.pay.as_ref().unwrap().docs.clone();
+    docs.sort_by(|a, b| a.date.cmp(&b.date));
+    let (oldest, next) = (docs[0].clone(), docs[1].clone());
+    // Enough for the oldest plus 100.00 of the next.
+    let amt = oldest.due + 10000;
+    let _ = app.update(Message::Pay(P::PayTotal(crate::ui::plain(amt))));
+    let s = app.pay.as_ref().unwrap();
+    let get = |id: i64| s.docs.iter().find(|d| d.id == id).unwrap().clone();
+    assert!(get(oldest.id).pick && crate::ui::parse_money(&get(oldest.id).amount) == Some(oldest.due));
+    assert_eq!(crate::ui::parse_money(&get(next.id).amount), Some(10000));
+    // Un-Apply clears it all.
+    press(&mut app, "Un-Apply Payment");
+    assert!(app.pay.as_ref().unwrap().docs.iter().all(|d| !d.pick && d.amount.is_empty()));
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -41,6 +41,8 @@ pub struct State {
     pub new_after: bool,
     /// Write Checks ▸ Print: print the check once it's saved.
     pub print_after: bool,
+    /// Receive Payments: the payment amount as typed (auto-applied to the oldest invoices first).
+    pub pay_total: String,
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +70,9 @@ pub enum Msg {
     SaveNew,
     /// Write Checks: save, print the check, and start the next one.
     SavePrint,
+    /// Receive Payments: the payment amount typed; Un-Apply Payment.
+    PayTotal(String),
+    Unapply,
     Printed(Result<String, String>),
 }
 
@@ -112,7 +117,7 @@ fn base(app: &App, mode: Mode, customers: bool) -> State {
     State {
         mode, acct_boxes: vec![], box_sig: vec![], contact: None, contact_text: String::new(), contacts: combo_box::State::new(app.lk.contact_opts(customers)),
         account: app.lk.bank_opts().into_iter().next(), date: ui::date(&ui::today_iso(), app.date_style()), reference: String::new(),
-        docs: vec![], lines: vec![], lat: "INCLUSIVE".into(), busy: false, check: false, check_no: String::new(), new_after: false, print_after: false,
+        docs: vec![], lines: vec![], lat: "INCLUSIVE".into(), busy: false, check: false, check_no: String::new(), new_after: false, print_after: false, pay_total: String::new(),
     }
 }
 
@@ -201,8 +206,24 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::NextCheck(r) => { if let Ok(v) = r { s.check_no = v["number"].as_str().unwrap_or("").to_string(); } Task::none() }
         Msg::Date(d) => { s.date = ui::date_keys(&s.date, &d, app.date_style()); Task::none() }
         Msg::Reference(r) => { s.reference = r; Task::none() }
-        Msg::Pick(n, on) => { let d = &mut s.docs[n]; d.pick = on; d.amount = if on { ui::plain(d.due) } else { String::new() }; Task::none() }
-        Msg::Amount(n, a) => { let d = &mut s.docs[n]; d.pick = ui::parse_money(&a).unwrap_or(0) > 0; d.amount = a; Task::none() }
+        Msg::PayTotal(v) => {
+            // Apply to the oldest invoices first, as QuickBooks Desktop does.
+            let mut left = ui::parse_money(&v).unwrap_or(0).max(0);
+            let mut order: Vec<usize> = (0..s.docs.len()).collect();
+            order.sort_by(|a, b| s.docs[*a].date.cmp(&s.docs[*b].date));
+            for i in order {
+                let d = &mut s.docs[i];
+                let take = left.min(d.due);
+                d.pick = take > 0;
+                d.amount = if take > 0 { ui::plain(take) } else { String::new() };
+                left -= take;
+            }
+            s.pay_total = v;
+            Task::none()
+        }
+        Msg::Unapply => { for d in s.docs.iter_mut() { d.pick = false; d.amount.clear(); } s.pay_total.clear(); Task::none() }
+        Msg::Pick(n, on) => { s.pay_total.clear(); let d = &mut s.docs[n]; d.pick = on; d.amount = if on { ui::plain(d.due) } else { String::new() }; Task::none() }
+        Msg::Amount(n, a) => { s.pay_total.clear(); let d = &mut s.docs[n]; d.pick = ui::parse_money(&a).unwrap_or(0) > 0; d.amount = a; Task::none() }
         Msg::LineAccount(n, a) => {
             let tax = a_tax(app, a.id);
             let l = &mut s.lines[n];
