@@ -74,6 +74,8 @@ pub struct State {
     pub job_new: Option<String>,
     /// Reminders: sections expanded to show their items.
     pub rem_open: Vec<&'static str>,
+    /// New/Edit Employee: the employee being edited (None = new) and the form's fields, as typed.
+    pub emp_form: Option<(Option<i64>, std::collections::BTreeMap<&'static str, String>, Value)>,
     /// Build Assemblies: the assembly, its components/builds (from items.components), quantity, date, memo,
     /// and the component list being edited (item, quantity per assembly).
     pub ba_item: Option<crate::app::Opt>,
@@ -138,7 +140,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), ShowInactive(bool), RemToggle(&'static str), JobNew(Option<String>), JobSave(i64), JobSaved(crate::backend::Reply), BiCust(i64, bool), BiAll(bool), BiItem(usize, crate::app::Opt), BiField(usize, u8, String), BiAddLine, BiDate(String), BiCreate, BiDone(crate::backend::Reply), InvSelect(i64), InvDetail(crate::backend::Reply), JobsLoaded(crate::backend::Reply), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), ShowInactive(bool), EmpNew, EmpEdit(i64), EmpLoaded(crate::backend::Reply), EmpField(&'static str, String), EmpSave, EmpSaved(crate::backend::Reply), EmpCancel, RemToggle(&'static str), JobNew(Option<String>), JobSave(i64), JobSaved(crate::backend::Reply), BiCust(i64, bool), BiAll(bool), BiItem(usize, crate::app::Opt), BiField(usize, u8, String), BiAddLine, BiDate(String), BiCreate, BiDone(crate::backend::Reply), InvSelect(i64), InvDetail(crate::backend::Reply), JobsLoaded(crate::backend::Reply), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
     /// Remember the Desktop view choices (One Window, icon bar pane).
@@ -386,6 +388,64 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         },
         Msg::RemToggle("__none") => { app.desk.rem_open.clear(); Task::none() }
         Msg::RemToggle(s) => { if app.desk.rem_open.contains(&s) { app.desk.rem_open.retain(|x| *x != s); } else { app.desk.rem_open.push(s); } Task::none() }
+        Msg::EmpNew => {
+            let mut f = std::collections::BTreeMap::new();
+            f.insert("start_date", app.d(&ui::today_iso())); f.insert("pay_basis", "SALARY".into()); f.insert("employment_type", "FULLTIME".into()); f.insert("hours_per_week", "38".into());
+            let cal = app.data.as_ref().and_then(|d| d["settings"]["calendars"][0]["id"].as_i64());
+            if let Some(c) = cal { f.insert("pay_calendar_id", c.to_string()); }
+            app.desk.emp_form = Some((None, f, Value::Null));
+            Task::none()
+        }
+        Msg::EmpEdit(id) => app.be.call("payroll.employee", serde_json::json!({"id": id}), |r| Message::Desk(Msg::EmpLoaded(r))),
+        Msg::EmpLoaded(r) => match r {
+            Ok(e) => {
+                let s = |k: &str| e[k].as_str().unwrap_or("").to_string();
+                let num = |k: &str, div: f64| e[k].as_i64().map(|v| { let x = v as f64 / div; if x.fract() == 0.0 { format!("{}", x as i64) } else { format!("{x:.2}") } }).unwrap_or_default();
+                let mut f = std::collections::BTreeMap::new();
+                for k in ["first_name", "last_name", "email", "address", "tax_id", "tax_code", "employment_type", "pay_basis", "bank_account"] { f.insert(k, s(k)); }
+                f.insert("start_date", app.d(&s("start_date")));
+                f.insert("termination_date", e["termination_date"].as_str().map(|d| app.d(d)).unwrap_or_default());
+                f.insert("annual_salary", num("annual_salary", 100.0));
+                f.insert("hourly_rate", num("hourly_rate_e2", 10_000.0));
+                f.insert("hours_per_week", num("hours_per_week_e2", 100.0));
+                f.insert("super_rate", num("super_rate_bp", 100.0));
+                f.insert("pay_calendar_id", e["pay_calendar_id"].as_i64().map(|v| v.to_string()).unwrap_or_default());
+                app.desk.emp_form = Some((e["id"].as_i64(), f, e));
+                Task::none()
+            }
+            Err(e) => app.toast(e, true),
+        },
+        Msg::EmpField(k, v) => {
+            let style = app.date_style();
+            let today = app.d(&ui::today_iso());
+            if let Some((_, f, _)) = app.desk.emp_form.as_mut() {
+                let v = if k.ends_with("_date") { let old = f.get(k).cloned().unwrap_or_default(); ui::date_keys(if old.is_empty() && k == "start_date" { &today } else { &old }, &v, style) } else { v };
+                f.insert(k, v);
+            }
+            Task::none()
+        }
+        Msg::EmpCancel => { app.desk.emp_form = None; Task::none() }
+        Msg::EmpSave => {
+            let Some((id, f, orig)) = app.desk.emp_form.clone() else { return Task::none() };
+            let g = |k: &str| f.get(k).cloned().unwrap_or_default().trim().to_string();
+            if g("first_name").is_empty() || g("last_name").is_empty() { return app.toast("Enter the employee's first and last name", true); }
+            let Some(start) = ui::to_iso(&g("start_date"), app.date_style()) else { return app.toast("Check the hire date", true) };
+            let term = if g("termination_date").is_empty() { None } else { match ui::to_iso(&g("termination_date"), app.date_style()) { Some(d) => Some(d), None => return app.toast("Check the release date", true) } };
+            let emp = serde_json::json!({"first_name": g("first_name"), "last_name": g("last_name"), "email": g("email"), "address": g("address"), "start_date": start, "termination_date": term,
+                "tax_id": g("tax_id"), "tax_code": g("tax_code"), "employment_type": g("employment_type"), "pay_calendar_id": g("pay_calendar_id").parse::<i64>().ok(),
+                "pay_basis": g("pay_basis"), "annual_salary": g("annual_salary").replace(',', ""), "hourly_rate": g("hourly_rate").replace(',', ""), "hours_per_week": g("hours_per_week"),
+                "super_rate": g("super_rate"), "bank_account": g("bank_account"), "template": orig["template"].as_array().cloned().unwrap_or_default()});
+            app.be.call("payroll.saveEmployee", serde_json::json!({"id": id, "employee": emp}), |r| Message::Desk(Msg::EmpSaved(r)))
+        }
+        Msg::EmpSaved(r) => match r {
+            Ok(v) => {
+                app.desk.emp_form = None;
+                if let Some(id) = v["id"].as_i64() { app.desk.emp = Some(id); }
+                let t1 = app.toast("Employee saved", false);
+                Task::batch([t1, app.load(), app.load_lookups()])
+            }
+            Err(e) => app.toast(e, true),
+        },
         Msg::ShowInactive(v) => { app.desk.show_inactive = v; Task::none() }
         Msg::OpenPrefs(cat) => { app.settings.cat = Some(cat); app.go(Route::Settings) }
         Msg::FavAdd(f) => { if !app.desk.favorites.contains(&f) { app.desk.favorites.push(f); app.save_desk_prefs(); } Task::none() }
@@ -2297,6 +2357,42 @@ pub fn calendar(app: &App) -> Element<'_, Message> {
 // ---------------- Employee Center ----------------
 
 /// Employees ▸ Employee Center: employee list, Employee Information and the payroll runs.
+/// New Employee / Edit Employee (inside the Employee Center).
+fn employee_form<'a>(app: &'a App, d: &'a Value) -> Element<'a, Message> {
+    let k = t();
+    let Some((id, f, _)) = &app.desk.emp_form else { return Space::new().into() };
+    let v = |key: &'static str| f.get(key).cloned().unwrap_or_default();
+    let field = move |label: &'static str, key: &'static str, w: f32| -> Element<'a, Message> {
+        column![text(label).size(11).font(BOLD).color(k.info), text_input("", &v(key)).on_input(move |x| Message::Desk(Msg::EmpField(key, x))).padding([5, 7]).size(13).style(theme::input).width(Length::Fixed(w))].spacing(3).into()
+    };
+    let choice = move |label: &'static str, key: &'static str, opts: Vec<(&'static str, &'static str)>, w: f32| -> Element<'a, Message> {
+        let names: Vec<String> = opts.iter().map(|o| o.1.to_string()).collect();
+        let cur = opts.iter().find(|o| o.0 == v(key)).map(|o| o.1.to_string());
+        column![text(label).size(11).font(BOLD).color(k.info), pick_list(names, cur, move |n: String| { let code = opts.iter().find(|o| o.1 == n).map(|o| o.0).unwrap_or(""); Message::Desk(Msg::EmpField(key, code.to_string())) })
+            .padding([5, 7]).text_size(13).style(theme::pick).width(Length::Fixed(w))].spacing(3).into()
+    };
+    let cals: Vec<crate::app::Opt> = d["settings"]["calendars"].as_array().cloned().unwrap_or_default().iter().map(|c| crate::app::Opt { id: c["id"].as_i64().unwrap_or(0), label: c["name"].as_str().unwrap_or("").to_string() }).collect();
+    let cal = v("pay_calendar_id").parse::<i64>().ok().and_then(|i| cals.iter().find(|c| c.id == i).cloned());
+    let hourly = v("pay_basis") == "HOURLY";
+    let retirement = d["settings"]["retirement_label"].as_str().unwrap_or("Retirement");
+    container(scrollable(column![
+        text(if id.is_some() { "Edit Employee" } else { "New Employee" }).size(18).font(BOLD),
+        text("Personal").size(13).font(BOLD),
+        row![field("FIRST NAME", "first_name", 200.0), field("LAST NAME", "last_name", 220.0), field("EMAIL", "email", 280.0)].spacing(14),
+        field("ADDRESS", "address", 600.0),
+        text("Payroll Info").size(13).font(BOLD),
+        row![field("HIRE DATE", "start_date", 140.0), field("RELEASE DATE", "termination_date", 140.0),
+            choice("EMPLOYMENT", "employment_type", vec![("FULLTIME", "Full-time"), ("PARTTIME", "Part-time"), ("CASUAL", "Casual"), ("CONTRACTOR", "Contractor")], 160.0),
+            column![text("PAY SCHEDULE").size(11).font(BOLD).color(k.info), pick_list(cals, cal, |c: crate::app::Opt| Message::Desk(Msg::EmpField("pay_calendar_id", c.id.to_string()))).padding([5, 7]).text_size(13).style(theme::pick).width(180)].spacing(3)].spacing(14),
+        row![choice("PAY BASIS", "pay_basis", vec![("SALARY", "Salary"), ("HOURLY", "Hourly")], 140.0),
+            if hourly { field("HOURLY RATE", "hourly_rate", 140.0) } else { field("ANNUAL SALARY", "annual_salary", 160.0) },
+            field("HOURS PER WEEK", "hours_per_week", 130.0), column![text(format!("{} %", retirement.to_uppercase())).size(11).font(BOLD).color(k.info),
+                text_input("default", &v("super_rate")).on_input(|x| Message::Desk(Msg::EmpField("super_rate", x))).padding([5, 7]).size(13).style(theme::input).width(120)].spacing(3)].spacing(14),
+        row![field("TAX ID / SSN", "tax_id", 180.0), field("TAX CODE / FILING STATUS", "tax_code", 200.0), field("BANK ACCOUNT (DIRECT DEPOSIT)", "bank_account", 240.0)].spacing(14),
+        row![ui::hspace(), ui::btn_primary("OK", Some(Message::Desk(Msg::EmpSave))), ui::btn("Cancel", Some(Message::Desk(Msg::EmpCancel)))].spacing(8),
+    ].spacing(12)).style(theme::scroll)).padding(16).width(Fill).height(Fill).style(theme::card).into()
+}
+
 pub fn employee_center(app: &App) -> Element<'_, Message> {
     let k = t();
     let Some(d) = &app.data else { return container(ui::muted("Loading…")).padding(20).into() };
@@ -2305,8 +2401,8 @@ pub fn employee_center(app: &App) -> Element<'_, Message> {
     let name = |e: &Value| format!("{} {}", e["first_name"].as_str().unwrap_or(""), e["last_name"].as_str().unwrap_or(""));
     let busy = app.people.busy;
     let toolbar = row![
-        ui::btn("New Employee", None),
-        ui::btn("Manage Employee Information", None),
+        ui::btn("New Employee", Some(Message::Desk(Msg::EmpNew))),
+        ui::btn("Edit Employee", sel.map(|id| Message::Desk(Msg::EmpEdit(id)))),
         ui::btn_primary("Pay Employees", if busy { None } else { Some(Message::People(crate::people::Msg::RunPayroll)) }),
         ui::hspace(),
         ui::btn("Payroll Summary", rep("payroll-activity")),
@@ -2326,7 +2422,8 @@ pub fn employee_center(app: &App) -> Element<'_, Message> {
         scrollable(names).style(theme::scroll).height(Fill),
     ].spacing(6)).width(300).height(Fill).style(theme::card);
     let info: Element<Message> = match sel.and_then(|id| emps.iter().find(|e| e["id"].as_i64() == Some(id))) {
-        None => container(ui::muted("No employees yet — add them in the Payroll settings of the web version for now.")).padding(16).width(Fill).style(theme::card).into(),
+        _ if app.desk.emp_form.is_some() => employee_form(app, d),
+        None => container(ui::muted("No employees yet — New Employee adds one.")).padding(16).width(Fill).style(theme::card).into(),
         Some(e) => {
             let s = |key: &str| e[key].as_str().unwrap_or("").to_string();
             let row_ = |l: &'static str, v: String| -> Element<'_, Message> { row![text(l).size(12).color(k.info).width(120), text(if v.is_empty() { "—".into() } else { v }).size(13)].spacing(6).into() };

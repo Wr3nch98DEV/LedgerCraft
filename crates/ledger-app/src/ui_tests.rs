@@ -2904,3 +2904,46 @@ fn desktop_reminders() {
     assert!(app.desk.rem_open.is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn desktop_new_and_edit_employee() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("employee");
+    let t = app.update(Message::Nav(Route::Payroll)); settle(&mut app, t);
+    let before = app.be.call_now("payroll.employees", json!({})).unwrap().as_array().unwrap().len();
+    press(&mut app, "New Employee");
+    for (k, v) in [("first_name", "Riley"), ("last_name", "Nguyen"), ("email", "riley@example.test"), ("pay_basis", "HOURLY"), ("hourly_rate", "32.50"), ("hours_per_week", "30")] {
+        let _ = app.update(Message::Desk(W::EmpField(k, v.into())));
+    }
+    press(&mut app, "OK");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let emps = app.be.call_now("payroll.employees", json!({})).unwrap();
+    assert_eq!(emps.as_array().unwrap().len(), before + 1);
+    let e = emps.as_array().unwrap().iter().find(|e| e["last_name"] == "Nguyen").unwrap().clone();
+    let id = e["id"].as_i64().unwrap();
+    let full = app.be.call_now("payroll.employee", json!({"id": id})).unwrap();
+    assert_eq!(full["pay_basis"], "HOURLY");
+    assert_eq!(full["hourly_rate_e2"], 325_000);
+    assert_eq!(full["hours_per_week_e2"], 3000);
+    // Edit: switch to salary.
+    let t = app.update(Message::Desk(W::EmpEdit(id))); settle(&mut app, t);
+    assert_eq!(app.desk.emp_form.as_ref().unwrap().1["hourly_rate"], "32.50");
+    for (k, v) in [("pay_basis", "SALARY"), ("annual_salary", "72000")] { let _ = app.update(Message::Desk(W::EmpField(k, v.into()))); }
+    let t = app.update(Message::Desk(W::EmpSave)); settle(&mut app, t);
+    let full = app.be.call_now("payroll.employee", json!({"id": id})).unwrap();
+    assert_eq!((full["pay_basis"].as_str(), full["annual_salary"].as_i64(), full["email"].as_str()), (Some("SALARY"), Some(7_200_000), Some("riley@example.test")));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+#[ignore]
+fn render_employee_form() {
+    let (mut app, dir) = desktop_app("emp-shot");
+    let t = app.update(Message::Nav(Route::Payroll)); settle(&mut app, t);
+    let _ = app.update(Message::Desk(crate::desktop::Msg::EmpNew));
+    let _ = std::fs::remove_file(std::env::temp_dir().join("lc-route-wgpu.png"));
+    let _g = sim_lock();
+    let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
+    ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join("lc-route.png")).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
