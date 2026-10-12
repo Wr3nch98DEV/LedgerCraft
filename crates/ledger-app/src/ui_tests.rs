@@ -2849,3 +2849,38 @@ fn make_deposits_with_other_amounts() {
     assert_eq!(bal(&app), before + 500_000);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn register_opens_edits_and_voids_a_check() {
+    use crate::payments::Msg as P;
+    let (mut app, dir) = desktop_app("edit-check");
+    let t = app.update(Message::Nav(Route::Check(None))); settle(&mut app, t);
+    let vendor = app.lk.contact_opts(false)[0].clone();
+    let acct = app.lk.account_opts(|a| a["type"] == "EXPENSE")[0].clone();
+    for m in [P::Contact(vendor.clone()), P::LineAccount(0, acct), P::LineAmount(0, "75.00".into()), P::Reference("Window cleaning".into())] { let t = app.update(Message::Pay(m)); settle(&mut app, t); }
+    let bank = app.pay.as_ref().unwrap().account.clone().unwrap();
+    press(&mut app, "Save & Close");
+    // In the register, the check opens in Write Checks.
+    let t = app.update(Message::Nav(Route::Register(Some(bank.id)))); settle(&mut app, t);
+    let row = app.data.as_ref().unwrap()["rows"].as_array().unwrap().iter().find(|r| r["kind"] == "banktx" && r["reference"] == "Window cleaning").cloned().expect("check in register");
+    let id = row["id"].as_i64().unwrap();
+    let msgs = click(&app, "Window cleaning");
+    assert!(msgs.iter().any(|m| matches!(m, Message::Nav(Route::BankTx(x)) if *x == id)), "{msgs:?}");
+    let t = app.update(Message::Nav(Route::BankTx(id))); settle(&mut app, t);
+    let s = app.pay.as_ref().unwrap();
+    assert!(s.check);
+    assert_eq!(s.contact.as_ref().map(|c| c.id), Some(vendor.id));
+    assert_eq!(crate::ui::parse_money(&s.lines[0].amount), Some(7500));
+    // Change the amount and save: the same check, updated.
+    let t = app.update(Message::Pay(P::LineAmount(0, "80.00".into()))); settle(&mut app, t);
+    press(&mut app, "Save & Close");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let tx = app.be.call_now("banktx.get", json!({"id": id})).unwrap();
+    assert_eq!(tx["total"], 8000);
+    // Void it.
+    let t = app.update(Message::Nav(Route::BankTx(id))); settle(&mut app, t);
+    press(&mut app, "Void Check");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert_ne!(app.be.call_now("banktx.get", json!({"id": id})).unwrap()["status"], "AUTHORISED");
+    let _ = std::fs::remove_dir_all(dir);
+}

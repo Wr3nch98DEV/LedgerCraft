@@ -43,6 +43,8 @@ pub struct State {
     pub print_after: bool,
     /// Receive Payments: the payment amount as typed (auto-applied to the oldest invoices first).
     pub pay_total: String,
+    /// Editing a saved check/expense (its bank transaction id).
+    pub edit_id: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +74,10 @@ pub enum Msg {
     SavePrint,
     /// Receive Payments: the payment amount typed; Un-Apply Payment.
     PayTotal(String),
+    TxLoaded(Result<Value, String>),
+    /// Edit ▸ Void Check.
+    Void,
+    Voided(Result<Value, String>),
     Unapply,
     /// Pay Bills: Select All Bills (pay each in full).
     SelectAll,
@@ -119,7 +125,7 @@ fn base(app: &App, mode: Mode, customers: bool) -> State {
     State {
         mode, acct_boxes: vec![], box_sig: vec![], contact: None, contact_text: String::new(), contacts: combo_box::State::new(app.lk.contact_opts(customers)),
         account: app.lk.bank_opts().into_iter().next(), date: ui::date(&ui::today_iso(), app.date_style()), reference: String::new(),
-        docs: vec![], lines: vec![], lat: "INCLUSIVE".into(), busy: false, check: false, check_no: String::new(), new_after: false, print_after: false, pay_total: String::new(),
+        docs: vec![], lines: vec![], lat: "INCLUSIVE".into(), busy: false, check: false, check_no: String::new(), new_after: false, print_after: false, pay_total: String::new(), edit_id: None,
     }
 }
 
@@ -146,6 +152,16 @@ pub fn open_spend(app: &mut App, account: Option<i64>, check: bool) -> Task<Mess
     app.pay = Some(s);
     app.data = Some(json!({}));
     match (check, acc) { (true, Some(a)) => app.be.call("banktx.nextCheck", json!({"account_id": a}), |r| Message::Pay(Msg::NextCheck(r))), _ => Task::none() }
+}
+
+/// Open a saved check or expense from the register.
+pub fn open_tx(app: &mut App, id: i64) -> Task<Message> {
+    let mut s = base(app, Mode::Spend, false);
+    s.edit_id = Some(id);
+    s.busy = true;
+    app.pay = Some(s);
+    app.data = Some(json!({}));
+    app.be.call("banktx.get", json!({"id": id}), |r| Message::Pay(Msg::TxLoaded(r)))
 }
 
 /// Bank deposit: pick payments from Undeposited Funds and deposit them as one entry.
@@ -210,6 +226,42 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::NextCheck(r) => { if let Ok(v) = r { s.check_no = v["number"].as_str().unwrap_or("").to_string(); } Task::none() }
         Msg::Date(d) => { s.date = ui::date_keys(&s.date, &d, app.date_style()); Task::none() }
         Msg::Reference(r) => { s.reference = r; Task::none() }
+        Msg::TxLoaded(r) => {
+            s.busy = false;
+            match r {
+                Ok(t) => {
+                    let opt = |id: Option<i64>| id.and_then(|id| app.lk.account_opts(|_| true).into_iter().find(|o| o.id == id));
+                    s.check = t["subtype"] == "CHECK";
+                    s.account = t["account_id"].as_i64().and_then(|id| app.lk.bank_opts().into_iter().find(|o| o.id == id));
+                    s.contact = t["contact_id"].as_i64().map(|id| Opt { id, label: t["contact_name"].as_str().unwrap_or("").to_string() });
+                    s.contacts = combo_box::State::with_selection(app.lk.contact_opts(false), s.contact.as_ref());
+                    s.date = ui::date(t["date"].as_str().unwrap_or(""), app.date_style());
+                    s.reference = t["reference"].as_str().unwrap_or("").to_string();
+                    s.check_no = t["check_number"].as_str().map(String::from).or_else(|| t["check_number"].as_i64().map(|n| n.to_string())).unwrap_or_default();
+                    s.lat = t["line_amount_type"].as_str().unwrap_or("INCLUSIVE").to_string();
+                    s.lines = t["lines"].as_array().cloned().unwrap_or_default().iter().map(|l| SpendLine {
+                        account: opt(l["account_id"].as_i64()), description: l["description"].as_str().unwrap_or("").to_string(),
+                        amount: ui::plain(l["line_amount"].as_i64().unwrap_or(0)),
+                        tax: l["tax_rate_id"].as_i64().and_then(|id| app.lk.tax_opts().into_iter().find(|o| o.id == id)),
+                    }).collect();
+                    s.lines.push(SpendLine::default());
+                    Task::none()
+                }
+                Err(e) => app.toast(e, true),
+            }
+        }
+        Msg::Void => {
+            let Some(id) = s.edit_id else { app.pay = Some(s); return Task::none() };
+            s.busy = true;
+            app.be.call("banktx.void", json!({"id": id}), |r| Message::Pay(Msg::Voided(r)))
+        }
+        Msg::Voided(r) => {
+            s.busy = false;
+            match r {
+                Ok(_) => { let t1 = app.toast(if s.check { "Check voided" } else { "Transaction voided" }, false); let t2 = app.load_lookups(); let i = app.desk.active; let t3 = app.close_window(i); return Task::batch([t1, t2, t3]); }
+                Err(e) => app.toast(e, true),
+            }
+        }
         Msg::PayTotal(v) => {
             // Apply to the oldest invoices first, as QuickBooks Desktop does.
             let mut left = ui::parse_money(&v).unwrap_or(0).max(0);
@@ -295,7 +347,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                     let mut tx = json!({"type": "SPEND", "account_id": acc.id, "date": date, "reference": s.reference, "line_amount_type": s.lat, "lines": lines});
                     if s.check { tx["subtype"] = json!("CHECK"); tx["check_number"] = json!(s.check_no.trim()); }
                     match &s.contact { Some(c) => tx["contact_id"] = json!(c.id), None if !s.contact_text.trim().is_empty() => tx["contact_name"] = json!(s.contact_text.trim()), None => {} }
-                    app.be.call("banktx.save", json!({"tx": tx}), |r| Message::Pay(Msg::Saved(r)))
+                    app.be.call("banktx.save", json!({"id": s.edit_id, "tx": tx}), |r| Message::Pay(Msg::Saved(r)))
                 }
             }
         }

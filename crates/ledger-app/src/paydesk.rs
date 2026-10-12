@@ -46,6 +46,7 @@ pub fn words(cents: i64) -> String {
 fn buttons<'a>(s: &State, save: &'static str) -> Element<'a, Message> {
     let busy = s.busy;
     let mut r = row![ui::hspace()].spacing(8);
+    if s.edit_id.is_some() { r = r.push(ui::btn(if s.check { "Void Check" } else { "Void" }, if busy { None } else { Some(Message::Pay(Msg::Void)) })); }
     if s.mode == Mode::Spend && s.check { r = r.push(ui::btn("Print Check", if busy { None } else { Some(Message::Pay(Msg::SavePrint)) })); }
     if matches!(s.mode, Mode::Spend | Mode::Receive) { r = r.push(ui::btn("Save & New", if busy { None } else { Some(Message::Pay(Msg::SaveNew)) })); }
     r.push(ui::btn_primary(save, if busy { None } else { Some(Message::Pay(Msg::Save)) }))

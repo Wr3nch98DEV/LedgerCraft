@@ -878,6 +878,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::EditItem(_) => "Edit Item".into(),
         Route::EditAccount(_) => "Edit Account".into(),
         Route::BatchInvoices => "Batch Invoice".into(),
+        Route::BankTx(_) => if app.pay.as_ref().is_some_and(|s| !s.check) { "Enter Credit Card Charges".into() } else { "Write Checks".into() },
         Route::EditContact(id) => if app.lk.contacts.iter().find(|c| c["id"].as_i64() == Some(*id)).is_some_and(|c| c["is_supplier"].as_i64() == Some(1) && c["is_customer"].as_i64() != Some(1)) { "Edit Vendor".into() } else { "Edit Customer".into() },
         Route::EnterTime => "Time/Enter Single Activity".into(),
         Route::Register(_) => app.data.as_ref().filter(|_| app.route == *r).and_then(|d| d["banks"].as_array().and_then(|b| b.iter().find(|x| x["id"] == d["account"]).and_then(|x| x["name"].as_str().map(String::from)))).unwrap_or_else(|| "Register".into()),
@@ -2572,13 +2573,16 @@ pub fn register(app: &App) -> Element<'_, Message> {
             column![ui::cell(app.d(r["date"].as_str().unwrap_or(""))), text(kind).size(10).color(k.faint)].spacing(0).into(),
             ui::cell_muted(number),
             ui::cell(r["contact"].as_str().unwrap_or("").to_string()),
-            ui::cell_muted(desc.to_string()),
+            // Checks and expenses show their memo, as QuickBooks does; others say what they are.
+            ui::cell_muted(match (r["kind"].as_str(), r["reference"].as_str().filter(|x| !x.is_empty())) { (Some("banktx"), Some(m)) => m.to_string(), _ => desc.to_string() }),
             if amt < 0 { ui::cell_money(-amt) } else { Space::new().into() },
             text(if r["reconciled"].as_i64() == Some(1) { "✓" } else { "" }).size(13).color(k.ok).into(),
             if amt > 0 { ui::cell_money(amt) } else { Space::new().into() },
             text(ui::money(bal)).size(13).color(if bal < 0 { k.bad } else { k.text }).align_x(iced::alignment::Horizontal::Right).width(Fill).into(),
         ];
-        let msg = r["document_id"].as_i64().map(|id| Message::Nav(Route::Doc { kind: if amt > 0 { "ACCREC".into() } else { "ACCPAY".into() }, id: Some(id) }));
+        // Payments open their invoice or bill; checks and expenses open in Write Checks.
+        let msg = r["document_id"].as_i64().map(|id| Message::Nav(Route::Doc { kind: if amt > 0 { "ACCREC".into() } else { "ACCPAY".into() }, id: Some(id) }))
+            .or_else(|| (r["kind"] == "banktx" && amt < 0).then(|| r["id"].as_i64().map(|id| Message::Nav(Route::BankTx(id)))).flatten());
         let rr = row(cells.into_iter().zip(cols.iter()).map(|(c, (_, w, _))| container(c).width(Length::FillPortion(*w)).into())).spacing(6).align_y(Alignment::Center).padding([4, 10]);
         let shade = n % 2 == 1;
         list = list.push(button(rr).padding(0).width(Fill).on_press_maybe(msg)

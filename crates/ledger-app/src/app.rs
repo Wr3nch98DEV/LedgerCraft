@@ -96,6 +96,8 @@ pub enum Route {
     EditAccount(i64),
     /// QuickBooks Desktop Customers ▸ Create Batch Invoices.
     BatchInvoices,
+    /// A saved check or expense (spend money), opened from the register.
+    BankTx(i64),
     /// QuickBooks Desktop Enter Time (single activity against a project task).
     EnterTime,
     NewProduct,
@@ -258,7 +260,7 @@ pub fn parse_route(s: &str) -> Option<Route> {
         "customers" => Route::Customers, "products" => Route::Products, "expenses" => Route::Expenses, "bills" => Route::Bills, "vendors" => Route::Vendors,
         "pos" => Route::PurchaseOrders, "contacts" => Route::Contacts, "contact" => Route::Contact(id(1)?), "banking" => Route::Banking(id(1)), "chart" => Route::Chart,
         "reports" => Route::Reports, "report" => Route::Report(parts.get(1)?.to_string()), "settings" => Route::Settings, "setup" => Route::Setup,
-        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "adjustinventory" => Route::AdjustInventory, "help" => Route::Help, "memreports" => Route::MemorizedReports, "docs" => Route::DocCenter, "payliabilities" => Route::PayLiabilities, "classes" => Route::ClassList, "payitems" => Route::PayrollItems, "othernames" => Route::OtherNames, "financecharges" => Route::FinanceCharges, "templates" => Route::Templates, "pricelevels" => Route::PriceLevels, "printforms" => Route::PrintForms, "payrollforms" => Route::PayrollForms, "favorites" => Route::CustomizeFavorites, "build" => Route::BuildAssemblies, "inventory" => Route::InventoryCenter, "editcontact" => Route::EditContact(id(1)?), "edititem" => Route::EditItem(id(1)?), "editaccount" => Route::EditAccount(id(1)?), "batchinvoices" => Route::BatchInvoices, "time" => Route::EnterTime, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
+        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "adjustinventory" => Route::AdjustInventory, "help" => Route::Help, "memreports" => Route::MemorizedReports, "docs" => Route::DocCenter, "payliabilities" => Route::PayLiabilities, "classes" => Route::ClassList, "payitems" => Route::PayrollItems, "othernames" => Route::OtherNames, "financecharges" => Route::FinanceCharges, "templates" => Route::Templates, "pricelevels" => Route::PriceLevels, "printforms" => Route::PrintForms, "payrollforms" => Route::PayrollForms, "favorites" => Route::CustomizeFavorites, "build" => Route::BuildAssemblies, "inventory" => Route::InventoryCenter, "editcontact" => Route::EditContact(id(1)?), "edititem" => Route::EditItem(id(1)?), "editaccount" => Route::EditAccount(id(1)?), "batchinvoices" => Route::BatchInvoices, "banktx" => Route::BankTx(id(1)?), "time" => Route::EnterTime, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
         _ => return None,
     })
 }
@@ -512,6 +514,7 @@ impl App {
             Route::PayBills => payments::open_pay_bills(self),
             Route::Spend(acc) => payments::open_spend(self, acc, false),
             Route::Check(acc) => payments::open_spend(self, acc, true),
+            Route::BankTx(id) => payments::open_tx(self, id),
             Route::Deposit => payments::open_deposit(self),
             Route::Reconcile => crate::reconcile::load(self),
             Route::Calendar => crate::desktop::load_calendar(self),
@@ -750,7 +753,7 @@ impl App {
                     let close = c == "a";
                     let m = match &self.route {
                         Route::Doc { .. } if self.doc.is_some() => Some(Message::Doc(if close { doc::Msg::SaveClose } else { doc::Msg::SaveAndNew })),
-                        Route::Check(_) | Route::Spend(_) | Route::ReceivePayment(_) | Route::PayBills | Route::Deposit if self.pay.is_some() =>
+                        Route::Check(_) | Route::Spend(_) | Route::BankTx(_) | Route::ReceivePayment(_) | Route::PayBills | Route::Deposit if self.pay.is_some() =>
                             Some(Message::Pay(if close { crate::payments::Msg::Save } else { crate::payments::Msg::SaveNew })),
                         Route::NewContact(_) | Route::EditContact(_) | Route::EditItem(_) | Route::EditAccount(_) | Route::NewProduct | Route::Transfer | Route::Journal | Route::NewAccount if self.form.is_some() =>
                             Some(Message::Form(if close { crate::forms::Msg::Save } else { crate::forms::Msg::SaveNew })),
