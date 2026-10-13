@@ -356,7 +356,8 @@ fn footer<'a>(busy: bool) -> Element<'a, Message> {
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let Some(s) = &app.form else { return ui::muted("…") };
-    if app.desktop() && !matches!(app.route, Route::NewAccount) { return crate::formdesk::view(app, s); }
+    // Edit Customer/Item/Account use the same form in every layout.
+    if (app.desktop() && !matches!(app.route, Route::NewAccount)) || matches!(app.route, Route::EditContact(_) | Route::EditItem(_) | Route::EditAccount(_)) { return crate::formdesk::view(app, s); }
     let k = t();
     match &app.route {
         Route::NewContact(customer) => {

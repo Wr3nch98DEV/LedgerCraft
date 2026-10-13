@@ -715,10 +715,13 @@ impl App {
                 let r = match entity.as_str() {
                     "contact" => Route::Contact(id),
                     "document" => Route::Doc { kind: "ACCREC".into(), id: Some(id) },
-                    "account" => Route::Chart,
-                    "item" => Route::Products,
-                    "banktx" => Route::Banking(None),
-                    _ => return self.toast("That kind of record opens in the web version for now", false),
+                    "account" => Route::EditAccount(id),
+                    "item" => Route::EditItem(id),
+                    "banktx" => Route::BankTx(id),
+                    "asset" => Route::FixedAssets,
+                    "manual_journal" => Route::Report("journal-report".into()),
+                    "project" => { let t = self.go(Route::Projects); let t2 = self.update(Message::Extras(crate::extras::Msg::PjSelect(id))); return Task::batch([t, t2]); }
+                    _ => return self.toast("That record can't be opened from search", false),
                 };
                 self.go(r)
             }

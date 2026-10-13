@@ -249,7 +249,7 @@ pub fn contact(app: &App) -> Element<'_, Message> {
         column![text(ui::money(open)).size(20).font(BOLD), ui::muted("Open balance")].spacing(2).width(180),
         column![text(ui::money(overdue)).size(20).font(BOLD).color(if overdue > 0 { k.bad } else { k.text }), ui::muted("Overdue")].spacing(2).width(160),
     ].align_y(Alignment::Center));
-    let mut actions: Vec<Element<Message>> = vec![];
+    let mut actions: Vec<Element<Message>> = vec![ui::btn("Edit", Some(Message::Nav(Route::EditContact(id))))];
     if is_supplier {
         actions.push(ui::btn_primary("New bill", Some(Message::NewDocFor("ACCPAY".into(), id))));
     } else {
@@ -277,7 +277,7 @@ pub fn products(app: &App) -> Element<'_, Message> {
         let tracked = i(&x["is_tracked"]) == 1;
         let kind = if tracked { "Inventory" } else if i(&x["is_sold"]) == 1 && i(&x["is_purchased"]) == 0 { "Service" } else { "Non-inventory" };
         (vec![ui::cell(st(x, "name")), ui::cell_muted(st(x, "code")), ui::cell_muted(kind), ui::num(ui::money(i(&x["sale_unit_e2"]) / 100)), ui::num(ui::money(i(&x["purchase_unit_e2"]) / 100)),
-            if tracked { ui::num(format!("{}", i(&x["qty_on_hand_e4"]) as f64 / 10000.0)) } else { ui::cell_muted("") }], None)
+            if tracked { ui::num(format!("{}", i(&x["qty_on_hand_e4"]) as f64 / 10000.0)) } else { ui::cell_muted("") }], x["id"].as_i64().map(|id| Message::Nav(Route::EditItem(id))))
     }).collect();
     let note: Element<Message> = if low > 0 { container(text(format!("{low} item(s) low on stock")).size(13).color(k.warn)).padding([6, 10]).style(theme::bad_soft).into() } else { Space::new().into() };
     ui::page(ui::h1(title), vec![ui::btn_primary("New", Some(Message::Nav(Route::NewProduct)))], column![note, search_and_tabs(app, &[]), ui::table(&cols, rows, "No products or services yet.")].spacing(16).into())
@@ -301,7 +301,8 @@ pub fn chart(app: &App) -> Element<'_, Message> {
                 ui::cell_muted(crate::coa::detail_type(kind, st(a, "bank_type"), st(a, "detail_type")).to_string()), ui::cell_money(bal)],
             Skin::Xero => vec![ui::cell_muted(st(a, "code")), ui::cell(st(a, "name")), ui::cell_muted(crate::coa::xero_type(kind)), ui::cell_muted(st(a, "tax_rate_name")), ui::cell_money(bal)],
         };
-        (cells, bank_id.map(|id| Message::Nav(Route::Banking(Some(id)))))
+        // Bank accounts open their transactions; other accounts open Edit account.
+        (cells, Some(match bank_id { Some(id) => Message::Nav(Route::Banking(Some(id))), None => Message::Nav(Route::EditAccount(a["id"].as_i64().unwrap_or(0))) }))
     }).collect();
     let new = if app.skin == Skin::QuickBooks { "New" } else { "Add account" };
     ui::page(ui::h1("Chart of accounts"), vec![ui::btn_primary(new, Some(Message::Nav(Route::NewAccount)))], ui::table(&cols, rows, "No accounts."))

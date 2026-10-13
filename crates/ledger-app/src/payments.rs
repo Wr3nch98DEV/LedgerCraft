@@ -229,6 +229,14 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::TxLoaded(r) => {
             s.busy = false;
             match r {
+                Ok(t) if t["type"].as_str().is_some_and(|ty| ty.starts_with("RECEIVE")) => {
+                    // Money in isn't edited on the check/expense form (it would be saved as money out).
+                    let acc = t["account_id"].as_i64();
+                    app.pay = Some(s);
+                    let t1 = app.toast("Money received opens in the bank account's transactions", false);
+                    let t2 = app.go(Route::Banking(acc));
+                    return Task::batch([t1, t2]);
+                }
                 Ok(t) => {
                     let opt = |id: Option<i64>| id.and_then(|id| app.lk.account_opts(|_| true).into_iter().find(|o| o.id == id));
                     s.check = t["subtype"] == "CHECK";

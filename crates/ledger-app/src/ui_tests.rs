@@ -3378,3 +3378,38 @@ fn projects_tasks_time_and_costs() {
     assert_eq!(p["summary"]["to_invoice"], 45500, "{}", p["summary"]);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn edit_screens_in_online_and_xero_and_search_opens_records() {
+    let (mut app, dir) = desktop_app("edit-online");
+    for layout in [crate::theme::Layout::Online, crate::theme::Layout::Xero] {
+        let t = app.update(Message::SetLayout(layout)); settle(&mut app, t);
+        // Item list row → Edit Item, with the item's details (not the journal form).
+        let t = app.update(Message::Nav(Route::Products)); settle(&mut app, t);
+        let item = app.data.as_ref().unwrap().as_array().unwrap()[0].clone();
+        let msgs = click(&app, item["name"].as_str().unwrap());
+        assert!(msgs.iter().any(|m| matches!(m, Message::Nav(Route::EditItem(_)))), "{layout:?}: {msgs:?}");
+        let t = app.update(Message::Nav(Route::EditItem(item["id"].as_i64().unwrap()))); settle(&mut app, t);
+        assert!(!click_fails(&app, "ITEM NAME/NUMBER"), "{layout:?}: item form shows");
+        // Contact page → Edit.
+        let cid = app.lk.contact_opts(true)[0].id;
+        let t = app.update(Message::Nav(Route::Contact(cid))); settle(&mut app, t);
+        assert!(click(&app, "Edit").iter().any(|m| matches!(m, Message::Nav(Route::EditContact(x)) if *x == cid)));
+        // Chart → Edit account for a non-bank account.
+        let acct = app.lk.accounts.iter().find(|a| a["code"] == "200").unwrap().clone();
+        let t = app.update(Message::Nav(Route::Chart)); settle(&mut app, t);
+        let msgs = click(&app, acct["code"].as_str().unwrap());
+        assert!(msgs.iter().any(|m| matches!(m, Message::Nav(Route::EditAccount(_)))), "{layout:?} {msgs:?}");
+    }
+    // Search results open items and accounts.
+    let t = app.update(Message::OpenResult("item".into(), 1)); settle(&mut app, t);
+    assert!(matches!(app.route, Route::EditItem(1)));
+    // A money-in bank transaction doesn't open on the check form.
+    let rx = app.be.call_now("bank.transactions", json!({"id": app.lk.bank_opts()[0].id})).unwrap().as_array().unwrap().iter()
+        .find(|r| r["kind"] == "banktx" && r["amount"].as_i64().unwrap_or(0) > 0).cloned();
+    if let Some(rx) = rx {
+        let t = app.update(Message::Nav(Route::BankTx(rx["id"].as_i64().unwrap()))); settle(&mut app, t);
+        assert!(matches!(app.route, Route::Banking(_)), "{:?}", app.route);
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
