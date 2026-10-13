@@ -20,6 +20,8 @@ pub struct LineInput {
     pub tax_rate_id: Option<i64>,
     pub tracking1: Option<i64>,
     pub tracking2: Option<i64>,
+    /// Lot number, or serial numbers separated by commas, for lot/serial-tracked items.
+    pub lot: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -37,6 +39,7 @@ pub struct CLine {
     pub tracking1: Option<i64>,
     pub tracking2: Option<i64>,
     pub report_type: Option<String>,
+    pub lot: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -93,7 +96,7 @@ impl Ledger {
                 && l.amount.as_deref().unwrap_or("").trim().is_empty() && l.account_id.is_none();
             if blank { continue; }
             let mut c = CLine { item_id: l.item_id, description: l.description.clone(), tracking1: l.tracking1, tracking2: l.tracking2,
-                account_id: l.account_id, tax_rate_id: l.tax_rate_id, ..Default::default() };
+                account_id: l.account_id, tax_rate_id: l.tax_rate_id, lot: l.lot.trim().to_string(), ..Default::default() };
             let mut item_unit: Option<i64> = None;
             if let Some(item) = l.item_id {
                 let (sa, st, su, pa, pt, pu, tracked, inv, sd, pd): (Option<i64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>, i64, Option<i64>, String, String) =
@@ -149,22 +152,22 @@ impl Ledger {
     pub fn write_lines(&self, kind: &str, parent: i64, lines: &[CLine]) -> Result<()> {
         self.conn.execute("DELETE FROM line_items WHERE parent_kind = ?1 AND parent_id = ?2", params![kind, parent])?;
         let mut stmt = self.conn.prepare_cached(
-            "INSERT INTO line_items(parent_kind, parent_id, sort, item_id, description, qty_e4, unit_e2, discount_bp, account_id, tax_rate_id, line_amount, net_amount, tax_amount, tracking1, tracking2)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)")?;
+            "INSERT INTO line_items(parent_kind, parent_id, sort, item_id, description, qty_e4, unit_e2, discount_bp, account_id, tax_rate_id, line_amount, net_amount, tax_amount, tracking1, tracking2, lot)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)")?;
         for (i, l) in lines.iter().enumerate() {
             stmt.execute(params![kind, parent, i as i64, l.item_id, l.description, l.qty_e4, l.unit_e2, l.discount_bp, l.account_id, l.tax_rate_id,
-                l.line_amount, l.net, l.tax, l.tracking1, l.tracking2])?;
+                l.line_amount, l.net, l.tax, l.tracking1, l.tracking2, l.lot])?;
         }
         Ok(())
     }
 
     pub fn read_lines(&self, kind: &str, parent: i64) -> Result<Vec<CLine>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT li.item_id, li.description, li.qty_e4, li.unit_e2, li.discount_bp, li.account_id, li.tax_rate_id, li.line_amount, li.net_amount, li.tax_amount, li.tracking1, li.tracking2, t.report_type
+            "SELECT li.item_id, li.description, li.qty_e4, li.unit_e2, li.discount_bp, li.account_id, li.tax_rate_id, li.line_amount, li.net_amount, li.tax_amount, li.tracking1, li.tracking2, t.report_type, li.lot
              FROM line_items li LEFT JOIN tax_rates t ON t.id = li.tax_rate_id WHERE li.parent_kind = ?1 AND li.parent_id = ?2 ORDER BY li.sort")?;
         let rows = stmt.query_map(params![kind, parent], |r| Ok(CLine {
             item_id: r.get(0)?, description: r.get(1)?, qty_e4: r.get(2)?, unit_e2: r.get(3)?, discount_bp: r.get(4)?, account_id: r.get(5)?,
-            tax_rate_id: r.get(6)?, line_amount: r.get(7)?, net: r.get(8)?, tax: r.get(9)?, tracking1: r.get(10)?, tracking2: r.get(11)?, report_type: r.get(12)?,
+            tax_rate_id: r.get(6)?, line_amount: r.get(7)?, net: r.get(8)?, tax: r.get(9)?, tracking1: r.get(10)?, tracking2: r.get(11)?, report_type: r.get(12)?, lot: r.get(13)?,
         }))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
@@ -376,7 +379,7 @@ impl Ledger {
         let control = if is_sales(&kind) { self.sys_account("AR")? } else { self.sys_account("AP")? };
         let gst = self.sys_account("GST")?;
         let mut jl = Vec::new();
-        let mut movements: Vec<(i64, i64, i64)> = Vec::new();
+        let mut movements: Vec<(i64, i64, i64, String)> = Vec::new();
         let mut total_fx = 0i64;
         for l in &lines {
             let acct = l.account_id.ok_or_else(|| Error::Validation("line missing account".into()))?;
@@ -403,7 +406,7 @@ impl Ledger {
                             let cogs = cogs.ok_or_else(|| Error::Validation("tracked item needs a cost of goods sold account".into()))?;
                             jl.push(JLine::new(cogs, cost).desc(format!("COGS: {}", l.description)).contact(Some(contact)).tracking(l.tracking1, l.tracking2));
                             jl.push(JLine::new(inv, -cost).desc(format!("COGS: {}", l.description)).contact(Some(contact)));
-                            movements.push((item, -l.qty_e4, -cost));
+                            movements.push((item, -l.qty_e4, -cost, l.lot.clone()));
                         }
                         "ACCRECCREDIT" => {
                             let (qoh, tc): (i64, i64) = self.conn.query_row("SELECT qty_on_hand_e4, total_cost FROM items WHERE id = ?1", [item], |r| Ok((r.get(0)?, r.get(1)?)))?;
@@ -414,11 +417,11 @@ impl Ledger {
                             if let Some(cogs) = cogs {
                                 jl.push(JLine::new(inv, cost).desc(format!("Stock returned: {}", l.description)).contact(Some(contact)));
                                 jl.push(JLine::new(cogs, -cost).desc(format!("Stock returned: {}", l.description)).contact(Some(contact)));
-                                movements.push((item, l.qty_e4, cost));
+                                movements.push((item, l.qty_e4, cost, l.lot.clone()));
                             }
                         }
-                        "ACCPAY" => movements.push((item, l.qty_e4, net_b)),
-                        "ACCPAYCREDIT" => { self.check_stock_at(item, location, l.qty_e4)?; self.inventory_cost_out(item, l.qty_e4)?; movements.push((item, -l.qty_e4, -net_b)) }
+                        "ACCPAY" => movements.push((item, l.qty_e4, net_b, l.lot.clone())),
+                        "ACCPAYCREDIT" => { self.check_stock_at(item, location, l.qty_e4)?; self.inventory_cost_out(item, l.qty_e4)?; movements.push((item, -l.qty_e4, -net_b, l.lot.clone())) }
                         _ => {}
                     }
                 }
@@ -429,7 +432,12 @@ impl Ledger {
             currency: Some(currency.clone()), fx_amount: Some(-s * total_fx), ..Default::default() });
         let jid = self.post_journal(NewJournal { date: date.clone(), source_type: kind.clone(), source_id: Some(id), reference: if number.is_empty() { reference.clone() } else { number.clone() },
             narration: reference, lines: jl, cash_basis: false, reverses: None })?;
-        for (item, q, c) in movements { self.record_movement_at(item, &date, q, c, &kind, Some(id), Some(jid), location)?; }
+        for (item, q, c, lot) in movements {
+            // Lot/serial-tracked items: one movement per lot or serial number.
+            for (lq, lc, l) in self.split_lots(item, q, c, &lot)? {
+                self.record_movement_lot(item, &date, lq, lc, &kind, Some(id), Some(jid), location, &l)?;
+            }
+        }
         self.conn.execute("UPDATE documents SET base_total = ?2 WHERE id = ?1", params![id, other.abs()])?;
         Ok(jid)
     }
@@ -439,11 +447,11 @@ impl Ledger {
         let (jid, kind, date): (Option<i64>, String, String) = self.conn.query_row("SELECT journal_id, type, date FROM documents WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         if let Some(j) = jid {
             let rid = self.reverse_journal(j, None, None)?;
-            let moves: Vec<(i64, i64, i64, Option<i64>)> = {
-                let mut st = self.conn.prepare("SELECT item_id, qty_e4, cost, location_id FROM inventory_movements WHERE source_type = ?1 AND source_id = ?2 AND journal_id = ?3")?;
-                st.query_map(params![kind, id, j], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<rusqlite::Result<Vec<_>>>()?
+            let moves: Vec<(i64, i64, i64, Option<i64>, String)> = {
+                let mut st = self.conn.prepare("SELECT item_id, qty_e4, cost, location_id, lot FROM inventory_movements WHERE source_type = ?1 AND source_id = ?2 AND journal_id = ?3")?;
+                st.query_map(params![kind, id, j], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?.collect::<rusqlite::Result<Vec<_>>>()?
             };
-            for (item, q, c, loc) in moves { self.record_movement_at(item, &date, -q, -c, "REVERSAL", Some(id), Some(rid), loc)?; }
+            for (item, q, c, loc, lot) in moves { self.record_movement_lot(item, &date, -q, -c, "REVERSAL", Some(id), Some(rid), loc, &lot)?; }
             self.conn.execute("UPDATE documents SET journal_id = NULL, void_journal_id = ?2 WHERE id = ?1", params![id, rid])?;
         }
         Ok(())
@@ -505,7 +513,7 @@ impl Ledger {
             quantity: Some(money::fmt_fixed(l["qty_e4"].as_i64().unwrap_or(0), 4)),
             unit_price: Some(money::fmt_fixed((l["unit_e2"].as_i64().unwrap_or(0) as i128 * percent_bp as i128 / 10_000) as i64, 4)),
             discount: Some(money::fmt_fixed(l["discount_bp"].as_i64().unwrap_or(0), 2)), account_id: l["account_id"].as_i64(), tax_rate_id: l["tax_rate_id"].as_i64(),
-            tracking1: l["tracking1"].as_i64(), tracking2: l["tracking2"].as_i64(), amount: None,
+            tracking1: l["tracking1"].as_i64(), tracking2: l["tracking2"].as_i64(), amount: None, lot: String::new(),
         }).collect();
         let input = DocInput {
             kind: "ACCREC".into(), contact_id: d["contact_id"].as_i64(), reference: d["number"].as_str().unwrap_or("").into(),
@@ -573,7 +581,7 @@ impl Ledger {
             discount: Some(money::fmt_fixed(l["discount_bp"].as_i64().unwrap_or(0), 2)),
             account_id: if is_sales(&from_kind) == is_sales(to_kind) { l["account_id"].as_i64() } else { None },
             tax_rate_id: if is_sales(&from_kind) == is_sales(to_kind) { l["tax_rate_id"].as_i64() } else { None },
-            tracking1: l["tracking1"].as_i64(), tracking2: l["tracking2"].as_i64(), amount: None,
+            tracking1: l["tracking1"].as_i64(), tracking2: l["tracking2"].as_i64(), amount: None, lot: String::new(),
         }).collect();
         let date = date.map(String::from).unwrap_or_else(util::today);
         let input = DocInput {

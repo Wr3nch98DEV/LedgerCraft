@@ -935,3 +935,38 @@ fn fifo_costing() {
     assert_eq!(l.inventory_cost_out(item, 50_000).unwrap(), 3_500);
     assert_invariants(&l);
 }
+
+#[test]
+fn lot_and_serial_numbers() {
+    let l = org();
+    let mk = |code: &str| l.create_item(&ItemInput { code: code.into(), name: code.into(), is_tracked: true, sale_price: Some("20".into()), sale_account_id: Some(acct(&l, "200")),
+        purchase_account_id: Some(acct(&l, "310")), purchase_price: Some("5".into()), ..Default::default() }).unwrap();
+    let (milk, phone) = (mk("MILK"), mk("PHONE"));
+    l.set_lot_tracking(milk, "LOT").unwrap();
+    l.set_lot_tracking(phone, "SERIAL").unwrap();
+    let doc = |kind: &str, item: i64, qty: &str, lot: &str| DocInput { kind: kind.into(), contact_name: Some("Acme".into()), date: "2026-06-01".into(), line_amount_type: Some("NOTAX".into()),
+        lines: vec![LineInput { item_id: Some(item), quantity: Some(qty.into()), unit_price: Some("5".into()), lot: lot.into(), account_id: Some(acct(&l, "200")), ..Default::default() }],
+        status: Some("AUTHORISED".into()), ..Default::default() };
+    // A lot is required; then stock is kept per lot.
+    assert!(l.save_document(None, &doc("ACCPAY", milk, "10", "")).is_err());
+    l.save_document(None, &doc("ACCPAY", milk, "10", "L001")).unwrap();
+    l.set_lot_expiry(milk, "L001", Some("2026-12-31")).unwrap();
+    assert!(l.save_document(None, &doc("ACCREC", milk, "3", "L999")).is_err(), "no such lot on hand");
+    l.save_document(None, &doc("ACCREC", milk, "3", "L001")).unwrap();
+    assert_eq!(l.lot_on_hand(milk, "L001").unwrap(), 70_000);
+    // Serials: one per unit, never twice in stock, only sold if in stock.
+    assert!(l.save_document(None, &doc("ACCPAY", phone, "2", "SN1")).is_err(), "2 units need 2 serials");
+    assert!(l.save_document(None, &doc("ACCPAY", phone, "2", "SN1, SN1")).is_err(), "duplicate");
+    l.save_document(None, &doc("ACCPAY", phone, "2", "SN1, SN2")).unwrap();
+    assert!(l.save_document(None, &doc("ACCPAY", phone, "1", "SN2")).is_err(), "already in stock");
+    assert!(l.save_document(None, &doc("ACCREC", phone, "1", "SN9")).is_err(), "not in stock");
+    let sale = l.save_document(None, &doc("ACCREC", phone, "1", "SN2")).unwrap();
+    assert_eq!(l.lot_on_hand(phone, "SN2").unwrap(), 0);
+    // Voiding the sale puts SN2 back.
+    l.set_document_status(sale, "VOIDED").unwrap();
+    assert_eq!(l.lot_on_hand(phone, "SN2").unwrap(), 10_000);
+    let lots = l.list_lots(false).unwrap();
+    assert_eq!(lots.len(), 3);
+    assert_eq!(lots.iter().find(|x| x["lot"] == "L001").unwrap()["expiry"], "2026-12-31");
+    assert_invariants(&l);
+}

@@ -435,7 +435,7 @@ impl Ledger {
             item_id: l["item_id"].as_i64(), description: l["description"].as_str().unwrap_or("").into(),
             quantity: Some(money::fmt_fixed(l["qty_e4"].as_i64().unwrap_or(0), 4)), unit_price: Some(money::fmt_fixed(l["unit_e2"].as_i64().unwrap_or(0), 4)),
             discount: Some(money::fmt_fixed(l["discount_bp"].as_i64().unwrap_or(0), 2)), account_id: l["account_id"].as_i64(), tax_rate_id: l["tax_rate_id"].as_i64(),
-            tracking1: l["tracking1"].as_i64(), tracking2: l["tracking2"].as_i64(), amount: None }).collect();
+            tracking1: l["tracking1"].as_i64(), tracking2: l["tracking2"].as_i64(), amount: None, lot: l["lot"].as_str().unwrap_or("").to_string() }).collect();
         let lat = Lat::parse(d["line_amount_type"].as_str().unwrap_or(""))?;
         let computed = self.compute_lines(lat, &lines, crate::documents::is_sales(d["type"].as_str().unwrap_or("")))?;
         let total: i64 = computed.iter().map(|l| l.net).sum::<i64>() + computed.iter().filter(|l| l.report_type.as_deref() != Some("REVERSECHARGE")).map(|l| l.tax).sum::<i64>();

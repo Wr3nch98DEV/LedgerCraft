@@ -139,6 +139,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::PaymentReminders => crate::extras::payment_reminders(app),
         Route::BatchPayments => crate::extras::batch_payments(app),
         Route::Locations => crate::extras::locations(app),
+        Route::Lots => crate::extras::lots(app),
         Route::CustomReports => crate::extras::custom_reports(app),
         Route::PayrollSettings => crate::extras::payroll_settings(app),
         Route::EnterTime => crate::desktop::enter_time(app),

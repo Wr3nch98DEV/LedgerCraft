@@ -147,6 +147,7 @@ pub fn report(l: &Ledger, name: &str, p: &ReportParams) -> Result<Value> {
         "contractor-1099" => l.report_1099(p),
         "w2-summary" => l.report_w2(p),
         "stock-by-location" => l.stock_by_location_report(),
+        "lots" => l.lots_report(),
         "sales-tax-by-agency" => l.report_tax_by_agency(p),
         "payroll-activity" => l.payroll_activity_report(&from, &to),
         "leave-balances" => l.leave_balances_report(),

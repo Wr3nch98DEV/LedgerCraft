@@ -20,6 +20,8 @@ pub struct Line {
     pub tax: Option<Opt>,
     /// Desktop bills: line belongs to the Items tab (else the Expenses tab).
     pub on_items: bool,
+    /// Lot number or serial numbers, for lot/serial-tracked items.
+    pub lot: String,
 }
 
 pub struct Editor {
@@ -132,6 +134,8 @@ pub enum Msg {
     AcuTab(&'static str),
     /// The inventory location for the document's stock.
     Location(Opt),
+    /// A line's lot or serial numbers.
+    Lot(usize, String),
     Send,
     Sent(Result<Value, String>),
     Delayed(Result<Value, String>),
@@ -302,7 +306,7 @@ impl Editor {
             if parse_e4(&l.qty).is_none() { return Err(format!("Line {}: quantity isn't a number", n + 1)); }
             if parse_e4(&l.price).is_none() { return Err(format!("Line {}: price isn't a number", n + 1)); }
             lines.push(json!({"item_id": l.item.as_ref().map(|i| i.id), "description": l.description, "quantity": l.qty.replace(',', ""), "unit_price": l.price.replace(',', ""),
-                "account_id": l.account.as_ref().map(|a| a.id), "tax_rate_id": l.tax.as_ref().map(|t| t.id)}));
+                "account_id": l.account.as_ref().map(|a| a.id), "tax_rate_id": l.tax.as_ref().map(|t| t.id), "lot": l.lot}));
         }
         if lines.is_empty() { return Err("Add at least one line".into()); }
         let kind = match self.kind.as_str() { "SALESRECEIPT" => "ACCREC", k if quote_variant(k) => "QUOTE", k => k };
@@ -367,6 +371,7 @@ fn line_from(app: &App, taxes: &[Opt], l: &Value, negate: bool) -> Line {
         account: l["account_id"].as_i64().map(|id| Opt { id, label: format!("{} {}", l["account_code"].as_str().unwrap_or(""), l["account_name"].as_str().unwrap_or("")) }),
         tax: l["tax_rate_id"].as_i64().and_then(|id| taxes.iter().find(|t| t.id == id).cloned()),
         on_items: l["item_id"].as_i64().is_some(),
+        lot: l["lot"].as_str().unwrap_or("").to_string(),
     }
 }
 
@@ -641,6 +646,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         }
         Msg::Submit => { e.submit = true; save(app, &mut e, false, false) }
         Msg::AcuTab(t) => { e.acu_tab = t; Task::none() }
+        Msg::Lot(i, s) => { if let Some(l) = e.lines.get_mut(i) { l.lot = s; } Task::none() }
         Msg::Location(o) => { e.location = (o.id != 0).then_some(o); Task::none() }
         Msg::ProgressOpen => {
             // Suggest what's left to invoice.
@@ -923,6 +929,24 @@ pub fn view(app: &App) -> Element<'_, Message> {
         table = table.push(column![r, ui::hr()]);
     }
     let table = container(table).style(theme::card).width(Fill).clip(true);
+    // Lot and serial numbers for the lines whose items track them.
+    let lot_lines: Vec<(usize, String, String)> = e.lines.iter().enumerate().filter_map(|(i, l)| {
+        let item = l.item.as_ref().and_then(|o| app.lk.item(o.id))?;
+        let mode = item["lot_tracking"].as_str().unwrap_or("NONE");
+        (mode != "NONE").then(|| (i, l.item.as_ref().map(|o| o.label.clone()).unwrap_or_default(), mode.to_string()))
+    }).collect();
+    let table: Element<Message> = if lot_lines.is_empty() { table.into() } else {
+        let mut panel = column![text("LOT AND SERIAL NUMBERS").size(11).font(BOLD).color(k.muted)].spacing(8);
+        for (i, label, mode) in lot_lines {
+            let serial = mode == "SERIAL";
+            let field: Element<Message> = if editable {
+                text_input(if serial { "Serial numbers, separated by commas" } else { "Lot number" }, &e.lines[i].lot).on_input(move |s| Message::Doc(Msg::Lot(i, s))).padding([6, 9]).size(14).style(theme::input).width(Fill).into()
+            } else { text(if e.lines[i].lot.is_empty() { "—".to_string() } else { e.lines[i].lot.clone() }).size(14).width(Fill).into() };
+            panel = panel.push(row![text(format!("Line {}: {label}", i + 1)).size(14).width(Length::FillPortion(2)), container(field).width(Length::FillPortion(3)),
+                text(if serial { "Serial" } else { "Lot" }).size(12).color(k.muted).width(60)].spacing(10).align_y(Alignment::Center));
+        }
+        column![table, ui::card(panel)].spacing(10).into()
+    };
     let add_line: Element<Message> = if editable { row![ui::btn("Add lines", Some(Message::Doc(Msg::AddLine)))].into() } else { Space::new().into() };
 
     // ---- totals ----

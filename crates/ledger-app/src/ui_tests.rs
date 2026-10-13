@@ -4049,3 +4049,31 @@ fn choose_fifo_costing_in_settings() {
     assert_eq!(app.setting("inventory_costing"), "AVERAGE");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn serial_numbers_in_the_app() {
+    use crate::extras::Msg as X;
+    use crate::doc::Msg as D;
+    let (mut app, dir) = desktop_app("serials");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Xero)); settle(&mut app, t);
+    let item = app.lk.items.iter().find(|i| i["is_tracked"] == 1).cloned().expect("a tracked item");
+    let opt = crate::app::Opt { id: item["id"].as_i64().unwrap(), label: item["name"].as_str().unwrap_or("").to_string() };
+    let t = app.update(Message::Nav(Route::Lots)); settle(&mut app, t);
+    let _ = app.update(Message::Extras(X::LotItem(opt.clone())));
+    press(&mut app, "By serial number");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert_eq!(app.lk.item(opt.id).unwrap()["lot_tracking"], "SERIAL");
+    // A bill for 2 asks for 2 serial numbers.
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCPAY".into(), id: None })); settle(&mut app, t);
+    let vendor = app.lk.contact_opts(false)[0].clone();
+    for m in [D::Contact(vendor), D::Item(0, opt.clone()), D::Qty(0, "2".into()), D::Price(0, "10".into())] { let t = app.update(Message::Doc(m)); settle(&mut app, t); }
+    assert!(!click_fails(&app, "LOT AND SERIAL NUMBERS"));
+    press(&mut app, "Approve");
+    assert!(app.doc.as_ref().unwrap().error.as_deref().is_some_and(|e| e.contains("serial")), "{:?}", app.doc.as_ref().unwrap().error);
+    let _ = app.update(Message::Doc(D::Lot(0, "A100, A101".into())));
+    press(&mut app, "Approve");
+    assert!(app.doc.as_ref().unwrap().error.is_none(), "{:?}", app.doc.as_ref().unwrap().error);
+    let t = app.update(Message::Nav(Route::Lots)); settle(&mut app, t);
+    assert!(!click_fails(&app, "A100") && !click_fails(&app, "A101"));
+    let _ = std::fs::remove_dir_all(dir);
+}

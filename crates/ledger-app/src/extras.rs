@@ -37,6 +37,9 @@ pub struct State {
     /// Locations: the new location (name, address), and the stock transfer being entered
     /// (item, from, to, quantity, date).
     pub loc_new: Option<(String, String)>,
+    /// Lots: the item whose tracking is being set, and expiry dates being typed (by item|lot).
+    pub lot_item: Option<Opt>,
+    pub lot_exp: BTreeMap<String, String>,
     pub tr_item: Option<Opt>,
     pub tr_from: Option<Opt>,
     pub tr_to: Option<Opt>,
@@ -106,6 +109,7 @@ pub enum Msg {
     CreditText(String), CreditHold(i64, bool), CreditSave(i64),
     /// Payment reminders: on/off, a new level's days, add, switch a level on/off, delete, send due reminders now.
     PrNew(bool), PrField(usize, String), PrItem(Opt), PrLevel(Opt), PrSave, PrDelete(i64),
+    LotItem(Opt), LotMode(&'static str), LotExpiry(i64, String, String), LotExpirySave(i64, String),
     LocNew(bool), LocField(u8, String), LocSave, LocDelete(i64), TrItem(Opt), TrFrom(Opt), TrTo(Opt), TrQty(String), TrDate(String), TrMove,
     DunOn(bool), DunDays(String), DunAdd, DunActive(i64, i64, bool), DunDelete(i64), DunRun,
     /// Find & recode.
@@ -150,6 +154,7 @@ pub fn load(app: &mut App) -> Task<Message> {
         Route::ImportExport => { app.data = Some(json!({})); Task::none() }
         Route::BatchPayments => call(app, "batch.list", json!({})),
         Route::Locations => call(app, "locations.stock", json!({})),
+        Route::Lots => call(app, "lots.list", json!({})),
         Route::PaymentReminders => {
             let be = app.be.clone();
             Task::perform(async move {
@@ -212,6 +217,23 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             let p = json!({"line_ids": x.rc_sel.iter().collect::<Vec<_>>(), "account_id": x.rc_to_account.as_ref().map(|o| o.id), "tax_rate_id": x.rc_to_tax.as_ref().map(|o| o.id)});
             app.extras.busy = true;
             app.be.call("recode.apply", p, |r| Message::Extras(Msg::Done(r.map(|v| { let n = v["transactions"].as_i64().unwrap_or(0); json!({"n": n}) }), "Recoded — the transactions were reposted")))
+        }
+        // ---- lots ----
+        Msg::LotItem(o) => { app.extras.lot_item = Some(o); Task::none() }
+        Msg::LotMode(mode) => {
+            let Some(item) = app.extras.lot_item.as_ref().map(|o| o.id) else { return app.toast("Choose the item first", true) };
+            app.be.call("items.setLotTracking", json!({"item_id": item, "mode": mode}), move |r| Message::Extras(Msg::Done(r, match mode { "LOT" => "Tracked by lot number", "SERIAL" => "Tracked by serial number", _ => "No longer tracked by lot or serial" })))
+        }
+        Msg::LotExpiry(item, lot, v) => {
+            let key = format!("{item}|{lot}");
+            let old = app.extras.lot_exp.get(&key).cloned().unwrap_or_default();
+            app.extras.lot_exp.insert(key, ui::date_keys(&old, &v, style));
+            Task::none()
+        }
+        Msg::LotExpirySave(item, lot) => {
+            let shown = app.extras.lot_exp.remove(&format!("{item}|{lot}")).unwrap_or_default();
+            let expiry = if shown.trim().is_empty() { None } else { match ui::to_iso(&shown, style) { Some(d) => Some(d), None => return app.toast("Check the expiry date", true) } };
+            app.be.call("lots.setExpiry", json!({"item_id": item, "lot": lot, "expiry": expiry}), |r| Message::Extras(Msg::Done(r, "Expiry date saved")))
         }
         // ---- locations ----
         Msg::LocNew(on) => { app.extras.loc_new = on.then(Default::default); Task::none() }
@@ -1001,6 +1023,49 @@ pub fn price_rules_section(app: &App) -> Element<'_, Message> {
     }).collect();
     col = col.push(ui::table(&[ui::col("Rule", 16), ui::col("Item", 18), ui::col("Customers", 16), ui::col("Quantity", 10), ui::col("Change", 9), ui::col("Dates", 20), ui::col("", 9)], rows, "No price rules yet."));
     col.push(ui::muted("The lowest matching price wins. Rules apply after the customer's price level, when an item goes on a sale or its quantity changes.")).into()
+}
+
+// ---------------- Lots and serial numbers ----------------
+
+/// Which items are tracked by lot or serial number, and what's on hand of each, with expiry.
+pub fn lots(app: &App) -> Element<'_, Message> {
+    let Some(d) = &app.data else { return loading() };
+    let x = &app.extras;
+    let k = t();
+    let tracked: Vec<Opt> = app.lk.items.iter().filter(|i| i["is_tracked"] == 1).map(|i| Opt { id: i["id"].as_i64().unwrap_or(0), label: i["name"].as_str().unwrap_or("").to_string() }).collect();
+    let mode = x.lot_item.as_ref().and_then(|o| app.lk.item(o.id)).and_then(|i| i["lot_tracking"].as_str()).unwrap_or("NONE");
+    let opt = |label: &'static str, key: &'static str| -> Element<'_, Message> {
+        iced::widget::button(text(label).size(13)).style(if mode == key && x.lot_item.is_some() { theme::primary } else { theme::secondary }).padding([6, 12]).on_press(Message::Extras(Msg::LotMode(key))).into()
+    };
+    let setup = ui::card(column![
+        ui::h2("Track an item"),
+        row![column![lbl("ITEM"), pick_list(tracked, x.lot_item.clone(), |o| Message::Extras(Msg::LotItem(o))).placeholder("Choose a stock item").padding([5, 7]).text_size(13).style(theme::pick).width(260)].spacing(3),
+            iced::widget::Space::new().width(12), opt("Not tracked", "NONE"), opt("By lot number", "LOT"), opt("By serial number", "SERIAL")].spacing(8).align_y(Alignment::End),
+        ui::muted("Bills and invoices for a tracked item then ask for its lot number, or one serial number per unit."),
+    ].spacing(10));
+    let qty = |q: i64| { let s = format!("{:.4}", q as f64 / 10_000.0); s.trim_end_matches('0').trim_end_matches('.').to_string() };
+    let today = ui::today_iso();
+    let rows = d.as_array().cloned().unwrap_or_default().into_iter().map(|l| {
+        let item = l["item_id"].as_i64().unwrap_or(0);
+        let lot = l["lot"].as_str().unwrap_or("").to_string();
+        let key = format!("{item}|{lot}");
+        let expiry = l["expiry"].as_str().map(String::from);
+        let expired = expiry.as_deref().is_some_and(|e| e < today.as_str());
+        let shown = x.lot_exp.get(&key).cloned().unwrap_or_else(|| expiry.as_deref().map(|e| app.d(e)).unwrap_or_default());
+        let (item2, lot2, lot3) = (item, lot.clone(), lot.clone());
+        (vec![
+            ui::cell(format!("{} {}", l["code"].as_str().unwrap_or(""), l["name"].as_str().unwrap_or("")).trim().to_string()),
+            ui::cell_muted(if l["lot_tracking"] == "SERIAL" { "Serial" } else { "Lot" }),
+            ui::cell(lot.clone()),
+            text_input("No expiry", &shown).on_input(move |v| Message::Extras(Msg::LotExpiry(item2, lot2.clone(), v))).padding([4, 7]).size(13).style(theme::input).into(),
+            if x.lot_exp.contains_key(&key) { ui::link("Save", Message::Extras(Msg::LotExpirySave(item, lot3))) } else if expired { text("Expired").size(13).color(k.bad).into() } else { ui::cell("") },
+            ui::num(qty(l["qty_e4"].as_i64().unwrap_or(0))),
+        ], None)
+    }).collect();
+    let body = column![setup,
+        ui::table(&[ui::col("Item", 28), ui::col("Type", 8), ui::col("Lot / serial", 18), ui::col("Expiry", 16), ui::col("", 10), ui::coln("On hand", 10)], rows, "Nothing on hand by lot or serial number yet.")].spacing(14);
+    let title = if crate::vocab::sage() { "Batches & Serial Numbers" } else if crate::vocab::acumatica() { "Lot/Serial Numbers" } else { "Lots and serial numbers" };
+    ui::page(ui::h1(title), vec![], body.max_width(1150).into())
 }
 
 // ---------------- Locations ----------------

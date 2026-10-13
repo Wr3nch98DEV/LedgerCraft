@@ -72,6 +72,7 @@ pub static PLACES: &[(&str, &str, &str, &str)] = &[
     ("build_assemblies", "inventory", "Transactions", "Kit Assembly"),
     ("inventory", "inventory", "Inquiries", "Inventory Summary"),
     ("locations", "inventory", "Profiles", "Warehouses"),
+    ("lots", "inventory", "Inquiries", "Lot/Serial Numbers"),
     // Projects / time and expenses
     ("projects", "projects", "Profiles", "Projects"),
     ("enter_time", "time_expenses", "Transactions", "Time Entries"),
@@ -136,7 +137,7 @@ fn workspace_of(r: &Route) -> &'static str {
         Route::Banking(_) | Route::Deposit | Route::Transfer | Route::Reconcile | Route::Register(_) | Route::BankRules | Route::BankTx(_) => "banking",
         Route::Quotes | Route::PriceLevels => "sales_orders",
         Route::PurchaseOrders => "purchases",
-        Route::Products | Route::InventoryCenter | Route::AdjustInventory | Route::BuildAssemblies | Route::NewProduct | Route::EditItem(_) | Route::Locations => "inventory",
+        Route::Products | Route::InventoryCenter | Route::AdjustInventory | Route::BuildAssemblies | Route::NewProduct | Route::EditItem(_) | Route::Locations | Route::Lots => "inventory",
         Route::Projects => "projects",
         Route::EnterTime | Route::ExpenseClaims | Route::Mileage => "time_expenses",
         Route::Payroll | Route::PayRun(_) | Route::PayLiabilities | Route::PayrollForms | Route::PayrollSettings | Route::PayrollItems => "payroll",

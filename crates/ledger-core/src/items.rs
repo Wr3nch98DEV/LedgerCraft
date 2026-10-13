@@ -146,8 +146,15 @@ impl Ledger {
     /// A stock movement at a location (None = the main location).
     #[allow(clippy::too_many_arguments)]
     pub fn record_movement_at(&self, item_id: i64, date: &str, qty_e4: i64, cost: i64, source_type: &str, source_id: Option<i64>, journal_id: Option<i64>, location: Option<i64>) -> Result<()> {
-        self.conn.execute("INSERT INTO inventory_movements(item_id, date, qty_e4, cost, source_type, source_id, journal_id, location_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![item_id, date, qty_e4, cost, source_type, source_id, journal_id, location])?;
+        self.record_movement_lot(item_id, date, qty_e4, cost, source_type, source_id, journal_id, location, "")
+    }
+
+    /// A stock movement at a location, for a lot or serial number ("" = none).
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_movement_lot(&self, item_id: i64, date: &str, qty_e4: i64, cost: i64, source_type: &str, source_id: Option<i64>, journal_id: Option<i64>, location: Option<i64>, lot: &str) -> Result<()> {
+        self.conn.execute("INSERT INTO inventory_movements(item_id, date, qty_e4, cost, source_type, source_id, journal_id, location_id, lot) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![item_id, date, qty_e4, cost, source_type, source_id, journal_id, location, lot])?;
+        if !lot.is_empty() { self.conn.execute("INSERT OR IGNORE INTO lots(item_id, lot) VALUES (?1, ?2)", params![item_id, lot])?; }
         self.conn.execute("UPDATE items SET qty_on_hand_e4 = qty_on_hand_e4 + ?2, total_cost = total_cost + ?3 WHERE id = ?1", params![item_id, qty_e4, cost])?;
         Ok(())
     }

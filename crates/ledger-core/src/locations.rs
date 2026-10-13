@@ -62,6 +62,7 @@ impl Ledger {
         util::parse_date(date)?;
         let (tracked, _, _) = self.item_tracking(item)?;
         if !tracked { return invalid("only tracked stock items have locations"); }
+        if self.lot_tracking(item)? != "NONE" { return invalid("moving lot- or serial-tracked stock between locations isn't supported yet"); }
         let at = self.stock_at(item, from)?;
         if qty_e4 > at { return invalid(format!("only {} there to move", qty_text(at))); }
         let cost = self.inventory_cost_out(item, qty_e4)?;
