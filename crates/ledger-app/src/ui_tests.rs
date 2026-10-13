@@ -4279,3 +4279,21 @@ fn retainage_hold_back_and_release() {
     assert!(held.as_array().unwrap().iter().all(|r| r["contact_id"].as_i64() != Some(cust.id)), "released");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn sql_query_screen() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = desktop_app("sqlq");
+    let t = app.update(Message::Nav(Route::SqlQuery)); settle(&mut app, t);
+    let _ = app.update(Message::Extras(X::SqlText("SELECT number, total FROM documents WHERE type = 'ACCREC' ORDER BY id LIMIT 3".into())));
+    let t = app.update(Message::Extras(X::SqlRun)); settle(&mut app, t);
+    let r = app.extras.sql_result.clone().expect("ran");
+    assert_eq!(r["rows"].as_array().unwrap().len(), 3);
+    assert!(!click_fails(&app, "NUMBER"));
+    press(&mut app, "Export CSV");
+    assert!(std::fs::read_to_string(crate::pdf::output_dir().join("sql-query.csv")).unwrap().starts_with("number,total"));
+    let _ = app.update(Message::Extras(X::SqlText("DELETE FROM documents".into())));
+    let t = app.update(Message::Extras(X::SqlRun)); settle(&mut app, t);
+    assert!(app.toasts.iter().any(|t| t.2), "refused");
+    let _ = std::fs::remove_dir_all(dir);
+}

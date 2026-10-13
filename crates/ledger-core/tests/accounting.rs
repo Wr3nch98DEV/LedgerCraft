@@ -1103,3 +1103,18 @@ fn approval_rules_route_big_bills() {
     assert_eq!(l.get_document(big).unwrap()["status"], "AUTHORISED");
     assert_invariants(&l);
 }
+
+#[test]
+fn sql_queries_are_read_only() {
+    let mut l = org();
+    let r = l.run_sql("SELECT code, name FROM accounts WHERE code = '200'").unwrap();
+    assert_eq!(r["columns"], serde_json::json!(["code", "name"]));
+    assert_eq!(r["rows"][0][0], "200");
+    for bad in ["DELETE FROM contacts", "SELECT 1; DELETE FROM contacts", "WITH x AS (SELECT 1) DELETE FROM contacts", "SELECT password_hash FROM users", "UPDATE accounts SET name = 'x'"] {
+        assert!(l.run_sql(bad).is_err(), "{bad} should be refused");
+    }
+    // Writing still works afterwards (query-only is switched back off).
+    l.find_or_create_contact("After the query").unwrap();
+    l.role = "STANDARD".into();
+    assert!(l.run_sql("SELECT 1").is_err(), "advisers only");
+}

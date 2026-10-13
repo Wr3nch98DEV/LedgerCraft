@@ -26,6 +26,7 @@ pub mod consolidation;
 pub mod receipts;
 pub mod approvals;
 pub mod retainage;
+pub mod sqlquery;
 pub mod deposits;
 pub mod agencies;
 pub mod pricelevels;

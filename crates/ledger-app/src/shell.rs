@@ -147,6 +147,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::ItemReceipts => crate::extras::item_receipts(app),
         Route::ApprovalRules => crate::extras::approval_rules(app),
         Route::Retainage => crate::extras::retainage(app),
+        Route::SqlQuery => crate::extras::sql_query(app),
         Route::CustomReports => crate::extras::custom_reports(app),
         Route::PayrollSettings => crate::extras::payroll_settings(app),
         Route::EnterTime => crate::desktop::enter_time(app),

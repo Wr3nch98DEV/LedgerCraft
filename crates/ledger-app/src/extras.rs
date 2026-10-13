@@ -55,6 +55,9 @@ pub struct State {
     /// item, quantity, unit cost, lot/serials).
     /// Approval rules: the rule being added (document type, amount, approver role).
     pub ap_new: Option<(&'static str, String, &'static str)>,
+    /// SQL query: the text, and the result.
+    pub sql: String,
+    pub sql_result: Option<Value>,
     pub ir_vendor: Option<Opt>,
     pub ir_date: String,
     pub ir_ref: String,
@@ -138,6 +141,7 @@ pub enum Msg {
     /// Payment reminders: on/off, a new level's days, add, switch a level on/off, delete, send due reminders now.
     PrNew(bool), PrField(usize, String), PrItem(Opt), PrLevel(Opt), PrSave, PrDelete(i64),
     LotItem(Opt), LotMode(&'static str), LotExpiry(i64, String, String), LotExpirySave(i64, String),
+    SqlText(String), SqlRun, SqlDone(Reply), SqlExport,
     RtRelease(i64), RtReleased(Reply),
     ApNew(bool), ApType(&'static str), ApMin(String), ApRole(&'static str), ApSave, ApDelete(i64),
     IrVendor(Opt), IrDate(String), IrRef(String), IrLoc(Opt), IrItem(usize, Opt), IrQty(usize, String), IrCost(usize, String), IrLot(usize, String), IrAddLine, IrReceive, IrBill(i64), IrBilled(Reply), IrVoid(i64),
@@ -195,6 +199,7 @@ pub fn load(app: &mut App) -> Task<Message> {
         Route::ItemReceipts => call(app, "itemReceipts.list", json!({})),
         Route::ApprovalRules => call(app, "approvals.list", json!({})),
         Route::Retainage => call(app, "retainage.list", json!({})),
+        Route::SqlQuery => { app.data = Some(json!({})); Task::none() }
         Route::LandedCosts => {
             let be = app.be.clone();
             Task::perform(async move {
@@ -285,6 +290,19 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             let p = json!({"line_ids": x.rc_sel.iter().collect::<Vec<_>>(), "account_id": x.rc_to_account.as_ref().map(|o| o.id), "tax_rate_id": x.rc_to_tax.as_ref().map(|o| o.id)});
             app.extras.busy = true;
             app.be.call("recode.apply", p, |r| Message::Extras(Msg::Done(r.map(|v| { let n = v["transactions"].as_i64().unwrap_or(0); json!({"n": n}) }), "Recoded — the transactions were reposted")))
+        }
+        // ---- SQL query ----
+        Msg::SqlText(s) => { app.extras.sql = s; Task::none() }
+        Msg::SqlRun => app.be.call("sql.run", json!({"sql": app.extras.sql}), |r| Message::Extras(Msg::SqlDone(r))),
+        Msg::SqlDone(r) => match r { Ok(v) => { app.extras.sql_result = Some(v); Task::none() } Err(e) => app.toast(e, true) },
+        Msg::SqlExport => {
+            let Some(r) = app.extras.sql_result.clone() else { return Task::none() };
+            let esc = |s: String| if s.contains([',', '"', '\n']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s };
+            let cell = |v: &Value| esc(match v { Value::Null => String::new(), Value::String(s) => s.clone(), v => v.to_string() });
+            let mut csv = r["columns"].as_array().cloned().unwrap_or_default().iter().map(cell).collect::<Vec<_>>().join(",") + "\r\n";
+            for row in r["rows"].as_array().cloned().unwrap_or_default() { csv += &(row.as_array().cloned().unwrap_or_default().iter().map(cell).collect::<Vec<_>>().join(",") + "\r\n"); }
+            let path = crate::pdf::output_dir().join("sql-query.csv");
+            match std::fs::write(&path, csv) { Ok(_) => app.toast(format!("Saved to {}", path.display()), false), Err(e) => app.toast(e.to_string(), true) }
         }
         // ---- retainage ----
         Msg::RtRelease(contact) => app.be.call("retainage.release", json!({"contact_id": contact}), |r| Message::Extras(Msg::RtReleased(r))),
@@ -1208,6 +1226,33 @@ pub fn price_rules_section(app: &App) -> Element<'_, Message> {
     }).collect();
     col = col.push(ui::table(&[ui::col("Rule", 16), ui::col("Item", 18), ui::col("Customers", 16), ui::col("Quantity", 10), ui::col("Change", 9), ui::col("Dates", 20), ui::col("", 9)], rows, "No price rules yet."));
     col.push(ui::muted("The lowest matching price wins. Rules apply after the customer's price level, when an item goes on a sale or its quantity changes.")).into()
+}
+
+// ---------------- SQL query ----------------
+
+/// Read-only SQL over the company file, for reports the built-in ones don't cover.
+pub fn sql_query(app: &App) -> Element<'_, Message> {
+    let x = &app.extras;
+    let k = t();
+    let mut body = column![ui::card(column![
+        lbl("SELECT QUERY"),
+        text_input("SELECT number, contact_id, total FROM documents WHERE type = 'ACCREC' ORDER BY date DESC", &x.sql).on_input(|s| Message::Extras(Msg::SqlText(s))).on_submit(Message::Extras(Msg::SqlRun))
+            .padding([8, 10]).size(14).style(theme::input).font(iced::Font::MONOSPACE),
+        row![ui::muted("Read-only. Advisers only. Up to 1,000 rows. Tables include documents, line_items, contacts, accounts, journals, journal_lines, items, payments."),
+            iced::widget::Space::new().width(Length::Fill), ui::btn("Export CSV", x.sql_result.as_ref().map(|_| Message::Extras(Msg::SqlExport))), ui::btn_primary("Run", Some(Message::Extras(Msg::SqlRun)))].spacing(8).align_y(Alignment::Center),
+    ].spacing(8))].spacing(14);
+    if let Some(r) = &x.sql_result {
+        let cols: Vec<String> = r["columns"].as_array().cloned().unwrap_or_default().iter().map(|c| c.as_str().unwrap_or("").to_string()).collect();
+        let cell = |t: String, head: bool| -> Element<'_, Message> { container(text(t).size(if head { 11 } else { 13 }).font(if head { BOLD } else { iced::Font::DEFAULT }).color(if head { k.muted } else { k.text })).width(Length::Fixed(160.0)).into() };
+        let mut grid = column![container(row(cols.iter().map(|c| cell(c.to_uppercase(), true))).spacing(8).padding([8, 12])).style(theme::header_row)];
+        let rows = r["rows"].as_array().cloned().unwrap_or_default();
+        for row_v in rows.iter().take(500) {
+            grid = grid.push(container(row(row_v.as_array().cloned().unwrap_or_default().into_iter().map(|v| cell(match v { Value::Null => String::new(), Value::String(s) => s, v => v.to_string() }, false))).spacing(8)).padding([4, 12]));
+        }
+        body = body.push(text(format!("{} row(s){}", rows.len(), if r["truncated"] == true { " (first 1,000)" } else { "" })).size(13).color(k.muted));
+        body = body.push(container(iced::widget::scrollable(grid).direction(iced::widget::scrollable::Direction::Both { vertical: Default::default(), horizontal: Default::default() }).style(theme::scroll)).style(theme::card).width(Length::Fill).height(Length::Fixed(520.0)));
+    }
+    ui::page(ui::h1(if app.desktop() { "SQL Query (ODBC)" } else { "SQL query" }), vec![], body.into())
 }
 
 // ---------------- Retainage ----------------

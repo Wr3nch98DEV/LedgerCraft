@@ -95,6 +95,7 @@ pub static FEATURES: &[Feature] = &[
     Feature { id: "batch_payments", go: || nav(Route::BatchPayments), online: ("expenses", "Batch payments"), xero: ("business", "Batch payments"), desktop: ("Vendors", "Batch Payments & Bank Files…") },
     Feature { id: "payment_reminders", go: || nav(Route::PaymentReminders), online: ("gear:Your company", "Payment reminders"), xero: ("settings", "Invoice reminders"), desktop: ("Customers", "Payment Reminders…") },
     Feature { id: "consolidation", go: || nav(Route::Consolidation), online: ("reports", "Consolidated reports"), xero: ("accounting", "Consolidated reports"), desktop: ("Reports", "Combine Reports from Multiple Companies") },
+    Feature { id: "sql_query", go: || nav(Route::SqlQuery), online: ("reports", "SQL query"), xero: ("accounting", "SQL query"), desktop: ("Reports", "SQL Query (ODBC)…") },
     Feature { id: "retainage", go: || nav(Route::Retainage), online: ("sales", "Retainage"), xero: ("business", "Retentions"), desktop: ("Customers", "Retainage…") },
     Feature { id: "approval_rules", go: || nav(Route::ApprovalRules), online: ("gear:Your company", "Approval workflows"), xero: ("settings", "Approval rules"), desktop: ("Company", "Approval Workflows…") },
     Feature { id: "custom_fields", go: || nav(Route::CustomFields), online: ("gear:Lists", "Custom fields"), xero: ("settings", "Custom fields"), desktop: ("Lists", "Custom Fields…") },

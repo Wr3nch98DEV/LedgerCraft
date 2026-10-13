@@ -43,7 +43,7 @@ pub static PLACES: &[(&str, &str, &str)] = &[
     ("payroll", "payroll", "Employees & Pay Runs"), ("pay_liabilities", "payroll", "Pay Liabilities"), ("payroll_forms", "payroll", "Filings"),
     ("payroll_settings", "payroll", "Payroll Settings"), ("payroll_items", "payroll", "Pay Elements"), ("enter_time", "payroll", "Timesheets"),
     // Reporting
-    ("reports", "reporting", "All Reports"), ("memorized_reports", "reporting", "Saved Reports"), ("custom_reports", "reporting", "Report Designer"), ("consolidation", "reporting", "Consolidated Reports"),
+    ("reports", "reporting", "All Reports"), ("memorized_reports", "reporting", "Saved Reports"), ("custom_reports", "reporting", "Report Designer"), ("consolidation", "reporting", "Consolidated Reports"), ("sql_query", "reporting", "SQL Query"),
     ("insights", "reporting", "Business Summary"), ("audit_log", "reporting", "Audit Trail"),
     // Accounting
     ("journal", "accounting", "Journals"), ("chart", "accounting", "Chart of Accounts"), ("recode", "accounting", "Reallocate Transactions"), ("revenue_recognition", "accounting", "Deferred Income"),
@@ -73,7 +73,7 @@ fn menu_of(r: &Route) -> &'static str {
         Route::Banking(_) | Route::Reconcile | Route::Deposit | Route::Transfer | Route::Register(_) | Route::BankRules | Route::BankTx(_) => "banking",
         Route::Products | Route::InventoryCenter | Route::AdjustInventory | Route::BuildAssemblies | Route::PriceLevels | Route::Locations | Route::Lots => "products",
         Route::Payroll | Route::PayRun(_) | Route::PayLiabilities | Route::PayrollForms | Route::PayrollSettings | Route::PayrollItems | Route::EnterTime => "payroll",
-        Route::Reports | Route::Report(_) | Route::MemorizedReports | Route::CustomReports | Route::AuditLog | Route::Consolidation => "reporting",
+        Route::Reports | Route::Report(_) | Route::MemorizedReports | Route::CustomReports | Route::AuditLog | Route::Consolidation | Route::SqlQuery => "reporting",
         Route::Settings | Route::ImportExport | Route::Templates | Route::Help | Route::Calendar | Route::DocCenter => "settings",
         _ => "accounting",
     }
