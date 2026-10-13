@@ -583,7 +583,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         }
         Msg::Sent(r) => match r {
             Ok(v) => {
-                let msg = if v["queued"] == true { "Emailed - it goes out within a few minutes" } else { "Saved to the Outbox (set up email sending in the web version: Settings, Email)" };
+                let msg = if v["queued"] == true { "Emailed - it goes out within a few minutes" } else { "Saved to the Outbox — set up email sending in Settings ▸ Email (Send Forms in QuickBooks Desktop-style)" };
                 let t1 = app.toast(msg, false);
                 app.doc = Some(e);
                 return Task::batch([t1, app.load()]);

@@ -122,7 +122,17 @@ pub fn handle(st: &AppState, token: Option<&str>, method: &str, p: Value) -> R {
         if session.perms.iter().any(|p| p == perm) { Ok(()) } else { Err(ApiError::Forbidden(format!("you don't have permission ({perm})"))) }
     };
     let file = org.path.file_name().unwrap().to_string_lossy().to_string();
-    dispatch(l, method, &p, &need, &session, &file, &orgs)
+    let mut out = dispatch(l, method, &p, &need, &session, &file, &orgs);
+    // Setting the first password turns sign-in on. A caller that had no session (passwords were
+    // off) gets one now, so they aren't locked out of the session they're in.
+    if method == "users.setPassword" && token.is_none() {
+        if let Ok(v) = out.as_mut() {
+            let tok = util::random_token(32);
+            st.sessions.lock().unwrap().insert(tok.clone(), session.clone());
+            if v.is_object() { v["token"] = json!(tok); } else { *v = json!({"ok": true, "token": tok}); }
+        }
+    }
+    out
 }
 
 fn report(l: &Ledger, name: &str, p: &ReportParams) -> R {

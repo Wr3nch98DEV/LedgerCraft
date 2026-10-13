@@ -3257,3 +3257,26 @@ fn render_custom_report() {
     shot(&app, "lc-cr-report");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn new_user_with_password_and_tracked_item_online() {
+    use crate::settings::Msg as S;
+    let (mut app, dir) = desktop_app("user-pass");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Online)); settle(&mut app, t);
+    let t = app.update(Message::Nav(Route::Settings)); settle(&mut app, t);
+    let _ = app.update(Message::Settings(S::AddUser));
+    for m in [S::UName("Jamie Bookkeeper".into()), S::UEmail("jamie@example.test".into()), S::UPassword("long enough pw".into())] { let _ = app.update(Message::Settings(m)); }
+    let t = app.update(Message::Settings(S::SaveUser)); settle(&mut app, t);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let users = app.be.call_now("users.list", json!({})).unwrap();
+    assert!(users.as_array().unwrap().iter().any(|u| u["email"] == "jamie@example.test"));
+    assert!(app.be.token.is_some(), "this session stays signed in after the first password");
+    assert!(app.be.call_now("session.get", json!({})).unwrap()["login_required"].is_null());
+    // Online-style New item can track inventory now.
+    let t = app.update(Message::Nav(Route::NewProduct)); settle(&mut app, t);
+    for m in [crate::forms::Msg::Name("Notebook".into()), crate::forms::Msg::ItemType("Inventory Part".into()), crate::forms::Msg::Price("12".into())] { let _ = app.update(Message::Form(m)); }
+    let t = app.update(Message::Form(crate::forms::Msg::Save)); settle(&mut app, t);
+    let it = app.be.call_now("items.list", json!({})).unwrap().as_array().unwrap().iter().find(|i| i["name"] == "Notebook").cloned().expect("saved");
+    assert_eq!(it["is_tracked"], 1);
+    let _ = std::fs::remove_dir_all(dir);
+}

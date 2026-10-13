@@ -414,7 +414,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
                     checkbox(s.service).label("This is a service (no stock)").on_toggle(|v| Message::Form(Msg::Service(v))).text_size(14),
                     row![ui::field("Sales price / rate", &s.price, |v| Message::Form(Msg::Price(v))), pick("Income account", income, &s.sale_account, Msg::SaleAccount), pick("Sales tax", taxes, &s.tax, Msg::Tax)].spacing(14),
                     row![ui::field_ph("Cost", "Optional", &s.cost, |v| Message::Form(Msg::Cost(v))), pick("Expense account", expense, &s.purchase_account, Msg::PurchaseAccount), Space::new().width(Fill)].spacing(14),
-                    ui::muted("Inventory items with quantity tracking can be set up in the web version for now."),
+                    checkbox(s.tracked).label(if app.skin == Skin::QuickBooks { "Track quantity on hand (inventory)" } else { "Track this item (inventory)" }).on_toggle(|v| Message::Form(Msg::ItemType(if v { "Inventory Part".into() } else { "Non-inventory Part".into() }))).text_size(14),
+                    if s.tracked { Element::from(row![ui::field_ph("Reorder point", "Optional", &s.reorder, |v| Message::Form(Msg::Reorder(v))), Space::new().width(Fill), Space::new().width(Fill)].spacing(14)) } else { Space::new().into() },
                 ].spacing(14)),
                 footer(s.busy),
             ].spacing(14).into())

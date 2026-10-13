@@ -61,6 +61,8 @@ pub struct State {
     pub adding: bool,
     pub u_name: String,
     pub u_email: String,
+    /// New user's first password (optional).
+    pub u_password: String,
     pub u_role: Option<&'static str>,
     pub smtp: Vec<String>,
     pub smtp_tls: Security,
@@ -73,7 +75,7 @@ pub struct State {
 #[derive(Debug, Clone)]
 pub enum Msg {
     Cat(&'static str), Edit, Field(usize, String), Save, Saved(Result<Value, String>), Cancel,
-    Users(Reply), AddUser, UName(String), UEmail(String), URole(RoleOpt), SaveUser, UserSaved(Reply), SetActive(i64, bool),
+    Users(Reply), AddUser, UName(String), UEmail(String), UPassword(String), URole(RoleOpt), SaveUser, UserSaved(Reply), SetActive(i64, bool),
     LockEdit, LockField(usize, String), LockSave, LockSaved(Reply), EditSmtp, Smtp(usize, String), SmtpTls(Security), SaveSmtp, SmtpSaved(Reply), TestTo(String), SendTest, TestSent(Reply),
 }
 
@@ -138,19 +140,35 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::AddUser => { app.settings.adding = true; app.settings.u_name.clear(); app.settings.u_email.clear(); app.settings.u_role = Some("STANDARD"); Task::none() }
         Msg::UName(v) => { app.settings.u_name = v; Task::none() }
         Msg::UEmail(v) => { app.settings.u_email = v; Task::none() }
+        Msg::UPassword(v) => { app.settings.u_password = v; Task::none() }
         Msg::URole(r) => { app.settings.u_role = Some(r.key); Task::none() }
         Msg::SaveUser => {
             let s = &app.settings;
             if s.u_name.trim().is_empty() { return app.toast("Enter the person's name", true); }
             if !s.u_email.contains('@') { return app.toast("Enter a valid email address", true); }
             let body = json!({"name": s.u_name.trim(), "email": s.u_email.trim(), "role": s.u_role.unwrap_or("STANDARD")});
+            let password = s.u_password.clone();
+            if !password.is_empty() && password.chars().count() < 8 { return app.toast("Passwords need at least 8 characters", true); }
             app.settings.busy = true;
-            app.be.call("users.create", body, |r| Message::Settings(Msg::UserSaved(r)))
+            let be = app.be.clone();
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                    let mut v = be.call_now("users.create", body)?;
+                    if !password.is_empty() {
+                        // The first password turns sign-in on; keep this session signed in.
+                        let r = be.call_now("users.setPassword", json!({"id": v["id"], "password": password}))?;
+                        if let Some(t) = r["token"].as_str() { v["session_token"] = json!(t); }
+                    }
+                    Ok(v)
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Settings(Msg::UserSaved(r)))
         }
         Msg::UserSaved(r) => {
             app.settings.busy = false;
             match r {
-                Ok(_) => { app.settings.adding = false; let t1 = app.toast("User added", false); Task::batch([t1, app.be.call("users.list", json!({}), |r| Message::Settings(Msg::Users(r)))]) }
+                Ok(v) => {
+                    if let Some(t) = v["session_token"].as_str() { app.be.token = Some(t.to_string()); }
+                    app.settings.adding = false; app.settings.u_password.clear(); let t1 = app.toast("User added", false); Task::batch([t1, app.be.call("users.list", json!({}), |r| Message::Settings(Msg::Users(r)))]) }
                 Err(e) => app.toast(e, true),
             }
         }
@@ -231,7 +249,8 @@ fn users_card(app: &App) -> Element<'_, Message> {
         col = col.push(container(column![
             row![ui::field("Name", &s.u_name, |v| Message::Settings(Msg::UName(v))), ui::field("Email", &s.u_email, |v| Message::Settings(Msg::UEmail(v))),
                 column![ui::label(if qb { "User type" } else { "Role" }), pick_list(roles, sel, |r| Message::Settings(Msg::URole(r))).padding([7, 10]).text_size(14).style(theme::pick).width(Fill)].spacing(5).width(Fill)].spacing(14),
-            ui::muted("They sign in with their email; set a password for them from the web version's Users page or they set one on first sign-in."),
+            row![iced::widget::text_input("Password (optional — at least 8 characters)", &s.u_password).on_input(|v| Message::Settings(Msg::UPassword(v))).secure(true).padding([7, 10]).size(14).style(theme::input).width(360)],
+            ui::muted("They sign in with their email and this password; leave it blank and they choose one on first sign-in. Once anyone has a password, LedgerCraft asks everyone to sign in — give the owner a password too."),
             row![ui::hspace(), ui::btn("Cancel", Some(Message::Settings(Msg::Cancel))), ui::btn_primary("Save", if s.busy { None } else { Some(Message::Settings(Msg::SaveUser)) })].spacing(8),
         ].spacing(10)).padding(14).style(theme::soft).width(Fill));
     }
@@ -356,7 +375,7 @@ fn file_section(_app: &App) -> Element<'_, Message> {
     ui::card(column![
         ui::h2("Company file"),
         row![ui::muted("Open a different company or create a new one."), ui::hspace(), ui::btn("Switch company", Some(Message::Nav(Route::Setup)))].align_y(Alignment::Center),
-        ui::muted("Invoice templates are in Lists ▸ Templates. Bank feeds, currencies and other advanced settings are still in the web version (start.bat web) during the native rewrite."),
+        ui::muted("Invoice templates, currencies, bank rules, budgets, fixed assets and import/export each have their own screen (see the menus). Two-step sign-in and a few payroll settings are still in the web version (start.bat web) for now."),
     ].spacing(10))
 }
 
