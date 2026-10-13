@@ -21,6 +21,8 @@ pub struct State {
     pub fa_method: Option<&'static str>,
     pub fa_dep_date: String,
     pub fa_dispose: Option<(i64, String, String, Option<Opt>, Option<Opt>)>,
+    /// Contact page: the note being written in History & notes.
+    pub contact_note: String,
     /// Audit log: what kind of record to show.
     pub audit_entity: Option<&'static str>,
     /// Currencies: the rate being entered (code, date, rate).
@@ -73,6 +75,8 @@ pub enum Msg {
     FaTab(&'static str), FaNew, FaField(&'static str, String), FaType(Opt), FaMethod(&'static str), FaSave, FaCancel, FaRegister(i64),
     FaDepDate(String), FaRun, FaDisposeOpen(i64), FaDisposeField(u8, String), FaDisposeProceeds(Opt), FaDisposeGain(Opt), FaDispose,
     AuditEntity(&'static str),
+    /// Contact History & notes: the note text, then add it to the contact.
+    ContactNote(String), ContactNoteAdd(i64),
     FxEnable(String, bool), FxRateOpen(String), FxRateField(u8, String), FxRateSave, FxRevalDate(String), FxRevalue, FxFetch,
     BudPick(i64), BudYear(i32), BudCell(i64, String, String), BudCopyAcross(i64), BudNew(Option<String>), BudCreate, BudSave, BudCreated(Reply),
     ClTab(&'static str), ClNew(bool), ClField(&'static str, String), ClAccount(Opt), ClTax(Opt), ClSave(bool), ClStatus(i64, &'static str), ClCancel,
@@ -132,6 +136,14 @@ fn opt_of(app: &App, id: Option<i64>) -> Option<Opt> { id.and_then(|id| app.lk.a
 pub fn update(app: &mut App, m: Msg) -> Task<Message> {
     let style = app.date_style();
     match m {
+        // ---- contact notes ----
+        Msg::ContactNote(s) => { app.extras.contact_note = s; Task::none() }
+        Msg::ContactNoteAdd(id) => {
+            let text = app.extras.contact_note.trim().to_string();
+            if text.is_empty() { return Task::none(); }
+            app.extras.contact_note.clear();
+            app.be.call("notes.add", json!({"entity": "contact", "id": id, "text": text}), |r| Message::Extras(Msg::Done(r, "Note added")))
+        }
         // ---- fixed assets ----
         Msg::FaTab(t) => { app.extras.fa_tab = Some(t); Task::none() }
         Msg::FaNew => {

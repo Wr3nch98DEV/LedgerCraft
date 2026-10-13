@@ -253,11 +253,15 @@ pub fn contacts(app: &App) -> Element<'_, Message> {
     let tabs: Vec<(&'static str, String)> = if customers.is_none() { vec![("all", "All".into()), ("customers", "Customers".into()), ("suppliers", "Suppliers".into())] } else { vec![] };
     let body = column![top, search_and_tabs(app, &tabs), ui::table(&cols, rows, "No contacts yet.")].spacing(16);
     let new_label = match customers { Some(true) => "New customer", Some(false) => if app.skin == Skin::QuickBooks { "New vendor" } else { "New supplier" }, None => "New contact" };
-    ui::page(ui::h1(title.to_string()), vec![ui::btn_primary(new_label, Some(Message::Nav(Route::NewContact(customers != Some(false)))))], body.into())
+    let mut actions: Vec<Element<Message>> = vec![];
+    if app.skin == Skin::Xero { for b in ["Import", "Export"] { actions.push(ui::btn(b, Some(Message::Nav(Route::ImportExport)))); } }
+    actions.push(ui::btn_primary(new_label, Some(Message::Nav(Route::NewContact(customers != Some(false))))));
+    ui::page(ui::h1(title.to_string()), actions, body.into())
 }
 
 pub fn contact(app: &App) -> Element<'_, Message> {
     if let Some(e) = loading_or_error(app, "Contact") { return e; }
+    if app.skin == Skin::Xero { return xero_contact(app); }
     let d = app.data.as_ref().unwrap();
     let c = &d["contact"];
     let id = c["id"].as_i64().unwrap_or(0);
@@ -297,6 +301,86 @@ pub fn contact(app: &App) -> Element<'_, Message> {
     let back = if is_supplier { Route::Vendors } else { Route::Customers };
     let title = column![ui::link(if is_supplier { app.term("suppliers") } else { app.term("customers") }, Message::Nav(back)), ui::h1(st(c, "name").to_string())].spacing(4);
     ui::page(title.into(), actions, column![info, ui::h2("Transaction list"), ui::table(&cols, rows, "No transactions yet.")].spacing(16).into())
+}
+
+/// Xero's contact page: details down the left; money in / money out, recent activity and
+/// History & notes on the right.
+fn xero_contact(app: &App) -> Element<'_, Message> {
+    let d = app.data.as_ref().unwrap();
+    let c = &d["contact"];
+    let id = c["id"].as_i64().unwrap_or(0);
+    let k = t();
+    let sum = &c["summary"];
+    let customer = c["is_customer"] == 1 || c["is_supplier"] != 1;
+    let supplier = c["is_supplier"] == 1;
+    // ---- details ----
+    let mut details = column![ui::h2("Contact details")].spacing(10);
+    let person = format!("{} {}", st(c, "first_name"), st(c, "last_name")).trim().to_string();
+    for (label, v) in [("Primary person", person), ("Email", st(c, "email").to_string()), ("Phone", st(c, "phone").to_string()), ("Mobile", st(c, "mobile").to_string()),
+        ("Website", st(c, "website").to_string()), ("Postal address", st(c, "postal_address").to_string()), ("Street address", st(c, "street_address").to_string()),
+        ("Tax number", st(c, "tax_number").to_string()), ("Account number", st(c, "account_number").to_string())] {
+        if !v.trim().is_empty() { details = details.push(column![ui::label(label), text(v).size(14)].spacing(2)); }
+    }
+    let groups: Vec<String> = c["groups"].as_array().cloned().unwrap_or_default().iter().map(|g| st(g, "name").to_string()).collect();
+    if !groups.is_empty() { details = details.push(column![ui::label("Groups"), text(groups.join(", ")).size(14)].spacing(2)); }
+    let left = column![ui::card(details)].width(320);
+    // ---- money in / out ----
+    let money = |title: &'static str, out: i64, over: i64, year: i64, new: Element<'static, Message>| -> Element<'static, Message> {
+        ui::card(column![
+            row![ui::h2(title), ui::hspace(), new].align_y(Alignment::Center),
+            row![
+                column![text(ui::money(out)).size(20).font(BOLD), ui::muted("Outstanding")].spacing(2).width(Fill),
+                column![text(ui::money(over)).size(20).font(BOLD).color(if over > 0 { k.bad } else { k.text }), ui::muted("Overdue")].spacing(2).width(Fill),
+            ],
+            text(format!("{} in the last 12 months", ui::money(year))).size(13).color(k.muted),
+        ].spacing(10)).into()
+    };
+    let mut panels = row![].spacing(14);
+    if customer { panels = panels.push(container(money("Money in", i(&sum["receivable"]), i(&sum["receivable_overdue"]), i(&sum["sales_12m"]), ui::link("New invoice", Message::NewDocFor("ACCREC".into(), id)))).width(Fill)); }
+    if supplier { panels = panels.push(container(money("Money out", i(&sum["payable"]), i(&sum["payable_overdue"]), i(&sum["purchases_12m"]), ui::link("New bill", Message::NewDocFor("ACCPAY".into(), id)))).width(Fill)); }
+    // ---- recent activity ----
+    let mut txs: Vec<Value> = d["sales"].as_array().cloned().unwrap_or_default();
+    txs.extend(d["bills"].as_array().cloned().unwrap_or_default());
+    txs.sort_by(|a, b| st(b, "date").cmp(st(a, "date")));
+    let cols = vec![col("Date", 12), col("Type", 12), col("Number", 12), col("Due date", 12), coln("Due", 14), coln("Total", 14), col("Status", 14)];
+    let rows = txs.iter().take(10).map(|r| {
+        let kind = st(r, "type");
+        let label = vocab::status(app.skin, kind, st(r, "status"), i(&r["overdue"]) == 1);
+        let due = if kind.ends_with("CREDIT") { String::new() } else { app.d(st(r, "due_date")) };
+        (vec![ui::cell(app.d(st(r, "date"))), ui::cell_muted(type_label(app, kind)), ui::cell(st(r, "number")), ui::cell_muted(due),
+            ui::cell_money(i(&r["amount_due"])), ui::cell_money(i(&r["total"])), ui::chip(label, status_color(label))],
+         Some(Message::Nav(Route::Doc { kind: kind.into(), id: r["id"].as_i64() })))
+    }).collect();
+    // ---- history & notes ----
+    let mut hist = column![
+        row![
+            text_input("Add a note", &app.extras.contact_note).on_input(|s| Message::Extras(crate::extras::Msg::ContactNote(s)))
+                .on_submit(Message::Extras(crate::extras::Msg::ContactNoteAdd(id))).padding([7, 10]).size(14).style(theme::input),
+            ui::btn("Add note", Some(Message::Extras(crate::extras::Msg::ContactNoteAdd(id)))),
+        ].spacing(8),
+    ].spacing(8);
+    let entries = d["history"].as_array().cloned().unwrap_or_default();
+    if entries.is_empty() { hist = hist.push(ui::muted("No history yet.")); }
+    for h in entries.iter().take(20) {
+        let when = st(h, "at");
+        let day = app.d(when.get(..10).unwrap_or(when));
+        hist = hist.push(row![
+            text(day).size(13).color(k.muted).width(110),
+            text(if st(h, "kind") == "NOTE" { "Note" } else { "History" }).size(13).color(k.muted).width(70),
+            text(st(h, "text").to_string()).size(14).width(Fill),
+            text(st(h, "user").to_string()).size(13).color(k.muted),
+        ].spacing(10));
+    }
+    let right = column![
+        panels,
+        ui::h2("Recent activity"), ui::table(&cols, rows, "No transactions yet."),
+        ui::h2("History & notes"), ui::card(hist),
+    ].spacing(14).width(Fill);
+    let mut actions: Vec<Element<Message>> = vec![ui::btn("Edit", Some(Message::Nav(Route::EditContact(id))))];
+    if customer { actions.push(ui::btn("Record payment", Some(Message::Nav(Route::ReceivePayment(Some(id)))))); }
+    actions.push(ui::btn_primary(if customer { "New invoice" } else { "New bill" }, Some(Message::NewDocFor((if customer { "ACCREC" } else { "ACCPAY" }).into(), id))));
+    let title = column![ui::link("Contacts", Message::Nav(Route::Contacts)), ui::h1(st(c, "name").to_string())].spacing(4);
+    ui::page(title.into(), actions, row![left, right].spacing(18).into())
 }
 
 pub fn products(app: &App) -> Element<'_, Message> {

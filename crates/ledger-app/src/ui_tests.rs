@@ -3556,3 +3556,17 @@ fn xero_reconcile_tabs_transfer_and_discuss() {
     assert!(app.data.as_ref().unwrap()["lines"].as_array().unwrap().iter().all(|l| l["id"] != line), "line reconciled");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn xero_contact_page_history_and_notes() {
+    let (mut app, dir) = demo_app("xero-contact", Skin::Xero);
+    let id = app.lk.contact_opts(true).into_iter().next().unwrap().id;
+    let t = app.update(Message::Nav(Route::Contact(id))); settle(&mut app, t);
+    for b in ["Contact details", "Money in", "Recent activity", "History & notes"] { let _g = sim_lock(); let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 1400.0), app.view()); assert!(ui.find(b).is_ok(), "missing {b}"); }
+    let _ = app.update(Message::Extras(crate::extras::Msg::ContactNote("Prefers email reminders".into())));
+    press(&mut app, "Add note");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let hist = app.data.as_ref().unwrap()["history"].as_array().unwrap().clone();
+    assert!(hist.iter().any(|h| h["text"] == "Prefers email reminders" && h["kind"] == "NOTE"), "{hist:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}

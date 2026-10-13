@@ -529,7 +529,8 @@ impl App {
                         let c = be.call_now("contacts.get", json!({"id": id}))?;
                         let sales = be.call_now("docs.list", json!({"type": "SALES", "contact_id": id, "limit": 200})).unwrap_or(json!({"rows": []}));
                         let bills = be.call_now("docs.list", json!({"type": "ACCPAY", "contact_id": id, "limit": 200})).unwrap_or(json!({"rows": []}));
-                        Ok(json!({"contact": c, "sales": sales["rows"], "bills": bills["rows"]}))
+                        let history = be.call_now("history.get", json!({"entity": "contact", "id": id})).unwrap_or(json!([]));
+                        Ok(json!({"contact": c, "sales": sales["rows"], "bills": bills["rows"], "history": history}))
                     }).await.unwrap_or_else(|e| Err(e.to_string()))
                 }, move |r| Message::Loaded(g, r))
             }
