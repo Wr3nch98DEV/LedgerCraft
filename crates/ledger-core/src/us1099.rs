@@ -63,6 +63,41 @@ impl Ledger {
     }
 
     /// "1099 Contractor Summary": vendors at or over the threshold, then those under it.
+    /// W-2 Wage and Tax Summary (US): each employee's calendar-year wages and the federal income
+    /// tax, social security and Medicare withheld, from posted pay runs. Social security and
+    /// Medicare are the employee's 6.2% and 1.45% of each payslip; federal is the rest of the tax.
+    pub fn report_w2(&self, p: &ReportParams) -> Result<Value> {
+        let to = p.to.clone().or(p.date.clone()).unwrap_or_else(util::today);
+        let year = to[..4].to_string();
+        let (from, to) = (format!("{year}-01-01"), format!("{year}-12-31"));
+        let slips = util::query_json(&self.conn,
+            "SELECT e.id AS employee_id, e.first_name || ' ' || e.last_name AS name, e.tax_id, s.gross, s.tax FROM payslips s JOIN pay_runs r ON r.id = s.pay_run_id JOIN employees e ON e.id = s.employee_id
+             WHERE r.status = 'POSTED' AND r.payment_date >= ?1 AND r.payment_date <= ?2 ORDER BY e.last_name, e.first_name", params![from, to])?;
+        let mut rows: Vec<Value> = Vec::new();
+        let mut tot = [0i64; 4];
+        let mut cur: Option<(i64, String, [i64; 4])> = None;
+        let flush = |c: Option<(i64, String, [i64; 4])>, rows: &mut Vec<Value>| if let Some((id, label, v)) = c { rows.push(json!({"label": label, "employee_id": id, "values": v})); };
+        for s in &slips {
+            let id = s["employee_id"].as_i64().unwrap_or(0);
+            if cur.as_ref().map(|c| c.0) != Some(id) {
+                flush(cur.take(), &mut rows);
+                let tin = s["tax_id"].as_str().unwrap_or("");
+                let name = s["name"].as_str().unwrap_or("");
+                cur = Some((id, if tin.is_empty() { format!("{name} (no SSN on file)") } else { format!("{name} ({tin})") }, [0; 4]));
+            }
+            let (gross, tax) = (s["gross"].as_i64().unwrap_or(0), s["tax"].as_i64().unwrap_or(0));
+            let ss = crate::money::div_round(gross as i128 * 620, 10_000) as i64;
+            let med = crate::money::div_round(gross as i128 * 145, 10_000) as i64;
+            let add = [gross, (tax - ss - med).max(0), ss, med];
+            if let Some(c) = cur.as_mut() { for n in 0..4 { c.2[n] += add[n]; tot[n] += add[n]; } }
+        }
+        flush(cur.take(), &mut rows);
+        Ok(json!({"title": "W-2 Wage and Tax Summary", "org": self.setting_or("org_name", "")?, "subtitle": format!("Calendar year {year}"),
+            "columns": ["Wages (box 1)", "Federal tax withheld (box 2)", "Social security tax (box 4)", "Medicare tax (box 6)"],
+            "sections": [{"title": "Employees", "rows": rows, "total": {"label": "Total", "values": tot}}],
+            "notes": ["Figures to copy onto Forms W-2 and W-3; LedgerCraft doesn't file them. Pre-tax deductions and state boxes aren't included."]}))
+    }
+
     pub fn report_1099(&self, p: &ReportParams) -> Result<Value> {
         let to = p.to.clone().or(p.date.clone()).unwrap_or_else(util::today);
         let from = p.from.clone().unwrap_or_else(|| format!("{}-01-01", &to[..4]));

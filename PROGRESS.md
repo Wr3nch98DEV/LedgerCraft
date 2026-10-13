@@ -28,6 +28,7 @@
 >   * Payment reminder (dunning) levels.
 >   * Price rules with quantity breaks and dates.
 >   * Bank files for batch supplier payments (Batch payments screen).
+>   * W-2 Wage and Tax Summary report (US).
 >
 >   Your company file updates itself (two new tables/columns).
 

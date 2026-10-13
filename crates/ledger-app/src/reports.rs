@@ -265,7 +265,7 @@ fn qb_group(key: &str) -> &'static str {
         "aged-payables" | "payable-invoice-detail" => "What you owe",
         "purchases-by-contact" | "purchases-by-item" | "expense-claims" | "contractor-1099" => "Expenses and vendors",
         "tax-reconciliation" | "sales-tax-by-agency" => "Sales tax",
-        "payroll-activity" | "leave-balances" => "Employees",
+        "payroll-activity" | "leave-balances" | "w2-summary" => "Employees",
         "inventory-summary" | "fixed-asset-register" | "fixed-asset-reconciliation" | "depreciation-schedule" | "project-profitability" => "Inventory, assets and projects",
         _ => "For my accountant",
     }
@@ -309,7 +309,7 @@ pub fn centre(app: &App) -> Element<'_, Message> {
     let q = app.list_q.to_lowercase();
     // 1099s are US-only.
     let us = app.country() == "US";
-    let cat: Vec<Value> = d.as_array().cloned().unwrap_or_default().into_iter().filter(|r| us || !matches!(r["key"].as_str(), Some("contractor-1099" | "sales-tax-by-agency")))
+    let cat: Vec<Value> = d.as_array().cloned().unwrap_or_default().into_iter().filter(|r| us || !matches!(r["key"].as_str(), Some("contractor-1099" | "sales-tax-by-agency" | "w2-summary")))
         .filter(|r| q.is_empty() || name(app.skin, r["key"].as_str().unwrap_or(""), r["title"].as_str().unwrap_or("")).to_lowercase().contains(&q) || r["description"].as_str().unwrap_or("").to_lowercase().contains(&q)).collect();
     let link_row = |key: String, title: String, desc: String| -> Element<'_, Message> {
         let on = favs.contains(&key);

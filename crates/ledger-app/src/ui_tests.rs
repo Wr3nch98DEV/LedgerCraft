@@ -3937,3 +3937,31 @@ fn batch_payment_bank_file() {
     for b in &bills { let name = b["contact_name"].as_str().unwrap().to_uppercase(); assert!(text.contains(&name[..name.len().min(16)]), "{name} in the file"); }
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn w2_wage_and_tax_summary() {
+    let (mut app, dir) = desktop_app("w2");
+    assert_eq!(app.country(), "US");
+    app.be.call_now("settings.update", json!({"payroll_jurisdiction": "US"})).unwrap();
+    let settings = app.be.call_now("payroll.settings", json!({})).unwrap();
+    let cal = settings["calendars"][0]["id"].as_i64().unwrap();
+    let id = app.be.call_now("payroll.createPayRun", json!({"calendar_id": cal})).unwrap()["id"].as_i64().unwrap();
+    let bank = crate::payments::bank_only(&app)[0].id;
+    app.be.call_now("payroll.post", json!({"id": id, "bank_account_id": bank})).unwrap();
+    let run = app.be.call_now("payroll.payRun", json!({"id": id})).unwrap();
+    let year = &run["payment_date"].as_str().unwrap()[..4];
+    let r = app.be.call_now("reports.run", json!({"name": "w2-summary", "params": {"date": format!("{year}-12-31")}})).unwrap();
+    let rows = r["sections"][0]["rows"].as_array().unwrap();
+    assert!(!rows.is_empty());
+    // Wages add up to the posted gross; social security is 6.2% of it.
+    let gross: i64 = run["payslips"].as_array().unwrap().iter().map(|s| s["gross"].as_i64().unwrap()).sum();
+    let total = &r["sections"][0]["total"]["values"];
+    assert!(total[0].as_i64().unwrap() >= gross);
+    assert!((total[2].as_i64().unwrap() - gross * 62 / 1000).abs() <= rows.len() as i64 * 2);
+    // It's in the US report list in every layout.
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Online)); settle(&mut app, t);
+    let t = app.update(Message::Nav(Route::Reports)); settle(&mut app, t);
+    let _ = app.update(Message::ListQuery("w-2".into()));
+    assert!(!click_fails(&app, "W-2 Wage and Tax Summary"));
+    let _ = std::fs::remove_dir_all(dir);
+}

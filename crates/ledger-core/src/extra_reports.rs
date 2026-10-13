@@ -42,6 +42,7 @@ pub const CATALOGUE: &[(&str, &str, &str, &str)] = &[
     ("fx-gains-losses", "Foreign Currency Gains and Losses", "Accounting", "Realised and unrealised currency gains"),
     ("income-by-contact", "Income by Contact", "Receivables", "Income per contact (cash and accrual)"),
     ("contractor-1099", "1099 Contractor Summary", "Payables", "Payments to vendors tracked for 1099s (US)"),
+    ("w2-summary", "W-2 Wage and Tax Summary", "Payroll", "Each employee's wages and taxes withheld for the year, for Forms W-2 (US)"),
     ("sales-tax-by-agency", "Sales Tax Liability by Agency", "Tax", "Taxable sales and tax collected per sales tax agency (US)"),
 ];
 

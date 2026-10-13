@@ -178,7 +178,7 @@ The first task of step 4 is to verify this column feature by feature; the table 
 | Estimates → sales orders → invoices, estimate inactivation, progress invoicing | QB, Sage, Acumatica | Have: progress invoices by % with invoiced-so-far; estimate closes at 100% |
 | Receipt capture with OCR and auto-matching | Sage, Xero, Acumatica | Partial: PDF reading; photo OCR needs Tesseract |
 | Expense claims, mileage, reimbursements | Sage, Xero | Have (native receipts, mileage, submit/approve) |
-| 1099 / W-2 | Sage, QB | Partial: 1099 summary; W-2 missing |
+| 1099 / W-2 | Sage, QB | Have: 1099 Contractor Summary and W-2 Wage and Tax Summary reports (figures for the forms; no e-filing) |
 | Advanced price rules (customer type, category, quantity breaks, dates) | QB, Acumatica | Have: price levels plus price rules (item, level, quantity breaks, dates); item categories still to add |
 
 ### Inventory, warehouse and manufacturing
