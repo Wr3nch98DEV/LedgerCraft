@@ -139,7 +139,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     }
 
     let layouts = row(crate::theme::Layout::ALL.iter().map(|l| {
-        let name = match l { crate::theme::Layout::Desktop => "QuickBooks Desktop", crate::theme::Layout::Online => "QuickBooks Online", crate::theme::Layout::Xero => "Xero" };
+        let name = match l { crate::theme::Layout::Desktop => "QuickBooks Desktop", crate::theme::Layout::Online => "QuickBooks Online", crate::theme::Layout::Xero => "Xero", crate::theme::Layout::Acumatica => "MYOB Acumatica" };
         button(text(name).size(14)).style(if s.layout == *l { theme::primary } else { theme::secondary }).padding([7, 14]).on_press(Message::Setup(Msg::Layout(*l))).into()
     })).spacing(6);
     let create = column![

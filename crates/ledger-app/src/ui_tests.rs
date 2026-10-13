@@ -3036,7 +3036,7 @@ fn every_feature_in_every_layout() {
 fn render_layout_menu() {
     use crate::theme::Layout;
     let (mut app, dir) = desktop_app("menu-shot");
-    let layout = match std::env::var("LC_LAYOUT").as_deref() { Ok("xero") => Layout::Xero, Ok("online") => Layout::Online, _ => Layout::Desktop };
+    let layout = Layout::from_key(&std::env::var("LC_LAYOUT").unwrap_or_default());
     let t = app.update(Message::SetLayout(layout)); settle(&mut app, t);
     if std::env::var("LC_LIGHT").is_ok() { app.dark = false; }
     let route = crate::app::parse_route(&std::env::var("LC_ROUTE").unwrap_or_else(|_| "dashboard".into())).unwrap();
@@ -3044,7 +3044,7 @@ fn render_layout_menu() {
     match std::env::var("LC_OPEN").as_deref() {
         Ok("new") => app.new_menu = true,
         Ok("gear") => app.gear_menu = true,
-        Ok(m) => app.menu = ["business", "accounting", "payroll", "contacts"].into_iter().find(|x| *x == m),
+        Ok(m) => app.menu = ["business", "accounting", "payroll", "contacts"].into_iter().chain(crate::acumatica::WORKSPACES.iter().map(|w| w.0)).find(|x| *x == m),
         _ => {}
     }
     let _ = std::fs::remove_file(std::env::temp_dir().join("lc-route-wgpu.png"));
@@ -3691,5 +3691,28 @@ fn xero_projects_tabs_and_pay_run_wording() {
     assert!(!click_fails(&app, "Pinecrest brand refresh"));
     let t = app.update(Message::Nav(Route::Payroll)); settle(&mut app, t);
     assert!(!click_fails(&app, "Add pay run"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn every_feature_in_the_acumatica_layout() {
+    let (mut app, dir) = desktop_app("acu-registry");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Acumatica)); settle(&mut app, t);
+    assert_eq!(app.skin, Skin::QuickBooks);
+    for (id, ws, _, label) in crate::acumatica::PLACES {
+        app.route = Route::Dashboard; app.data = None; app.new_menu = false; app.gear_menu = false;
+        app.menu = Some(ws);
+        let msgs = {
+            let _g = sim_lock();
+            let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
+            ui.click(*label).unwrap_or_else(|e| panic!("Acumatica: {ws} ▸ {label} not clickable (feature {id}): {e:?}"));
+            ui.into_messages().collect::<Vec<_>>()
+        };
+        assert!(!msgs.is_empty(), "Acumatica: {ws} ▸ {label} does nothing");
+    }
+    // Opening a screen from the panel closes it.
+    app.menu = Some("payables");
+    let t = app.update(Message::Nav(Route::Bills)); settle(&mut app, t);
+    assert_eq!(app.menu, None);
     let _ = std::fs::remove_dir_all(dir);
 }

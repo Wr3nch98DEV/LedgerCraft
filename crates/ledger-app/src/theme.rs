@@ -17,14 +17,14 @@ impl Skin {
 /// The screen layout. Desktop and Online are both QuickBooks (same terms, `Skin::QuickBooks`);
 /// they differ in navigation and screen design.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Layout { Desktop, Online, Xero }
+pub enum Layout { Desktop, Online, Xero, Acumatica }
 
 impl Layout {
-    pub const ALL: [Layout; 3] = [Layout::Desktop, Layout::Online, Layout::Xero];
-    pub fn key(self) -> &'static str { match self { Layout::Desktop => "desktop", Layout::Online => "quickbooks", Layout::Xero => "xero" } }
-    pub fn from_key(s: &str) -> Layout { match s { "xero" => Layout::Xero, "quickbooks" | "online" | "qbo" => Layout::Online, _ => Layout::Desktop } }
+    pub const ALL: [Layout; 4] = [Layout::Desktop, Layout::Online, Layout::Xero, Layout::Acumatica];
+    pub fn key(self) -> &'static str { match self { Layout::Desktop => "desktop", Layout::Online => "quickbooks", Layout::Xero => "xero", Layout::Acumatica => "acumatica" } }
+    pub fn from_key(s: &str) -> Layout { match s { "xero" => Layout::Xero, "acumatica" | "myob" => Layout::Acumatica, "quickbooks" | "online" | "qbo" => Layout::Online, _ => Layout::Desktop } }
     pub fn skin(self) -> Skin { if self == Layout::Xero { Skin::Xero } else { Skin::QuickBooks } }
-    pub fn label(self) -> &'static str { match self { Layout::Desktop => "QuickBooks Desktop-style", Layout::Online => "QuickBooks Online-style", Layout::Xero => "Xero-style" } }
+    pub fn label(self) -> &'static str { match self { Layout::Desktop => "QuickBooks Desktop-style", Layout::Online => "QuickBooks Online-style", Layout::Xero => "Xero-style", Layout::Acumatica => "MYOB Acumatica-style" } }
 }
 impl From<Skin> for Layout { fn from(s: Skin) -> Layout { match s { Skin::QuickBooks => Layout::Online, Skin::Xero => Layout::Xero } } }
 
@@ -44,6 +44,21 @@ pub fn tokens_for(layout: Layout, dark: bool) -> Tokens {
             accent: hex(0x2ca01c), accent_ink: hex(0xffffff), accent_soft: hexa(0x2ca01c, 0.12), ok: hex(0x2a8a1c), warn: hex(0xb06d00),
             bad: hex(0xc8281e), info: hex(0x0b5fa5), nav_bg: hex(0x2f3439), nav_text: hex(0xffffff), nav_muted: hex(0xc3c9cf),
             nav_active: hex(0x6fd15f), nav_hover: hex(0x40464c),
+        },
+        // MYOB Acumatica-style: deep navy main menu, blue-violet accent, square-ish panels.
+        (Layout::Acumatica, true) => Tokens {
+            dark, bg: hex(0x0f131a), bg2: hex(0x141a23), panel: hex(0x18202b), panel2: hex(0x1f2834), hover: hex(0x263141),
+            line: hex(0x2b3646), line2: hex(0x3c4a5e), text: hex(0xe8edf4), muted: hex(0xa0abba), faint: hex(0x6c7889),
+            accent: hex(0x6d8dff), accent_ink: hex(0xffffff), accent_soft: hexa(0x6d8dff, 0.16), ok: hex(0x43c27a), warn: hex(0xf0b43c),
+            bad: hex(0xf06a6a), info: hex(0x5fb3f0), nav_bg: hex(0x0b1018), nav_text: hex(0xe8edf4), nav_muted: hex(0x93a0b2),
+            nav_active: hex(0x8aa4ff), nav_hover: hex(0x1a2331),
+        },
+        (Layout::Acumatica, false) => Tokens {
+            dark, bg: hex(0xeef1f5), bg2: hex(0xe4e8ee), panel: hex(0xffffff), panel2: hex(0xf3f5f8), hover: hex(0xe6ecf8),
+            line: hex(0xccd3dd), line2: hex(0xaeb8c6), text: hex(0x1c2430), muted: hex(0x56606e), faint: hex(0x8a94a2),
+            accent: hex(0x3b5bdb), accent_ink: hex(0xffffff), accent_soft: hexa(0x3b5bdb, 0.10), ok: hex(0x1f8a4c), warn: hex(0xb06d00),
+            bad: hex(0xc8281e), info: hex(0x0b6bb5), nav_bg: hex(0x1d2838), nav_text: hex(0xffffff), nav_muted: hex(0xb7c1cf),
+            nav_active: hex(0x9fb4ff), nav_hover: hex(0x2a374b),
         },
         _ => tokens(layout.skin(), dark),
     }

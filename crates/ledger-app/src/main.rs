@@ -2,6 +2,7 @@
 //! over the same accounting engine and company files.
 #![windows_subsystem = "windows"]
 
+mod acumatica;
 mod app;
 mod backend;
 mod banking;

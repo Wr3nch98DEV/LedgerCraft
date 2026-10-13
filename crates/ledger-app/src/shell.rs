@@ -20,10 +20,11 @@ pub fn view(app: &App) -> Element<'_, Message> {
         return with_toasts(app, crate::desktop::frame(app, content.into()));
     }
     let content = container(page(app)).style(theme::page).width(Fill).height(Fill);
-    let base: Element<Message> = match app.skin {
+    let acu = app.layout == crate::theme::Layout::Acumatica;
+    let base: Element<Message> = if acu { crate::acumatica::frame(app, content.into()) } else { match app.skin {
         Skin::QuickBooks => row![qb_sidebar(app), column![qb_topbar(app), content]].into(),
         Skin::Xero => column![xero_topbar(app), content].into(),
-    };
+    } };
     let mut layers = stack![base].width(Fill).height(Fill);
     if !app.search_results.is_empty() && !app.search.is_empty() {
         layers = layers.push(mouse_area(container(Space::new()).width(Fill).height(Fill)).on_press(Message::CloseMenus));
@@ -44,6 +45,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if app.new_menu || app.gear_menu || app.menu.is_some() {
         layers = layers.push(mouse_area(container(Space::new()).width(Fill).height(Fill)).on_press(Message::CloseMenus));
         let (menu, pad) = match (app.skin, app.new_menu, app.gear_menu, app.menu) {
+            (_, _, _, Some(ws)) if acu => (crate::acumatica::workspace_panel(app, ws), Padding { top: 50.0, left: crate::acumatica::PANEL_LEFT, ..Padding::ZERO }),
             (Skin::QuickBooks, true, _, _) => (new_menu(app), Padding { top: 104.0, left: 14.0, ..Padding::ZERO }),
             (Skin::Xero, true, _, _) => (new_menu(app), Padding { top: 56.0, left: 320.0, ..Padding::ZERO }),
             (_, _, true, _) => (gear_menu(app), Padding { top: 56.0, left: 180.0, ..Padding::ZERO }),
@@ -270,7 +272,7 @@ fn top_icon<'a>(name: &str, msg: Message) -> Element<'a, Message> {
     button(icon(name, 19.0, t().muted)).style(theme::ghost).padding(7).on_press(msg).into()
 }
 
-fn avatar<'a>(app: &App) -> Element<'a, Message> {
+pub(crate) fn avatar<'a>(app: &App) -> Element<'a, Message> {
     let k = t();
     let initials: String = app.user_name().split_whitespace().filter_map(|w| w.chars().next()).take(2).collect::<String>().to_uppercase();
     container(text(if initials.is_empty() { "?".into() } else { initials }).size(12).font(BOLD).color(k.accent_ink)).width(30).height(30).center_x(30).center_y(30)
