@@ -3570,3 +3570,30 @@ fn xero_contact_page_history_and_notes() {
     assert!(hist.iter().any(|h| h["text"] == "Prefers email reminders" && h["kind"] == "NOTE"), "{hist:?}");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn find_and_recode_moves_lines_to_another_account() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = demo_app("recode", Skin::Xero);
+    let t = app.update(Message::Nav(Route::Recode)); settle(&mut app, t);
+    let rent = app.lk.account_opts(|a| a["name"] == "Rent").into_iter().next().expect("Rent account");
+    let _ = app.update(Message::Extras(X::RcAccount(rent.clone())));
+    // ("Search" is also the top bar's search box.)
+    let t = app.update(Message::Extras(X::RcFind)); settle(&mut app, t);
+    let found = app.data.as_ref().unwrap().as_array().unwrap().clone();
+    assert!(!found.is_empty() && found.iter().all(|l| l["account_name"] == "Rent"), "{found:?}");
+    let first = found[0]["line_id"].as_i64().unwrap();
+    let _ = app.update(Message::Extras(X::RcToggle(first)));
+    let office = app.lk.account_opts(|a| a["type"] != "BANK" && a["name"].as_str().unwrap_or("").contains("Office")).into_iter().next().expect("office account");
+    let _ = app.update(Message::Extras(X::RcToAccount(office.clone())));
+    let on_office = |app: &App| app.be.call_now("recode.find", json!({"account_id": office.id})).unwrap().as_array().unwrap().len();
+    let before = on_office(&app);
+    press(&mut app, "Recode 1 line(s)");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    // The search reloads: one fewer Rent line; the moved line is on the new account.
+    let after = app.data.as_ref().unwrap().as_array().unwrap().clone();
+    assert_eq!(after.len(), found.len() - 1);
+    // (Reposting rewrites the transaction's lines, so they get new ids.)
+    assert_eq!(on_office(&app), before + 1);
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -21,6 +21,15 @@ pub struct State {
     pub fa_method: Option<&'static str>,
     pub fa_dep_date: String,
     pub fa_dispose: Option<(i64, String, String, Option<Opt>, Option<Opt>)>,
+    /// Find & recode: filters (account, tax rate, contact, from, to, text), the lines ticked,
+    /// and what to change them to.
+    pub rc_account: Option<Opt>,
+    pub rc_tax: Option<Opt>,
+    pub rc_contact: Option<Opt>,
+    pub rc_text: BTreeMap<&'static str, String>,
+    pub rc_sel: std::collections::BTreeSet<i64>,
+    pub rc_to_account: Option<Opt>,
+    pub rc_to_tax: Option<Opt>,
     /// Contact page: the note being written in History & notes.
     pub contact_note: String,
     /// Audit log: what kind of record to show.
@@ -77,6 +86,8 @@ pub enum Msg {
     AuditEntity(&'static str),
     /// Contact History & notes: the note text, then add it to the contact.
     ContactNote(String), ContactNoteAdd(i64),
+    /// Find & recode.
+    RcAccount(Opt), RcTax(Opt), RcContact(Opt), RcText(&'static str, String), RcFind, RcClear, RcToggle(i64), RcAll(bool), RcToAccount(Opt), RcToTax(Opt), RcApply,
     FxEnable(String, bool), FxRateOpen(String), FxRateField(u8, String), FxRateSave, FxRevalDate(String), FxRevalue, FxFetch,
     BudPick(i64), BudYear(i32), BudCell(i64, String, String), BudCopyAcross(i64), BudNew(Option<String>), BudCreate, BudSave, BudCreated(Reply),
     ClTab(&'static str), ClNew(bool), ClField(&'static str, String), ClAccount(Opt), ClTax(Opt), ClSave(bool), ClStatus(i64, &'static str), ClCancel,
@@ -115,6 +126,13 @@ pub fn load(app: &mut App) -> Task<Message> {
         Route::CustomReports => call(app, "layouts.list", json!({})),
         Route::PayrollSettings => call(app, "payroll.settings", json!({})),
         Route::ImportExport => { app.data = Some(json!({})); Task::none() }
+        Route::Recode => {
+            let x = &app.extras;
+            let style = app.date_style();
+            let date = |k: &str| x.rc_text.get(k).and_then(|v| ui::to_iso(v, style));
+            call(app, "recode.find", json!({"account_id": x.rc_account.as_ref().map(|o| o.id), "tax_rate_id": x.rc_tax.as_ref().map(|o| o.id),
+                "contact_id": x.rc_contact.as_ref().map(|o| o.id), "from": date("from"), "to": date("to"), "q": x.rc_text.get("q").cloned().unwrap_or_default()}))
+        }
         Route::Budgets => {
             let be = app.be.clone();
             let sel = app.extras.bud_sel;
@@ -136,6 +154,31 @@ fn opt_of(app: &App, id: Option<i64>) -> Option<Opt> { id.and_then(|id| app.lk.a
 pub fn update(app: &mut App, m: Msg) -> Task<Message> {
     let style = app.date_style();
     match m {
+        // ---- find & recode ----
+        Msg::RcAccount(o) => { app.extras.rc_account = Some(o); Task::none() }
+        Msg::RcTax(o) => { app.extras.rc_tax = Some(o); Task::none() }
+        Msg::RcContact(o) => { app.extras.rc_contact = Some(o); Task::none() }
+        Msg::RcText(k, v) => {
+            let v = if k == "q" { v } else { let old = app.extras.rc_text.get(k).cloned().unwrap_or_default(); ui::date_keys(&old, &v, style) };
+            app.extras.rc_text.insert(k, v); Task::none()
+        }
+        Msg::RcFind => { app.extras.rc_sel.clear(); load(app) }
+        Msg::RcClear => { app.extras.rc_account = None; app.extras.rc_tax = None; app.extras.rc_contact = None; app.extras.rc_text.clear(); app.extras.rc_sel.clear(); load(app) }
+        Msg::RcToggle(id) => { if !app.extras.rc_sel.remove(&id) { app.extras.rc_sel.insert(id); } Task::none() }
+        Msg::RcAll(on) => {
+            app.extras.rc_sel = if on { app.data.as_ref().and_then(|d| d.as_array()).map(|a| a.iter().filter_map(|l| l["line_id"].as_i64()).collect()).unwrap_or_default() } else { Default::default() };
+            Task::none()
+        }
+        Msg::RcToAccount(o) => { app.extras.rc_to_account = Some(o); Task::none() }
+        Msg::RcToTax(o) => { app.extras.rc_to_tax = Some(o); Task::none() }
+        Msg::RcApply => {
+            let x = &app.extras;
+            if x.rc_sel.is_empty() { return app.toast("Tick the lines to recode", true); }
+            if x.rc_to_account.is_none() && x.rc_to_tax.is_none() { return app.toast("Choose a new account or tax rate", true); }
+            let p = json!({"line_ids": x.rc_sel.iter().collect::<Vec<_>>(), "account_id": x.rc_to_account.as_ref().map(|o| o.id), "tax_rate_id": x.rc_to_tax.as_ref().map(|o| o.id)});
+            app.extras.busy = true;
+            app.be.call("recode.apply", p, |r| Message::Extras(Msg::Done(r.map(|v| { let n = v["transactions"].as_i64().unwrap_or(0); json!({"n": n}) }), "Recoded — the transactions were reposted")))
+        }
         // ---- contact notes ----
         Msg::ContactNote(s) => { app.extras.contact_note = s; Task::none() }
         Msg::ContactNoteAdd(id) => {
@@ -813,6 +856,63 @@ pub fn bank_rules(app: &App) -> Element<'_, Message> {
     body = body.push(ui::table(&[ui::col("Rule", 20), ui::col("Applies to", 14), ui::col("When", 34), ui::col("Then", 22), ui::col("", 8)], rows, "No bank rules yet."));
     body = body.push(ui::muted("Rules fill in matching bank statement lines for you when you review them in Banking."));
     ui::page(ui::h1("Bank rules"), vec![ui::btn_primary("New rule", Some(Message::Extras(Msg::BrNew(true))))], body.max_width(1150).into())
+}
+
+// ---------------- Find & recode ----------------
+
+/// Find posted invoice, bill and bank lines by account, tax rate, contact, date or text, tick
+/// them, and move them to another account or tax rate (each transaction is reposted).
+pub fn recode(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let x = &app.extras;
+    let pick = |label: &'static str, opts: Vec<Opt>, cur: Option<Opt>, f: fn(Opt) -> Msg, ph: &'static str, w: f32| -> Element<'_, Message> {
+        column![lbl(label), pick_list(opts, cur, move |o| Message::Extras(f(o))).placeholder(ph).padding([5, 7]).text_size(13).style(theme::pick).width(Length::Fixed(w))].spacing(3).into()
+    };
+    let txt = |k: &'static str| x.rc_text.get(k).cloned().unwrap_or_default();
+    let filters = ui::card(column![
+        ui::h2("Find"),
+        row![
+            pick("ACCOUNT", app.lk.account_opts(|_| true), x.rc_account.clone(), Msg::RcAccount, "Any account", 240.0),
+            pick("TAX RATE", app.lk.tax_opts(), x.rc_tax.clone(), Msg::RcTax, "Any tax rate", 200.0),
+            pick("CONTACT", { let mut seen = std::collections::HashSet::new(); app.lk.contact_opts(true).into_iter().chain(app.lk.contact_opts(false)).filter(|o| seen.insert(o.id)).collect() }, x.rc_contact.clone(), Msg::RcContact, "Any contact", 220.0),
+        ].spacing(12),
+        row![
+            input("FROM", &txt("from"), 130.0, |v| Message::Extras(Msg::RcText("from", v))),
+            input("TO", &txt("to"), 130.0, |v| Message::Extras(Msg::RcText("to", v))),
+            input("DESCRIPTION CONTAINS", &txt("q"), 260.0, |v| Message::Extras(Msg::RcText("q", v))),
+            ui::hspace(),
+            ui::btn("Clear", Some(Message::Extras(Msg::RcClear))), ui::btn_primary("Search", Some(Message::Extras(Msg::RcFind))),
+        ].spacing(12).align_y(Alignment::End),
+    ].spacing(12));
+    let Some(d) = &app.data else { return ui::page(ui::h1("Find and recode"), vec![], column![filters, loading()].spacing(14).into()) };
+    let lines = d.as_array().cloned().unwrap_or_default();
+    let all = !lines.is_empty() && lines.iter().all(|l| l["line_id"].as_i64().is_some_and(|id| x.rc_sel.contains(&id)));
+    let type_name = |ty: &str| match ty { "ACCREC" => "Invoice", "ACCPAY" => "Bill", "ACCRECCREDIT" | "ACCPAYCREDIT" => "Credit note", "SPEND" => "Spend money", "RECEIVE" => "Receive money", other => other }.to_string();
+    let rows = lines.iter().map(|l| {
+        let id = l["line_id"].as_i64().unwrap_or(0);
+        (vec![
+            iced::widget::checkbox(x.rc_sel.contains(&id)).on_toggle(move |_| Message::Extras(Msg::RcToggle(id))).into(),
+            ui::cell(app.d(l["date"].as_str().unwrap_or(""))), ui::cell_muted(type_name(l["type"].as_str().unwrap_or(""))), ui::cell(l["number"].as_str().unwrap_or("").to_string()),
+            ui::cell(l["contact"].as_str().unwrap_or("").to_string()), ui::cell_muted(l["description"].as_str().unwrap_or("").to_string()),
+            ui::cell(format!("{} {}", l["account_code"].as_str().unwrap_or(""), l["account_name"].as_str().unwrap_or("")).trim().to_string()),
+            ui::cell_muted(l["tax_rate_name"].as_str().unwrap_or("").to_string()), ui::cell_money(l["net_amount"].as_i64().unwrap_or(0)),
+        ], Some(Message::Extras(Msg::RcToggle(id))))
+    }).collect();
+    let head = row![
+        iced::widget::checkbox(all).label(format!("{} line(s) found, {} ticked", lines.len(), x.rc_sel.len())).on_toggle(|v| Message::Extras(Msg::RcAll(v))).text_size(13),
+    ];
+    let change = ui::card(column![
+        ui::h2("Recode the ticked lines"),
+        row![
+            pick("NEW ACCOUNT", app.lk.account_opts(|a| a["type"] != "BANK"), x.rc_to_account.clone(), Msg::RcToAccount, "Leave as is", 260.0),
+            pick("NEW TAX RATE", app.lk.tax_opts(), x.rc_to_tax.clone(), Msg::RcToTax, "Leave as is", 220.0),
+            ui::hspace(),
+            ui::btn_primary(&format!("Recode {} line(s)", x.rc_sel.len()), if x.busy || x.rc_sel.is_empty() { None } else { Some(Message::Extras(Msg::RcApply)) }),
+        ].spacing(12).align_y(Alignment::End),
+        text("Each changed transaction is reversed and posted again with the new coding; payments stay as they are. The change is in the audit log.").size(12).color(k.muted),
+    ].spacing(10));
+    let cols = [ui::col("", 3), ui::col("Date", 10), ui::col("Type", 10), ui::col("Number", 10), ui::col("Contact", 15), ui::col("Description", 20), ui::col("Account", 16), ui::col("Tax rate", 12), ui::coln("Amount", 10)];
+    ui::page(ui::h1("Find and recode"), vec![], column![filters, change, head, ui::table(&cols, rows, "Nothing matches — change the search.")].spacing(14).into())
 }
 
 // ---------------- Import / export ----------------
