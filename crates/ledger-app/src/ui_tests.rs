@@ -3790,3 +3790,35 @@ fn acumatica_remove_hold_and_column_filters() {
     for n in &others { assert!(!click_fails(&app, n), "{n} back"); }
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn credit_limit_save_anyway_and_credit_hold() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = demo_app("credit", Skin::Xero);
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    // Set a 100.00 limit on the contact page.
+    let t = app.update(Message::Nav(Route::Contact(cust.id))); settle(&mut app, t);
+    let _ = app.update(Message::Extras(X::CreditText("100".into())));
+    press(&mut app, "Save");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert_eq!(app.be.call_now("contacts.get", json!({"id": cust.id})).unwrap()["credit_limit"], 10000);
+    // An invoice over it is stopped with "Save anyway".
+    let new_invoice = |app: &mut App| {
+        let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None })); settle(app, t);
+        let e = app.doc.as_mut().unwrap(); e.contact = Some(cust.clone()); e.lines[0].description = "Big job".into(); e.lines[0].price = "250".into();
+    };
+    new_invoice(&mut app);
+    press(&mut app, "Approve");
+    assert!(app.doc.as_ref().unwrap().error.as_deref().is_some_and(|e| e.starts_with("CREDIT_LIMIT:")));
+    press(&mut app, "Save anyway");
+    let id = app.doc.as_ref().and_then(|e| e.id).expect("saved over the limit");
+    assert_eq!(app.be.call_now("docs.get", json!({"id": id})).unwrap()["status"], "AUTHORISED");
+    // On credit hold nothing new can be approved.
+    let t = app.update(Message::Nav(Route::Contact(cust.id))); settle(&mut app, t);
+    let t = app.update(Message::Extras(X::CreditHold(cust.id, true))); settle(&mut app, t);
+    new_invoice(&mut app);
+    press(&mut app, "Approve");
+    assert!(app.doc.as_ref().unwrap().error.as_deref().is_some_and(|e| e.contains("credit hold")));
+    assert!(click_fails(&app, "Save anyway"));
+    let _ = std::fs::remove_dir_all(dir);
+}

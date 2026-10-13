@@ -30,6 +30,8 @@ pub struct State {
     pub rc_sel: std::collections::BTreeSet<i64>,
     pub rc_to_account: Option<Opt>,
     pub rc_to_tax: Option<Opt>,
+    /// Contact page: the credit limit being typed (None = not being edited).
+    pub credit_text: Option<String>,
     /// Contact page: the note being written in History & notes.
     pub contact_note: String,
     /// Audit log: what kind of record to show.
@@ -86,6 +88,8 @@ pub enum Msg {
     AuditEntity(&'static str),
     /// Contact History & notes: the note text, then add it to the contact.
     ContactNote(String), ContactNoteAdd(i64),
+    /// Contact credit: the limit as typed, on/off hold, save the limit.
+    CreditText(String), CreditHold(i64, bool), CreditSave(i64),
     /// Find & recode.
     RcAccount(Opt), RcTax(Opt), RcContact(Opt), RcText(&'static str, String), RcFind, RcClear, RcToggle(i64), RcAll(bool), RcToAccount(Opt), RcToTax(Opt), RcApply,
     FxEnable(String, bool), FxRateOpen(String), FxRateField(u8, String), FxRateSave, FxRevalDate(String), FxRevalue, FxFetch,
@@ -178,6 +182,18 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             let p = json!({"line_ids": x.rc_sel.iter().collect::<Vec<_>>(), "account_id": x.rc_to_account.as_ref().map(|o| o.id), "tax_rate_id": x.rc_to_tax.as_ref().map(|o| o.id)});
             app.extras.busy = true;
             app.be.call("recode.apply", p, |r| Message::Extras(Msg::Done(r.map(|v| { let n = v["transactions"].as_i64().unwrap_or(0); json!({"n": n}) }), "Recoded — the transactions were reposted")))
+        }
+        // ---- contact credit ----
+        Msg::CreditText(s) => { app.extras.credit_text = Some(s); Task::none() }
+        Msg::CreditHold(id, on) => {
+            let limit = app.data.as_ref().and_then(|d| d["contact"]["credit_limit"].as_i64());
+            app.be.call("contacts.setCredit", json!({"id": id, "credit_limit": limit, "hold": on}), move |r| Message::Extras(Msg::Done(r, if on { "On credit hold" } else { "Off credit hold" })))
+        }
+        Msg::CreditSave(id) => {
+            let txt = app.extras.credit_text.take().unwrap_or_default();
+            let limit = if txt.trim().is_empty() { None } else { match ui::parse_money(&txt) { Some(v) => Some(v), None => return app.toast("Enter the credit limit as an amount, e.g. 5000", true) } };
+            let hold = app.data.as_ref().is_some_and(|d| d["contact"]["credit_hold"] == 1);
+            app.be.call("contacts.setCredit", json!({"id": id, "credit_limit": limit, "hold": hold}), |r| Message::Extras(Msg::Done(r, "Credit limit saved")))
         }
         // ---- contact notes ----
         Msg::ContactNote(s) => { app.extras.contact_note = s; Task::none() }

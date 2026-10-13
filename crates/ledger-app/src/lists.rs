@@ -351,7 +351,7 @@ pub fn contact(app: &App) -> Element<'_, Message> {
     let mut tabs: Vec<(&'static str, String)> = vec![("all", "Transaction list".into()), ("details", who.into()), ("notes", "Notes".into())];
     if !is_supplier { tabs.insert(1, ("statements", "Statements".into())); }
     let body: Element<Message> = match app.list_tab {
-        "details" => ui::card(contact_details(c)).into(),
+        "details" => if is_supplier { ui::card(contact_details(c)) } else { column![ui::card(contact_details(c)), ui::card(contact_credit(app, c))].spacing(14).into() },
         "notes" => ui::card(contact_history(app, d, id)).into(),
         _ => ui::table(&cols, rows, "No transactions yet."),
     };
@@ -370,6 +370,25 @@ fn contact_details(c: &Value) -> iced::widget::Column<'static, Message> {
     let groups: Vec<String> = c["groups"].as_array().cloned().unwrap_or_default().iter().map(|g| st(g, "name").to_string()).collect();
     if !groups.is_empty() { details = details.push(column![ui::label("Groups"), text(groups.join(", ")).size(14)].spacing(2)); }
     details
+}
+
+/// A customer's credit: limit and credit hold.
+fn contact_credit<'a>(app: &'a App, c: &'a Value) -> Element<'a, Message> {
+    use crate::extras::Msg as X;
+    let id = c["id"].as_i64().unwrap_or(0);
+    let k = t();
+    let limit = c["credit_limit"].as_i64().filter(|l| *l > 0);
+    let shown = app.extras.credit_text.clone().unwrap_or_else(|| limit.map(ui::money).unwrap_or_default());
+    let hold = c["credit_hold"] == 1;
+    column![
+        ui::h2("Credit"),
+        row![
+            column![ui::label("Credit limit"), text_input("No limit", &shown).on_input(|s| Message::Extras(X::CreditText(s))).on_submit(Message::Extras(X::CreditSave(id))).padding([6, 9]).size(14).style(theme::input).width(160)].spacing(4),
+            column![Space::new().height(18), ui::btn("Save", app.extras.credit_text.as_ref().map(|_| Message::Extras(X::CreditSave(id))))].spacing(0),
+        ].spacing(8).align_y(Alignment::End),
+        iced::widget::checkbox(hold).label("On credit hold (no new invoices can be approved)").on_toggle(move |v| Message::Extras(X::CreditHold(id, v))).text_size(13),
+        if hold { text("On hold").size(13).color(k.bad).into() } else { Element::from(Space::new()) },
+    ].spacing(8).into()
 }
 
 /// History & notes for a contact, with a box to add a note.
@@ -408,7 +427,7 @@ fn xero_contact(app: &App) -> Element<'_, Message> {
     let customer = c["is_customer"] == 1 || c["is_supplier"] != 1;
     let supplier = c["is_supplier"] == 1;
     let details = contact_details(c);
-    let left = column![ui::card(details)].width(320);
+    let left = if customer { column![ui::card(details), ui::card(contact_credit(app, c))].spacing(14).width(320) } else { column![ui::card(details)].width(320) };
     // ---- money in / out ----
     let money = |title: &'static str, out: i64, over: i64, year: i64, new: Element<'static, Message>| -> Element<'static, Message> {
         ui::card(column![

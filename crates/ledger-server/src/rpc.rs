@@ -263,6 +263,7 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
                 .map(|x| (x["agency"].as_str().unwrap_or("").to_string(), x["name"].as_str().unwrap_or("").to_string(), x["rate_bp"].as_i64().unwrap_or(0))).collect();
             Ok(json!({"id": l.create_sales_tax_rate(s(p, "name"), &parts)?}))
         }
+        "contacts.setCredit" => { need("contacts:write")?; l.set_credit(id(p)?, p["credit_limit"].as_i64(), p["hold"].as_bool().unwrap_or(false))?; ok() }
         "contacts.set1099" => { need("contacts:write")?; l.set_track_1099(id(p)?, p["on"].as_bool().unwrap_or(true))?; ok() }
         "docs.saveSalesOrder" => { need("sales:write")?; Ok(json!({"id": l.save_sales_order(oi(p, "id"), &de::<DocInput>(&p["doc"])?)?})) }
         "docs.saveDelayed" => { need("sales:write")?; Ok(json!({"id": l.save_delayed(oi(p, "id"), &de::<DocInput>(&p["doc"])?, p["credit"].as_bool().unwrap_or(false))?})) }

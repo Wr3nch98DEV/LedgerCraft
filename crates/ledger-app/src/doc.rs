@@ -55,6 +55,8 @@ pub struct Editor {
     pub send_after: bool,
     /// Save as "Awaiting approval" (Xero's Save ▸ Submit for approval).
     pub submit: bool,
+    /// The user chose to approve over the customer's credit limit.
+    pub allow_over: bool,
     /// QuickBooks invoices: the customer's open delayed charges/credits, and those added.
     pub delayed: Vec<Value>,
     pub added: Vec<i64>,
@@ -116,6 +118,8 @@ pub enum Msg {
     Step(&'static str),
     /// Xero: save for someone else to approve.
     Submit,
+    /// Approve anyway, over the customer's credit limit.
+    OverLimit,
     Send,
     Sent(Result<Value, String>),
     Delayed(Result<Value, String>),
@@ -231,7 +235,7 @@ impl Editor {
             lat: if app.country() == "US" { "EXCLUSIVE".into() } else { "EXCLUSIVE".into() },
             lines: vec![Line { qty: "1".into(), ..Default::default() }, Line { qty: "1".into(), ..Default::default() }],
             terms: String::new(), busy: false, editing: true,
-            pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false, submit: false,
+            pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false, submit: false, allow_over: false,
             delayed: vec![], added: vec![], items_tab: false, close_after: false, history: vec![], memo_open: false, memo_freq: "Monthly", memo_next: String::new(), memo_auto: false, apply: None, refund_open: false,
         };
         if let Some(a) = default_account(app, kind) { for l in &mut e.lines { l.account = Some(a.clone()); l.tax = default_tax(app, Some(a.id)); } }
@@ -278,7 +282,7 @@ impl Editor {
         }
         if lines.is_empty() { return Err("Add at least one line".into()); }
         let kind = match self.kind.as_str() { "SALESRECEIPT" => "ACCREC", k if quote_variant(k) => "QUOTE", k => k };
-        let mut doc = json!({"type": kind, "date": date, "due_date": due, "reference": self.reference, "line_amount_type": self.lat, "terms": self.terms, "lines": lines, "status": status});
+        let mut doc = json!({"type": kind, "date": date, "due_date": due, "reference": self.reference, "line_amount_type": self.lat, "terms": self.terms, "lines": lines, "status": status, "allow_over_limit": self.allow_over});
         if self.kind == "QUOTE" { doc["expiry_date"] = doc["due_date"].take(); }
         if self.kind == "PO" { doc["delivery_date"] = doc["due_date"].take(); }
         if !self.number.trim().is_empty() { doc["number"] = json!(self.number.trim()); }
@@ -603,6 +607,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, move |id| match id { Some(id) => Message::Nav(Route::Doc { kind: k2.clone(), id: Some(id) }), None => Message::Noop })
         }
         Msg::Submit => { e.submit = true; save(app, &mut e, false, false) }
+        Msg::OverLimit => { e.allow_over = true; e.error = None; save(app, &mut e, true, false) }
         Msg::Send => {
             let Some(id) = e.id else { app.doc = Some(e); return Task::none() };
             app.doc = Some(e);
@@ -648,7 +653,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                     let t3 = app.go(next);
                     return Task::batch([t1, t2, t3]);
                 }
-                Err(err) => { e.close_after = false; e.error = Some(err.clone()); app.toast(err, true) }
+                Err(err) => { e.close_after = false; e.error = Some(err.clone()); app.toast(err.trim_start_matches("CREDIT_LIMIT: ").to_string(), true) }
             }
         }
         Msg::Edit => { e.editing = true; Task::none() }
@@ -960,7 +965,15 @@ pub fn view(app: &App) -> Element<'_, Message> {
     // ---- assemble per layout ----
     let k2 = k;
     let status_chip = ui::chip(status_label, crate::lists::status_color(status_label));
-    let error: Element<Message> = match &e.error { Some(err) => container(text(err.clone()).size(13).color(k2.bad)).padding([8, 12]).style(theme::bad_soft).width(Fill).into(), None => Space::new().into() };
+    let error: Element<Message> = match &e.error {
+        // Over the customer's credit limit: say so, and let the user go ahead.
+        Some(err) if err.starts_with("CREDIT_LIMIT:") => container(row![
+            text(err.trim_start_matches("CREDIT_LIMIT: ").to_string()).size(13).color(k2.bad).width(Fill),
+            ui::btn("Save anyway", m(Msg::OverLimit)),
+        ].spacing(10).align_y(Alignment::Center)).padding([8, 12]).style(theme::bad_soft).width(Fill).into(),
+        Some(err) => container(text(err.clone()).size(13).color(k2.bad)).padding([8, 12]).style(theme::bad_soft).width(Fill).into(),
+        None => Space::new().into(),
+    };
     let body: Element<Message> = match app.skin {
         Skin::QuickBooks if vocab::acumatica() => {
             // Acumatica record screen: toolbar along the top, summary area, then the details grid.

@@ -67,6 +67,8 @@ pub struct DocInput {
     pub expected_payment_date: Option<String>,
     pub planned_payment_date: Option<String>,
     pub repeating_id: Option<i64>,
+    /// Approve even though it takes the customer over their credit limit (the user confirmed).
+    pub allow_over_limit: bool,
 }
 
 pub fn is_sales(kind: &str) -> bool { matches!(kind, "ACCREC" | "ACCRECCREDIT" | "QUOTE") }
@@ -208,6 +210,7 @@ impl Ledger {
         let subtotal: i64 = lines.iter().map(|l| l.net).sum();
         let total_tax: i64 = lines.iter().filter(|l| l.report_type.as_deref() != Some("REVERSECHARGE")).map(|l| l.tax).sum();
         let total = subtotal + total_tax;
+        if kind == "ACCREC" && d.status.as_deref() == Some("AUTHORISED") { self.check_credit(contact_id, id, total, d.allow_over_limit)?; }
         let due = match d.due_date.as_deref().filter(|s| !s.is_empty()) {
             Some(s) => Some(s.to_string()),
             None if is_ledger_doc(&kind) => { let (t, n) = self.contact_terms(contact_id, sales)?; Some(util::due_date(&d.date, &t, n)?) }
@@ -298,6 +301,11 @@ impl Ledger {
 
     /// Public status change (submit, approve, void, delete, mark sent/accepted/declined...).
     pub fn set_document_status(&self, id: i64, status: &str) -> Result<()> {
+        // Approving an invoice on its own (e.g. from the list) checks the customer's credit too.
+        if status == "AUTHORISED" {
+            let (kind, contact, total, from): (String, i64, i64, String) = self.conn.query_row("SELECT type, contact_id, total, status FROM documents WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+            if kind == "ACCREC" && from != "AUTHORISED" { self.check_credit(contact, Some(id), total, false)?; }
+        }
         self.atomic(|| self.set_document_status_inner(id, status, false))
     }
 

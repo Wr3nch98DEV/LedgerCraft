@@ -824,3 +824,29 @@ fn build_assemblies_move_component_cost() {
     assert_eq!(l.list_builds(Some(table)).unwrap().len(), 1);
     assert_invariants(&l);
 }
+
+#[test]
+fn credit_limit_and_credit_hold() {
+    let l = org();
+    let sales = acct(&l, "200");
+    let first = invoice(&l, "2026-01-10", vec![line(sales, None, "1", "800")], "AUTHORISED");
+    let acme: i64 = l.conn.query_row("SELECT contact_id FROM documents WHERE id = ?1", [first], |r| r.get(0)).unwrap();
+    // A 1,000.00 limit: 800 owing + 300 more is over it.
+    l.set_credit(acme, Some(100_000), false).unwrap();
+    let doc = |status: &str, allow: bool| DocInput { kind: "ACCREC".into(), contact_id: Some(acme), date: "2026-01-12".into(), line_amount_type: Some("EXCLUSIVE".into()),
+        lines: vec![line(sales, None, "1", "300")], status: Some(status.into()), allow_over_limit: allow, ..Default::default() };
+    let err = l.save_document(None, &doc("AUTHORISED", false)).unwrap_err().to_string();
+    assert!(err.contains("CREDIT_LIMIT:"), "{err}");
+    // Drafts aren't checked; approving the draft on its own is.
+    let draft = l.save_document(None, &doc("DRAFT", false)).unwrap();
+    assert!(l.set_document_status(draft, "AUTHORISED").is_err());
+    // The user can go ahead anyway.
+    l.save_document(Some(draft), &doc("AUTHORISED", true)).unwrap();
+    // On hold: nothing new can be approved, even when allowed over the limit.
+    l.set_credit(acme, None, true).unwrap();
+    let err = l.save_document(None, &doc("AUTHORISED", true)).unwrap_err().to_string();
+    assert!(err.contains("credit hold"), "{err}");
+    l.set_credit(acme, None, false).unwrap();
+    l.save_document(None, &doc("AUTHORISED", false)).unwrap();
+    assert_invariants(&l);
+}

@@ -9,6 +9,31 @@ use serde_json::{json, Value};
 pub const THRESHOLD: i64 = 60000;
 
 impl Ledger {
+    /// A customer's credit limit (cents; None = no limit) and credit hold.
+    pub fn set_credit(&self, contact: i64, limit: Option<i64>, hold: bool) -> Result<()> {
+        if limit.is_some_and(|l| l < 0) { return Err(crate::error::Error::Validation("the credit limit can't be negative".into())); }
+        self.conn.execute("UPDATE contacts SET credit_limit = ?2, credit_hold = ?3 WHERE id = ?1", params![contact, limit, hold as i64])?;
+        self.audit("UPDATE", "contact", Some(contact), None, Some(json!({"credit_limit": limit, "credit_hold": hold})))?;
+        self.add_note("contact", contact, "HISTORY", &if hold { "Put on credit hold".to_string() } else { match limit { Some(l) => format!("Credit limit set to {}", crate::money::fmt_money(l)), None => "Credit limit removed".into() } })?;
+        Ok(())
+    }
+
+    /// Refuses to approve an invoice for a customer on credit hold, or one that takes them over
+    /// their credit limit (unless the user said to go ahead). The over-limit message starts
+    /// "CREDIT_LIMIT:" so the app can offer "Save anyway".
+    pub fn check_credit(&self, contact: i64, doc: Option<i64>, total: i64, allow_over: bool) -> Result<()> {
+        let (name, limit, hold): (String, Option<i64>, i64) = self.conn.query_row("SELECT name, credit_limit, credit_hold FROM contacts WHERE id = ?1", [contact], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        if hold == 1 { return Err(crate::error::Error::Validation(format!("{name} is on credit hold. Take them off hold on their contact page before approving invoices."))); }
+        let Some(limit) = limit.filter(|l| *l > 0) else { return Ok(()) };
+        if allow_over { return Ok(()); }
+        let owing: i64 = self.conn.query_row("SELECT COALESCE(SUM(total - amount_paid - amount_credited), 0) FROM documents WHERE type = 'ACCREC' AND status = 'AUTHORISED' AND contact_id = ?1 AND id <> COALESCE(?2, 0)",
+            params![contact, doc], |r| r.get(0))?;
+        if owing + total > limit {
+            return Err(crate::error::Error::Validation(format!("CREDIT_LIMIT: This takes {name} to {} owing, over their credit limit of {}.", crate::money::fmt_money(owing + total), crate::money::fmt_money(limit))));
+        }
+        Ok(())
+    }
+
     pub fn set_track_1099(&self, contact: i64, on: bool) -> Result<()> {
         self.conn.execute("UPDATE contacts SET track_1099 = ?2 WHERE id = ?1", params![contact, on as i64])?;
         self.audit("UPDATE", "contact", Some(contact), None, Some(json!({"track_1099": on})))?;
