@@ -29,7 +29,7 @@ pub static PLACES: &[(&str, &str, &str)] = &[
     ("payment_reminders", "sales", "Payment Reminders"), ("projects", "sales", "Projects"),
     // Purchases
     ("bills", "purchases", "Purchase Invoices"), ("bill", "purchases", "New Purchase Invoice"), ("vendor_credit", "purchases", "New Purchase Credit Note"),
-    ("pay_bills", "purchases", "Supplier Payments"), ("purchase_orders", "purchases", "Purchase Orders"), ("purchase_order", "purchases", "New Purchase Order"),
+    ("pay_bills", "purchases", "Supplier Payments"), ("batch_payments", "purchases", "Batch Payments"), ("purchase_orders", "purchases", "Purchase Orders"), ("purchase_order", "purchases", "New Purchase Order"),
     ("receive_items", "purchases", "Goods Received"), ("expenses", "purchases", "Purchases Overview"), ("expense", "purchases", "Other Payment"),
     ("check", "purchases", "Cheque Payment"), ("print_checks", "purchases", "Print Cheques"), ("expense_claims", "purchases", "Expense Claims"),
     ("mileage", "purchases", "Mileage"), ("contractor_1099", "purchases", "1099 Reporting"),

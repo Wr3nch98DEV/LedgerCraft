@@ -3909,3 +3909,31 @@ fn price_rule_quantity_break_on_an_invoice() {
     assert_eq!(bulk, ledger_core::pricelevels::apply_level(base, -2_000));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn batch_payment_bank_file() {
+    let (mut app, dir) = demo_app("batchfile", Skin::Xero);
+    // Two open bills, from suppliers with bank details, paid together.
+    let bills: Vec<Value> = app.be.call_now("docs.list", json!({"type": "ACCPAY", "tab": "awaiting", "limit": 50})).unwrap()["rows"].as_array().unwrap().iter().filter(|b| b["status"] == "AUTHORISED").take(2).cloned().collect();
+    assert_eq!(bills.len(), 2);
+    {
+        let g = app.be.st.org.lock().unwrap();
+        let l = &g.as_ref().unwrap().ledger;
+        for b in &bills { l.conn.execute("UPDATE contacts SET bank_account = '062000 12345678' WHERE id = ?1", [b["contact_id"].as_i64().unwrap()]).unwrap(); }
+        l.conn.execute("UPDATE accounts SET bank_account_number = '062000 87654321' WHERE type = 'BANK'", []).unwrap();
+    }
+    let bank = crate::payments::bank_only(&app)[0].id;
+    let items: Vec<Value> = bills.iter().map(|b| json!({"document_id": b["id"], "amount": crate::ui::plain(b["amount_due"].as_i64().unwrap())})).collect();
+    app.be.call_now("batch.create", json!({"account_id": bank, "date": "2026-10-13", "reference": "Supplier run", "items": items})).unwrap();
+    let t = app.update(Message::Nav(Route::BatchPayments)); settle(&mut app, t);
+    assert!(!click_fails(&app, "Supplier run"));
+    // The link names the country's format (ABA / BACS / NACHA).
+    let id = app.data.as_ref().unwrap().as_array().unwrap().iter().find(|b| b["reference"] == "Supplier run").unwrap()["id"].as_i64().unwrap();
+    let t = app.update(Message::Extras(crate::extras::Msg::BatchBankFile(id))); settle(&mut app, t);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let file = std::fs::read_dir(crate::pdf::output_dir()).unwrap().filter_map(|e| e.ok()).map(|e| e.path())
+        .find(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(&format!("batch-{id}.")))).expect("bank file written");
+    let text = std::fs::read_to_string(file).unwrap().to_uppercase();
+    for b in &bills { let name = b["contact_name"].as_str().unwrap().to_uppercase(); assert!(text.contains(&name[..name.len().min(16)]), "{name} in the file"); }
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -108,7 +108,7 @@ pub enum Msg {
     IeWhat(&'static str), IePick, IePicked(Result<Option<(String, String)>, String>), IePreview(Reply), IeRun, IeDate(String), IeExport(&'static str), IeExported(Result<String, String>),
     CrNew(bool), CrName(String), CrMonthly(bool), CrAdd(&'static str), CrLabel(usize, String), CrType(usize, &'static str), CrExpr(usize, String), CrSign(usize, bool), CrRemove(usize), CrSave, CrDelete(i64),
     PsCalNew(bool), PsCalField(u8, String), PsCalFreq(&'static str), PsCalSave, PsLeaveNew(bool), PsLeaveField(u8, String), PsLeaveSave,
-    PayslipsPdf(i64), PayrunBankFile(i64), Saved(Result<String, String>, &'static str),
+    PayslipsPdf(i64), PayrunBankFile(i64), BatchBankFile(i64), Saved(Result<String, String>, &'static str),
     PjSelect(i64), PjLoaded(Reply), PjNew(bool), PjNewName(String), PjNewCustomer(Opt), PjCreate,
     PjTaskOpen(bool), PjTaskField(u8, String), PjTaskKind(&'static str), PjTaskSave,
     PjTimeOpen(bool), PjTimeTask(Opt), PjTimeField(u8, String), PjTimeSave,
@@ -139,6 +139,7 @@ pub fn load(app: &mut App) -> Task<Message> {
         Route::CustomReports => call(app, "layouts.list", json!({})),
         Route::PayrollSettings => call(app, "payroll.settings", json!({})),
         Route::ImportExport => { app.data = Some(json!({})); Task::none() }
+        Route::BatchPayments => call(app, "batch.list", json!({})),
         Route::PaymentReminders => {
             let be = app.be.clone();
             Task::perform(async move {
@@ -549,6 +550,18 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                 }).await.unwrap_or_else(|e| Err(e.to_string()))
             }, |r| Message::Extras(Msg::Saved(r, "Bank file saved to — upload it to your bank:")))
         }
+        Msg::BatchBankFile(id) => {
+            let st = app.be.st.clone();
+            let format = match app.country().as_str() { "GB" | "UK" => "BACS", "US" => "NACHA", _ => "ABA" };
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<String, String> {
+                    let (name, text) = { let g = st.org.lock().unwrap(); g.as_ref().ok_or("no company open")?.ledger.batch_file(id, format).map_err(|e| e.to_string())? };
+                    let path = crate::pdf::output_dir().join(name);
+                    std::fs::write(&path, text).map_err(|e| e.to_string())?;
+                    Ok(path.display().to_string())
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Extras(Msg::Saved(r, "Bank file saved to — upload it to your bank:")))
+        }
         Msg::Saved(r, what) => match r { Ok(p) => app.toast(format!("{what} {p}"), false), Err(e) => app.toast(e, true) },
         // ---- projects ----
         Msg::PjSelect(id) => { app.extras.pj_sel = Some(id); app.be.call("projects.get", json!({"id": id}), |r| Message::Extras(Msg::PjLoaded(r))) }
@@ -953,6 +966,28 @@ pub fn price_rules_section(app: &App) -> Element<'_, Message> {
     }).collect();
     col = col.push(ui::table(&[ui::col("Rule", 16), ui::col("Item", 18), ui::col("Customers", 16), ui::col("Quantity", 10), ui::col("Change", 9), ui::col("Dates", 20), ui::col("", 9)], rows, "No price rules yet."));
     col.push(ui::muted("The lowest matching price wins. Rules apply after the customer's price level, when an item goes on a sale or its quantity changes.")).into()
+}
+
+// ---------------- Batch payments ----------------
+
+/// Supplier payments made together (Pay bills with several bills), each with a bank file
+/// (ABA in Australia, BACS in the UK, NACHA in the US) to upload to the bank.
+pub fn batch_payments(app: &App) -> Element<'_, Message> {
+    let Some(d) = &app.data else { return loading() };
+    let format = match app.country().as_str() { "GB" | "UK" => "BACS", "US" => "NACHA", _ => "ABA" };
+    let rows = d.as_array().cloned().unwrap_or_default().iter().filter(|b| b["status"] != "DELETED").map(|b| {
+        let id = b["id"].as_i64().unwrap_or(0);
+        let pay = b["type"] != "RECBATCH";
+        (vec![ui::cell(app.d(b["date"].as_str().unwrap_or(""))), ui::cell_muted(if pay { "Payments" } else { "Receipts" }), ui::cell(b["reference"].as_str().unwrap_or("").to_string()),
+            ui::cell_muted(b["account_name"].as_str().unwrap_or("").to_string()), ui::cell(b["payment_count"].as_i64().unwrap_or(0).to_string()), ui::cell_money(b["total"].as_i64().unwrap_or(0)),
+            if pay { ui::link(if format == "BACS" { "Bank file (BACS)" } else if format == "NACHA" { "Bank file (NACHA)" } else { "Bank file (ABA)" }, Message::Extras(Msg::BatchBankFile(id))) } else { ui::cell("") }], None)
+    }).collect();
+    let body = column![
+        ui::table(&[ui::col("Date", 12), ui::col("Type", 10), ui::col("Reference", 18), ui::col("Bank account", 18), ui::col("Payments", 9), ui::coln("Total", 12), ui::col("", 16)], rows,
+            "No batch payments yet. Pay several bills together in Pay bills and they're saved as one batch."),
+        ui::muted("A bank file pays every supplier in the batch in one upload. Suppliers need their bank details on their contact."),
+    ].spacing(14);
+    ui::page(ui::h1("Batch payments"), vec![ui::btn_primary(app.term("pay_bill"), Some(Message::Nav(Route::PayBills)))], body.max_width(1150).into())
 }
 
 // ---------------- Payment reminders ----------------

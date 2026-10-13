@@ -46,6 +46,7 @@ pub static PLACES: &[(&str, &str, &str, &str)] = &[
     ("expense", "payables", "Transactions", "Card Expenses"),
     ("pay_bills", "payables", "Processes", "Prepare Payments"),
     ("print_checks", "payables", "Processes", "Print Checks"),
+    ("batch_payments", "payables", "Processes", "Batch Payments and Bank Files"),
     ("bills", "payables", "Inquiries", "Bills"),
     ("expenses", "payables", "Inquiries", "Vendor Details"),
     ("vendors", "payables", "Profiles", "Vendors"),
