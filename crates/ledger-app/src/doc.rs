@@ -53,6 +53,8 @@ pub struct Editor {
     pub error: Option<String>,
     /// Email the document once the save succeeds ("Save and send").
     pub send_after: bool,
+    /// Save as "Awaiting approval" (Xero's Save ▸ Submit for approval).
+    pub submit: bool,
     /// QuickBooks invoices: the customer's open delayed charges/credits, and those added.
     pub delayed: Vec<Value>,
     pub added: Vec<i64>,
@@ -110,6 +112,8 @@ pub enum Msg {
     Print,
     Printed(Result<String, String>),
     SaveAndSend,
+    /// Xero: save for someone else to approve.
+    Submit,
     Send,
     Sent(Result<Value, String>),
     Delayed(Result<Value, String>),
@@ -225,7 +229,7 @@ impl Editor {
             lat: if app.country() == "US" { "EXCLUSIVE".into() } else { "EXCLUSIVE".into() },
             lines: vec![Line { qty: "1".into(), ..Default::default() }, Line { qty: "1".into(), ..Default::default() }],
             terms: String::new(), busy: false, editing: true,
-            pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false,
+            pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false, submit: false,
             delayed: vec![], added: vec![], items_tab: false, close_after: false, history: vec![], memo_open: false, memo_freq: "Monthly", memo_next: String::new(), memo_auto: false, apply: None, refund_open: false,
         };
         if let Some(a) = default_account(app, kind) { for l in &mut e.lines { l.account = Some(a.clone()); l.tax = default_tax(app, Some(a.id)); } }
@@ -576,6 +580,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::SaveAndNew => save(app, &mut e, true, true),
         Msg::SaveClose => { e.close_after = true; save(app, &mut e, true, false) }
         Msg::SaveAndSend => { e.send_after = true; save(app, &mut e, true, false) }
+        Msg::Submit => { e.submit = true; save(app, &mut e, false, false) }
         Msg::Send => {
             let Some(id) = e.id else { app.doc = Some(e); return Task::none() };
             app.doc = Some(e);
@@ -701,9 +706,21 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
     task
 }
 
+/// The link above the title: the list this document belongs to (Xero: "Invoices", "Bills"…).
+fn crumb<'a>(app: &App, kind: &str) -> Element<'a, Message> {
+    if app.skin != Skin::Xero { return row![ui::link(if sales(kind) { "Sales" } else { "Purchases" }, Message::Back)].into(); }
+    let (label, route) = match kind {
+        "ACCREC" => ("Invoices", Route::Invoices), "ACCRECCREDIT" | "ACCPAYCREDIT" => ("Credit notes", Route::CreditNotes),
+        "QUOTE" => ("Quotes", Route::Quotes), "PO" => ("Purchase orders", Route::PurchaseOrders), "ACCPAY" => ("Bills to pay", Route::Bills),
+        _ => return row![ui::link(if sales(kind) { "Sales" } else { "Purchases" }, Message::Back)].into(),
+    };
+    if !sales(kind) { return row![ui::link(label, Message::Nav(route))].into(); }
+    row![ui::link("Sales overview", Message::Nav(Route::AllSales)), text("›").size(14).color(t().faint), ui::link(label, Message::Nav(route))].spacing(6).align_y(Alignment::Center).into()
+}
+
 fn save(app: &mut App, e: &mut Editor, approve: bool, new_after: bool) -> Task<Message> {
     if e.busy { return Task::none(); }
-    let status = if approve { "AUTHORISED" } else { "DRAFT" };
+    let status = if approve { "AUTHORISED" } else if std::mem::take(&mut e.submit) { "SUBMITTED" } else { "DRAFT" };
     if e.kind == "SALESORDER" {
         return match e.payload(app, "SENT") {
             Ok(p) => { e.busy = true; e.error = None; app.be.call("docs.saveSalesOrder", p, move |r| Message::Doc(Msg::Saved(r, new_after))) }
@@ -751,14 +768,15 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let date_hint = hint(app.date_style());
 
     // ---- header fields ----
-    let contact_label = if sales(&e.kind) { "Customer" } else { app.term("supplier") };
+    // Xero labels the contact "To" on sales and "From" on purchases.
+    let contact_label = match (app.skin, sales(&e.kind)) { (Skin::Xero, true) => "To", (Skin::Xero, false) => "From", (_, true) => "Customer", _ => app.term("supplier") };
     let contact_field: Element<Message> = if editable {
         column![ui::label(contact_label), combo_box(&e.contacts, &format!("Choose a {}", contact_label.to_lowercase()), e.contact.as_ref(), |c| Message::Doc(Msg::Contact(c)))
             .on_input(|s| Message::Doc(Msg::ContactText(s))).padding([7, 10]).size(14).input_style(theme::input)].spacing(5).width(Fill).into()
     } else {
         column![ui::label(contact_label), ui::link(e.contact.as_ref().map(|c| c.label.clone()).unwrap_or_default(), e.contact.as_ref().map(|c| Message::Nav(Route::Contact(c.id))).unwrap_or(Message::Noop))].spacing(8).width(Fill).into()
     };
-    let date_label = match e.kind.as_str() { "ACCREC" => "Invoice date", "QUOTE" => if app.skin == Skin::QuickBooks { "Estimate date" } else { "Date" }, _ => "Date" };
+    let date_label = match e.kind.as_str() { "ACCREC" => if app.skin == Skin::QuickBooks { "Invoice date" } else { "Date" }, "QUOTE" => if app.skin == Skin::QuickBooks { "Estimate date" } else { "Date" }, _ => "Date" };
     let due_label = match e.kind.as_str() { "QUOTE" => "Expiration date", "PO" => "Delivery date", "ACCRECCREDIT" | "ACCPAYCREDIT" | "SALESRECEIPT" | "DELAYEDCHARGE" | "DELAYEDCREDIT" => "", _ if is_receipt => "", _ => "Due date" };
     let date_label = if is_receipt { "Sales receipt date" } else { date_label };
     let field = |lbl: &str, ph: &str, val: &str, f: fn(String) -> Msg| -> Element<'_, Message> {
@@ -771,7 +789,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         fields = fields.push(column![ui::label("Deposit to"), pick_list(app.lk.bank_opts(), e.pay_account.clone(), |a| Message::Doc(Msg::PayAccount(a))).padding([7, 10]).text_size(14).style(theme::pick).width(Fill)].spacing(5).width(Fill));
     }
     let mut fields2 = row![].spacing(14);
-    fields2 = fields2.push(field(if app.skin == Skin::QuickBooks { if delayed(&e.kind) { "No." } else if sales(&e.kind) { "Invoice no." } else { "Bill no." } } else { "Number" }, "Auto", &e.number, Msg::Number));
+    fields2 = fields2.push(field(if app.skin == Skin::QuickBooks { if delayed(&e.kind) { "No." } else if sales(&e.kind) { "Invoice no." } else { "Bill no." } } else { match e.kind.as_str() { "ACCREC" => "Invoice number", "QUOTE" => "Quote number", "PO" => "Order number", "ACCRECCREDIT" | "ACCPAYCREDIT" => "Credit note number", _ => "Number" } }, "Auto", &e.number, Msg::Number));
     fields2 = fields2.push(field(if app.skin == Skin::QuickBooks { "Ref no. / PO" } else { "Reference" }, "", &e.reference, Msg::Reference));
     fields2 = fields2.push(column![ui::label("Amounts are"), if editable {
         Element::from(pick_list(&LATS[..], Some(LatOpt(match e.lat.as_str() { "INCLUSIVE" => "INCLUSIVE", "NOTAX" => "NOTAX", _ => "EXCLUSIVE" })), |l| Message::Doc(Msg::Lat(l))).padding([7, 10]).text_size(14).style(theme::pick).width(Fill))
@@ -864,8 +882,17 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 else { actions.push(ui::btn_primary(if e.kind == "PO" { "Save" } else { "Save and close" }, m(Msg::Save(true)))); }
             }
             Skin::Xero => {
-                actions.push(ui::btn("Save draft", m(Msg::Save(false))));
-                actions.push(ui::btn_primary("Approve", m(Msg::Save(true))));
+                // Xero: Save (draft / submit for approval) and Approve (or Approve & email for sales).
+                if status != "SUBMITTED" { actions.push(ui::btn("Save draft", m(Msg::Save(false)))); }
+                if ledger_doc(&e.kind) {
+                    actions.push(ui::btn(if status == "SUBMITTED" { "Save" } else { "Submit for approval" }, m(Msg::Submit)));
+                }
+                if sales(&e.kind) && ledger_doc(&e.kind) {
+                    actions.push(ui::btn("Approve", m(Msg::Save(true))));
+                    actions.push(ui::btn_primary("Approve & email", m(Msg::SaveAndSend)));
+                } else {
+                    actions.push(ui::btn_primary("Approve", m(Msg::Save(true))));
+                }
             }
         }
     } else {
@@ -900,11 +927,13 @@ pub fn view(app: &App) -> Element<'_, Message> {
         }
         Skin::Xero => {
             let header = ui::card(column![fields, fields2].spacing(14));
-            column![error, header, table, add_line, ui::card(bottom), pay_panel, row![ui::btn("Cancel", Some(Message::Doc(Msg::Cancel))), ui::hspace()].extend(actions).spacing(8)].spacing(14).into()
+            // Xero only offers Cancel while editing; an approved document just has its options.
+            let cancel: Element<Message> = if editable { ui::btn("Cancel", Some(Message::Doc(Msg::Cancel))) } else { Space::new().into() };
+            column![error, header, table, add_line, ui::card(bottom), pay_panel, row![cancel, ui::hspace()].extend(actions).spacing(8)].spacing(14).into()
         }
     };
     let title_el = column![
-        row![ui::link(if sales(&e.kind) { "Sales" } else { "Purchases" }, Message::Back)],
+        crumb(app, &e.kind),
         row![ui::h1(title), status_chip].spacing(12).align_y(Alignment::Center),
     ].spacing(4);
     ui::page(title_el.into(), vec![], body)

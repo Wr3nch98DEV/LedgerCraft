@@ -3508,3 +3508,28 @@ fn xero_invoice_list_summary_and_repeating_tab() {
     assert_eq!(app.route, Route::Memorized);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn xero_invoice_submit_for_approval_then_approve() {
+    let (mut app, dir) = demo_app("xero-submit", Skin::Xero);
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None })); settle(&mut app, t);
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    {
+        let e = app.doc.as_mut().unwrap();
+        e.contact = Some(cust);
+        e.lines[0].description = "Consulting".into();
+        e.lines[0].price = "250".into();
+    }
+    // Xero's breadcrumb and buttons.
+    for b in ["Sales overview", "Invoices", "Save draft", "Approve", "Approve & email"] { let _ = click(&app, b); }
+    press(&mut app, "Submit for approval");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let id = app.doc.as_ref().and_then(|e| e.id).expect("saved");
+    assert_eq!(app.be.call_now("docs.get", json!({"id": id})).unwrap()["status"], "SUBMITTED");
+    // Awaiting approval: Save keeps it there; Approve authorises it.
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: Some(id) })); settle(&mut app, t);
+    let _ = click(&app, "Save");
+    press(&mut app, "Approve");
+    assert_eq!(app.be.call_now("docs.get", json!({"id": id})).unwrap()["status"], "AUTHORISED");
+    let _ = std::fs::remove_dir_all(dir);
+}
