@@ -3491,3 +3491,20 @@ fn second_tracking_category() {
     assert!(app.toasts.iter().any(|t| t.2));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn xero_invoice_list_summary_and_repeating_tab() {
+    use crate::theme::Layout;
+    let (mut app, dir) = desktop_app("xero-invlist");
+    let t = app.update(Message::SetLayout(Layout::Xero)); settle(&mut app, t);
+    let t = app.update(Message::Nav(Route::Invoices)); settle(&mut app, t);
+    // The summary boxes open their tab ("Overdue" text also appears in the status chips, so send the box's message).
+    let t = app.update(Message::ListTab("overdue")); settle(&mut app, t);
+    assert_eq!(app.list_tab, "overdue");
+    let rows = app.data.as_ref().unwrap()["rows"].as_array().unwrap().clone();
+    assert!(!rows.is_empty() && rows.iter().all(|r| r["overdue"] == 1), "only overdue invoices");
+    for b in ["Import", "Export", "Send statements", "New credit note", "New repeating invoice"] { press(&mut app, b); let t = app.update(Message::Nav(Route::Invoices)); settle(&mut app, t); }
+    press(&mut app, "Repeating");
+    assert_eq!(app.route, Route::Memorized);
+    let _ = std::fs::remove_dir_all(dir);
+}

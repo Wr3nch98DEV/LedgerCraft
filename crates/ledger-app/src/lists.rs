@@ -109,6 +109,24 @@ fn money_bar<'a>(parts: Vec<(&'a str, String, i64, Color)>) -> Element<'a, Messa
     })).spacing(14).into()
 }
 
+/// Xero's summary above invoices and bills: what's draft, waiting for approval, waiting for payment and overdue.
+/// Each box opens its tab.
+fn xero_summary<'a>(app: &App, counts: &serde_json::Value) -> Element<'a, Message> {
+    let k = t();
+    let boxes = [("draft", "Draft", "draft", "draft_total", k.muted), ("submitted", "Awaiting approval", "submitted", "submitted_total", k.warn),
+        ("awaiting", "Awaiting payment", "awaiting", "awaiting_total", k.info), ("overdue", "Overdue", "overdue", "overdue_total", k.bad)];
+    row(boxes.into_iter().map(|(tab, label, n, total, c)| {
+        let active = app.list_tab == tab;
+        let n = i(&counts[n]);
+        button(column![
+            text(label).size(13).color(if tab == "overdue" && n > 0 { k.bad } else { k.muted }),
+            text(ui::money(i(&counts[total]))).size(20).font(BOLD),
+            text(format!("{n} {}", if n == 1 { "item" } else { "items" })).size(12).color(k.faint),
+            container(Space::new()).width(Fill).height(3).style(move |_: &iced::Theme| container::Style { background: Some(iced::Background::Color(c)), ..Default::default() }),
+        ].spacing(4).width(Fill)).style(theme::tab(active)).padding([10, 14]).width(Fill).on_press(Message::ListTab(tab)).into()
+    })).spacing(10).into()
+}
+
 pub fn docs(app: &App) -> Element<'_, Message> {
     let (title, new_kind): (&str, &str) = match app.route {
         Route::AllSales => (if app.skin == Skin::QuickBooks { "Sales transactions" } else { "Sales" }, "ACCREC"),
@@ -127,8 +145,21 @@ pub fn docs(app: &App) -> Element<'_, Message> {
     let purchases = matches!(new_kind, "ACCPAY" | "PO");
     let new_label = format!("New {}", type_label(app, new_kind).to_lowercase());
     let mut actions: Vec<Element<Message>> = vec![];
-    if purchases && new_kind == "ACCPAY" { actions.push(ui::btn(app.term("pay_bill"), Some(Message::Nav(Route::PayBills)))); }
-    if !purchases && new_kind == "ACCREC" { actions.push(ui::btn(app.term("receive_payment"), Some(Message::Nav(Route::ReceivePayment(None))))); }
+    if purchases && new_kind == "ACCPAY" && !(app.skin == Skin::Xero && matches!(app.route, Route::Bills)) { actions.push(ui::btn(app.term("pay_bill"), Some(Message::Nav(Route::PayBills)))); }
+    let xero_list = app.skin == Skin::Xero && matches!(app.route, Route::Invoices | Route::Bills);
+    if xero_list {
+        // Xero's invoice and bill lists: Import / Export, statements for customers, then the new buttons.
+        actions.push(ui::btn("Import", Some(Message::Nav(Route::ImportExport))));
+        actions.push(ui::btn("Export", Some(Message::Nav(Route::ImportExport))));
+        if new_kind == "ACCREC" {
+            actions.push(ui::btn("Send statements", Some(Message::Nav(Route::Statements))));
+            actions.push(ui::btn("New credit note", Some(Message::Nav(Route::Doc { kind: "ACCRECCREDIT".into(), id: None }))));
+        } else {
+            actions.push(ui::btn("New credit note", Some(Message::Nav(Route::Doc { kind: "ACCPAYCREDIT".into(), id: None }))));
+        }
+        actions.push(ui::btn(if new_kind == "ACCREC" { "New repeating invoice" } else { "New repeating bill" }, Some(Message::Nav(Route::Memorized))));
+    }
+    if !purchases && new_kind == "ACCREC" && !xero_list { actions.push(ui::btn(app.term("receive_payment"), Some(Message::Nav(Route::ReceivePayment(None))))); }
     if matches!(app.route, Route::Expenses) { actions.push(ui::btn("New expense", Some(Message::Nav(Route::Spend(None))))); }
     actions.push(ui::btn_primary(&new_label, Some(Message::Nav(Route::Doc { kind: new_kind.into(), id: None }))));
 
@@ -147,6 +178,8 @@ pub fn docs(app: &App) -> Element<'_, Message> {
                 ("Draft", format!("{} draft", i(&counts["draft"])), i(&counts["draft_total"]), k.line2),
             ])
         }
+    } else if xero_list {
+        xero_summary(app, counts)
     } else { Space::new().into() };
 
     let tabs: Vec<(&'static str, String)> = match app.skin {
@@ -155,7 +188,7 @@ pub fn docs(app: &App) -> Element<'_, Message> {
         Skin::Xero => [("all", "All"), ("draft", "Draft"), ("submitted", "Awaiting approval"), ("awaiting", "Awaiting payment"), ("paid", "Paid")].into_iter().map(|(k, l)| {
             let n = if matches!(k, "draft" | "submitted" | "awaiting") { i(&counts[k]) } else { 0 };
             (k, if n > 0 { format!("{l} ({n})") } else { l.to_string() })
-        }).collect(),
+        }).chain(xero_list.then(|| ("repeating", "Repeating".to_string()))).collect(),
     };
     let cols = match app.skin {
         Skin::QuickBooks => vec![col("Date", 10), col("Type", 10), col("No.", 9), col(if purchases { "Payee" } else { "Customer" }, 22), col("Due date", 10), coln("Balance", 11), coln("Total", 11), col("Status", 11)],

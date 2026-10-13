@@ -726,6 +726,8 @@ impl App {
                 self.go(r)
             }
             Message::ListQuery(q) => { self.list_q = q; self.load() }
+            // Xero's "Repeating" tab on invoices and bills is the repeating transactions list.
+            Message::ListTab("repeating") => self.update(Message::Nav(Route::Memorized)),
             Message::ListTab(t) => { self.list_tab = t; self.load() }
             Message::DropToast(id) => { self.toasts.retain(|t| t.0 != id); Task::none() }
             Message::Key(ev) => self.on_key(ev),
