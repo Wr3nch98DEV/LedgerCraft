@@ -124,6 +124,8 @@ pub enum Route {
     PaymentReminders,
     /// Batch payments and their bank files.
     BatchPayments,
+    /// Inventory locations / warehouses.
+    Locations,
     /// Custom reports: build your own report rows and formulas.
     CustomReports,
     /// Payroll settings: pay schedules and leave types.
@@ -152,8 +154,15 @@ pub struct Lookups {
     pub templates: Vec<Value>,
     /// Price rules (quantity breaks, dates) applied when an item goes on a sale.
     pub price_rules: Vec<Value>,
+    /// Inventory locations (warehouses); empty = everything is at the main location.
+    pub locations: Vec<Value>,
 }
 impl Lookups {
+    pub fn location_opts(&self) -> Vec<Opt> {
+        let mut v = vec![Opt { id: 0, label: ledger_core::locations::MAIN.to_string() }];
+        v.extend(self.locations.iter().map(|l| Opt { id: l["id"].as_i64().unwrap_or(0), label: l["name"].as_str().unwrap_or("").to_string() }));
+        v
+    }
     pub fn template_opts(&self) -> Vec<Opt> {
         self.templates.iter().map(|t| Opt { id: t["id"].as_i64().unwrap_or(0), label: t["name"].as_str().unwrap_or("").to_string() }).collect()
     }
@@ -298,7 +307,7 @@ pub fn parse_route(s: &str) -> Option<Route> {
         "customers" => Route::Customers, "products" => Route::Products, "expenses" => Route::Expenses, "bills" => Route::Bills, "vendors" => Route::Vendors,
         "pos" => Route::PurchaseOrders, "contacts" => Route::Contacts, "contact" => Route::Contact(id(1)?), "banking" => Route::Banking(id(1)), "chart" => Route::Chart,
         "reports" => Route::Reports, "report" => Route::Report(parts.get(1)?.to_string()), "settings" => Route::Settings, "setup" => Route::Setup,
-        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "adjustinventory" => Route::AdjustInventory, "help" => Route::Help, "memreports" => Route::MemorizedReports, "docs" => Route::DocCenter, "payliabilities" => Route::PayLiabilities, "classes" => Route::ClassList, "payitems" => Route::PayrollItems, "othernames" => Route::OtherNames, "financecharges" => Route::FinanceCharges, "templates" => Route::Templates, "pricelevels" => Route::PriceLevels, "printforms" => Route::PrintForms, "payrollforms" => Route::PayrollForms, "favorites" => Route::CustomizeFavorites, "build" => Route::BuildAssemblies, "inventory" => Route::InventoryCenter, "editcontact" => Route::EditContact(id(1)?), "edititem" => Route::EditItem(id(1)?), "editaccount" => Route::EditAccount(id(1)?), "batchinvoices" => Route::BatchInvoices, "banktx" => Route::BankTx(id(1)?), "reminders" => Route::Reminders, "find" => Route::Find, "apps" => Route::Apps, "assets" => Route::FixedAssets, "audit" => Route::AuditLog, "currencies" => Route::Currencies, "budgets" => Route::Budgets, "claims" => Route::ExpenseClaims, "bankrules" => Route::BankRules, "importexport" => Route::ImportExport, "recode" => Route::Recode, "dunning" => Route::PaymentReminders, "batches" => Route::BatchPayments, "customreports" => Route::CustomReports, "payrollsettings" => Route::PayrollSettings, "time" => Route::EnterTime, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
+        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "adjustinventory" => Route::AdjustInventory, "help" => Route::Help, "memreports" => Route::MemorizedReports, "docs" => Route::DocCenter, "payliabilities" => Route::PayLiabilities, "classes" => Route::ClassList, "payitems" => Route::PayrollItems, "othernames" => Route::OtherNames, "financecharges" => Route::FinanceCharges, "templates" => Route::Templates, "pricelevels" => Route::PriceLevels, "printforms" => Route::PrintForms, "payrollforms" => Route::PayrollForms, "favorites" => Route::CustomizeFavorites, "build" => Route::BuildAssemblies, "inventory" => Route::InventoryCenter, "editcontact" => Route::EditContact(id(1)?), "edititem" => Route::EditItem(id(1)?), "editaccount" => Route::EditAccount(id(1)?), "batchinvoices" => Route::BatchInvoices, "banktx" => Route::BankTx(id(1)?), "reminders" => Route::Reminders, "find" => Route::Find, "apps" => Route::Apps, "assets" => Route::FixedAssets, "audit" => Route::AuditLog, "currencies" => Route::Currencies, "budgets" => Route::Budgets, "claims" => Route::ExpenseClaims, "bankrules" => Route::BankRules, "importexport" => Route::ImportExport, "recode" => Route::Recode, "dunning" => Route::PaymentReminders, "batches" => Route::BatchPayments, "locations" => Route::Locations, "customreports" => Route::CustomReports, "payrollsettings" => Route::PayrollSettings, "time" => Route::EnterTime, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
         _ => return None,
     })
 }
@@ -457,7 +466,7 @@ impl App {
                 tokio::task::spawn_blocking(move || {
                     if qb { let _ = be.call_now("accounts.undeposited", json!({})); }
                     let get = |m: &str, p: Value| be.call_now(m, p).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
-                    Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})), price_rules: get("priceRules.list", json!({})) }
+                    Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})), price_rules: get("priceRules.list", json!({})), locations: get("locations.list", json!({})) }
                 }).await.unwrap_or_default()
             },
             |l| Message::LookupsLoaded(Box::new(l)),
@@ -568,7 +577,7 @@ impl App {
             Route::ClassList => call("tracking.list", json!({})),
             Route::PayrollItems => call("payroll.settings", json!({})),
             Route::Reminders => crate::desktop::load_reminders(self),
-            Route::FixedAssets | Route::AuditLog | Route::Currencies | Route::Budgets | Route::ExpenseClaims | Route::BankRules | Route::ImportExport | Route::Recode | Route::PaymentReminders | Route::BatchPayments | Route::CustomReports | Route::PayrollSettings => crate::extras::load(self),
+            Route::FixedAssets | Route::AuditLog | Route::Currencies | Route::Budgets | Route::ExpenseClaims | Route::BankRules | Route::ImportExport | Route::Recode | Route::PaymentReminders | Route::BatchPayments | Route::Locations | Route::CustomReports | Route::PayrollSettings => crate::extras::load(self),
             Route::Apps => { self.data = Some(json!({})); Task::none() }
             Route::Find => { self.data = Some(json!({"rows": null})); Task::none() }
             Route::BatchInvoices => call("contacts.list", json!({"filter": "customers"})),

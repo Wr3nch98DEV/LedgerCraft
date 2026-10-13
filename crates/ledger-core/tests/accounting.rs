@@ -884,3 +884,35 @@ fn price_rules_quantity_breaks_and_dates() {
     // The lowest price wins: 10 or more gets the bulk 20% off.
     assert_eq!(rule_bp(&rules, 1, None, 100_000, "2026-10-05"), Some(-2_000));
 }
+
+#[test]
+fn inventory_locations_receive_transfer_and_sell() {
+    let l = org();
+    let item = l.create_item(&ItemInput { code: "BOLT".into(), name: "Bolt".into(), is_tracked: true, sale_price: Some("2".into()), sale_account_id: Some(acct(&l, "200")),
+        purchase_account_id: Some(acct(&l, "310")), purchase_price: Some("1".into()), ..Default::default() }).unwrap();
+    let north = l.save_location(None, "North warehouse", "1 North St").unwrap();
+    let doc = |kind: &str, qty: &str, price: &str, loc: Option<i64>| DocInput { kind: kind.into(), contact_name: Some("Acme".into()), date: "2026-06-01".into(), line_amount_type: Some("NOTAX".into()),
+        lines: vec![LineInput { item_id: Some(item), quantity: Some(qty.into()), unit_price: Some(price.into()), account_id: Some(acct(&l, "200")), ..Default::default() }],
+        status: Some("AUTHORISED".into()), location_id: loc, ..Default::default() };
+    // 100 received into North, none at the main location.
+    l.save_document(None, &doc("ACCPAY", "100", "1", Some(north))).unwrap();
+    assert_eq!(l.stock_at(item, Some(north)).unwrap(), 1_000_000);
+    assert_eq!(l.stock_at(item, None).unwrap(), 0);
+    // Selling from the main location fails; from North works.
+    let err = l.save_document(None, &doc("ACCREC", "5", "2", None)).unwrap_err().to_string();
+    assert!(err.contains("Main location"), "{err}");
+    l.save_document(None, &doc("ACCREC", "5", "2", Some(north))).unwrap();
+    // Move 20 to the main location; cost and the ledger don't change.
+    let before = l.get_item(item).unwrap()["total_cost"].as_i64().unwrap();
+    l.transfer_stock(item, Some(north), None, 200_000, "2026-06-02").unwrap();
+    assert_eq!(l.get_item(item).unwrap()["total_cost"].as_i64().unwrap(), before);
+    assert_eq!(l.stock_at(item, None).unwrap(), 200_000);
+    assert_eq!(l.stock_at(item, Some(north)).unwrap(), 750_000);
+    assert!(l.transfer_stock(item, None, Some(north), 300_000, "2026-06-02").is_err());
+    // A location with stock can't be removed; the report has a column per location.
+    assert!(l.delete_location(north).is_err());
+    let r = l.stock_by_location_report().unwrap();
+    assert_eq!(r["columns"][1], "North warehouse");
+    assert_eq!(r["sections"][0]["rows"][0]["values"], serde_json::json!([200_000, 750_000, 950_000]));
+    assert_invariants(&l);
+}

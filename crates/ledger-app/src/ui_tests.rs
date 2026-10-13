@@ -15,7 +15,7 @@ fn demo_app(tag: &str, skin: Skin) -> (App, std::path::PathBuf) {
     let session = app.be.call_now("session.get", json!({})).unwrap();
     let _ = app.update(Message::Session(Ok(session)));
     let get = |m: &str, p: Value| app.be.call_now(m, p).unwrap().as_array().cloned().unwrap();
-    let lk = Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})), price_rules: get("priceRules.list", json!({})) };
+    let lk = Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})), price_rules: get("priceRules.list", json!({})), locations: get("locations.list", json!({})) };
     let _ = app.update(Message::LookupsLoaded(Box::new(lk)));
     (app, dir)
 }
@@ -728,7 +728,7 @@ fn desktop_app(tag: &str) -> (App, std::path::PathBuf) {
     let session = app.be.call_now("session.get", json!({})).unwrap();
     let _ = app.update(Message::Session(Ok(session)));
     let get = |m: &str, p: Value| app.be.call_now(m, p).unwrap().as_array().cloned().unwrap();
-    let lk = Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})), price_rules: get("priceRules.list", json!({})) };
+    let lk = Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})), price_rules: get("priceRules.list", json!({})), locations: get("locations.list", json!({})) };
     let _ = app.update(Message::LookupsLoaded(Box::new(lk)));
     (app, dir)
 }
@@ -3994,5 +3994,40 @@ fn sage_bank_feed_table() {
     for m in msgs { let t = app.update(m); settle(&mut app, t); }
     let after = app.data.as_ref().unwrap()["lines"].as_array().unwrap().len();
     assert!(after <= before);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn inventory_locations_in_the_app() {
+    use crate::extras::Msg as X;
+    use crate::doc::Msg as D;
+    let (mut app, dir) = desktop_app("locations");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Online)); settle(&mut app, t);
+    let t = app.update(Message::Nav(Route::Locations)); settle(&mut app, t);
+    let _ = app.update(Message::Extras(X::LocNew(true)));
+    let _ = app.update(Message::Extras(X::LocField(0, "Back store".into())));
+    press(&mut app, "Save location");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let loc = app.lk.location_opts().into_iter().find(|o| o.label == "Back store").expect("in lookups");
+    // A bill puts stock into the new location.
+    let item = app.lk.items.iter().find(|i| i["is_tracked"] == 1).cloned().expect("a tracked item");
+    let opt = crate::app::Opt { id: item["id"].as_i64().unwrap(), label: item["name"].as_str().unwrap_or("").to_string() };
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCPAY".into(), id: None })); settle(&mut app, t);
+    assert!(!click_fails(&app, "Location"));
+    let vendor = app.lk.contact_opts(false)[0].clone();
+    for m in [D::Contact(vendor), D::Location(loc.clone()), D::Item(0, opt.clone()), D::Qty(0, "12".into()), D::Price(0, "3".into())] { let t = app.update(Message::Doc(m)); settle(&mut app, t); }
+    press(&mut app, "Save and close");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let item_id = item["id"].clone();
+    let stock = |app: &App| app.be.call_now("locations.stock", json!({})).unwrap()["rows"].as_array().unwrap().iter()
+        .filter(|r| r["id"] == item_id && r["location_id"].as_i64() == Some(loc.id)).map(|r| r["qty_e4"].as_i64().unwrap()).sum::<i64>();
+    assert_eq!(stock(&app), 120_000);
+    // Move 5 back to the main location.
+    let t = app.update(Message::Nav(Route::Locations)); settle(&mut app, t);
+    for m in [X::TrItem(opt), X::TrFrom(loc.clone()), X::TrTo(crate::app::Opt { id: 0, label: "Main location".into() }), X::TrQty("5".into())] { let _ = app.update(Message::Extras(m)); }
+    press(&mut app, "Move");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert_eq!(stock(&app), 70_000);
+    assert!(!click_fails(&app, "Back store"));
     let _ = std::fs::remove_dir_all(dir);
 }

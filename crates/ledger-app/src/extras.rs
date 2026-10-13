@@ -34,6 +34,14 @@ pub struct State {
     pub pr_new: Option<[String; 5]>,
     pub pr_item: Option<Opt>,
     pub pr_level: Option<Opt>,
+    /// Locations: the new location (name, address), and the stock transfer being entered
+    /// (item, from, to, quantity, date).
+    pub loc_new: Option<(String, String)>,
+    pub tr_item: Option<Opt>,
+    pub tr_from: Option<Opt>,
+    pub tr_to: Option<Opt>,
+    pub tr_qty: String,
+    pub tr_date: String,
     /// Payment reminders: a new level's days after the due date, as typed.
     pub dun_days: String,
     /// Contact page: the credit limit being typed (None = not being edited).
@@ -98,6 +106,7 @@ pub enum Msg {
     CreditText(String), CreditHold(i64, bool), CreditSave(i64),
     /// Payment reminders: on/off, a new level's days, add, switch a level on/off, delete, send due reminders now.
     PrNew(bool), PrField(usize, String), PrItem(Opt), PrLevel(Opt), PrSave, PrDelete(i64),
+    LocNew(bool), LocField(u8, String), LocSave, LocDelete(i64), TrItem(Opt), TrFrom(Opt), TrTo(Opt), TrQty(String), TrDate(String), TrMove,
     DunOn(bool), DunDays(String), DunAdd, DunActive(i64, i64, bool), DunDelete(i64), DunRun,
     /// Find & recode.
     RcAccount(Opt), RcTax(Opt), RcContact(Opt), RcText(&'static str, String), RcFind, RcClear, RcToggle(i64), RcAll(bool), RcToAccount(Opt), RcToTax(Opt), RcApply,
@@ -140,6 +149,7 @@ pub fn load(app: &mut App) -> Task<Message> {
         Route::PayrollSettings => call(app, "payroll.settings", json!({})),
         Route::ImportExport => { app.data = Some(json!({})); Task::none() }
         Route::BatchPayments => call(app, "batch.list", json!({})),
+        Route::Locations => call(app, "locations.stock", json!({})),
         Route::PaymentReminders => {
             let be = app.be.clone();
             Task::perform(async move {
@@ -202,6 +212,31 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             let p = json!({"line_ids": x.rc_sel.iter().collect::<Vec<_>>(), "account_id": x.rc_to_account.as_ref().map(|o| o.id), "tax_rate_id": x.rc_to_tax.as_ref().map(|o| o.id)});
             app.extras.busy = true;
             app.be.call("recode.apply", p, |r| Message::Extras(Msg::Done(r.map(|v| { let n = v["transactions"].as_i64().unwrap_or(0); json!({"n": n}) }), "Recoded — the transactions were reposted")))
+        }
+        // ---- locations ----
+        Msg::LocNew(on) => { app.extras.loc_new = on.then(Default::default); Task::none() }
+        Msg::LocField(n, v) => { if let Some(f) = app.extras.loc_new.as_mut() { if n == 0 { f.0 = v } else { f.1 = v } } Task::none() }
+        Msg::LocSave => {
+            let Some((name, address)) = app.extras.loc_new.take() else { return Task::none() };
+            app.be.call("locations.save", json!({"name": name, "address": address}), |r| Message::Extras(Msg::Done(r, "Location added")))
+        }
+        Msg::LocDelete(id) => app.be.call("locations.delete", json!({"id": id}), |r| Message::Extras(Msg::Done(r, "Location removed"))),
+        Msg::TrItem(o) => { app.extras.tr_item = Some(o); Task::none() }
+        Msg::TrFrom(o) => { app.extras.tr_from = Some(o); Task::none() }
+        Msg::TrTo(o) => { app.extras.tr_to = Some(o); Task::none() }
+        Msg::TrQty(v) => { app.extras.tr_qty = v; Task::none() }
+        Msg::TrDate(v) => { let old = if app.extras.tr_date.is_empty() { app.d(&ui::today_iso()) } else { app.extras.tr_date.clone() }; app.extras.tr_date = ui::date_keys(&old, &v, style); Task::none() }
+        Msg::TrMove => {
+            let x = &app.extras;
+            let Some(item) = x.tr_item.as_ref().map(|o| o.id) else { return app.toast("Choose the item to move", true) };
+            let (Some(from), Some(to)) = (x.tr_from.as_ref(), x.tr_to.as_ref()) else { return app.toast("Choose where it's moving from and to", true) };
+            let Some(q) = x.tr_qty.trim().parse::<f64>().ok().filter(|q| *q > 0.0) else { return app.toast("Enter the quantity to move", true) };
+            let shown = if x.tr_date.is_empty() { app.d(&ui::today_iso()) } else { x.tr_date.clone() };
+            let Some(date) = ui::to_iso(&shown, style) else { return app.toast("Check the date", true) };
+            let loc = |o: &Opt| if o.id == 0 { None } else { Some(o.id) };
+            let p = json!({"item_id": item, "from": loc(from), "to": loc(to), "qty_e4": (q * 10_000.0).round() as i64, "date": date});
+            app.extras.tr_qty.clear();
+            app.be.call("locations.transfer", p, |r| Message::Extras(Msg::Done(r, "Stock moved")))
         }
         // ---- price rules ----
         Msg::PrNew(on) => { app.extras.pr_new = on.then(|| [String::new(), "1".into(), String::new(), String::new(), String::new()]); app.extras.pr_item = None; app.extras.pr_level = None; Task::none() }
@@ -966,6 +1001,74 @@ pub fn price_rules_section(app: &App) -> Element<'_, Message> {
     }).collect();
     col = col.push(ui::table(&[ui::col("Rule", 16), ui::col("Item", 18), ui::col("Customers", 16), ui::col("Quantity", 10), ui::col("Change", 9), ui::col("Dates", 20), ui::col("", 9)], rows, "No price rules yet."));
     col.push(ui::muted("The lowest matching price wins. Rules apply after the customer's price level, when an item goes on a sale or its quantity changes.")).into()
+}
+
+// ---------------- Locations ----------------
+
+/// Inventory locations: the list, stock on hand at each, and moving stock between them.
+pub fn locations(app: &App) -> Element<'_, Message> {
+    let Some(d) = &app.data else { return loading() };
+    let x = &app.extras;
+    let k = t();
+    let locs = d["locations"].as_array().cloned().unwrap_or_default();
+    let title = if crate::vocab::acumatica() { "Warehouses" } else if app.desktop() { "Inventory Site List" } else { "Locations" };
+    let mut body = column![].spacing(14);
+    if let Some((name, address)) = &x.loc_new {
+        body = body.push(ui::card(row![
+            input("NAME", name, 220.0, |v| Message::Extras(Msg::LocField(0, v))), input("ADDRESS", address, 320.0, |v| Message::Extras(Msg::LocField(1, v))),
+            iced::widget::Space::new().width(Length::Fill), ui::btn("Cancel", Some(Message::Extras(Msg::LocNew(false)))), ui::btn_primary("Save location", Some(Message::Extras(Msg::LocSave))),
+        ].spacing(12).align_y(Alignment::End)));
+    }
+    // Stock grid: item rows, a column per location.
+    let mut names = vec![ledger_core::locations::MAIN.to_string()];
+    names.extend(locs.iter().map(|l| l["name"].as_str().unwrap_or("").to_string()));
+    let mut by_item: Vec<(String, Vec<i64>)> = Vec::new();
+    for r in d["rows"].as_array().cloned().unwrap_or_default() {
+        let label = format!("{} {}", r["code"].as_str().unwrap_or(""), r["name"].as_str().unwrap_or("")).trim().to_string();
+        if by_item.last().map(|b| &b.0) != Some(&label) { by_item.push((label.clone(), vec![0; locs.len() + 1])); }
+        let at = r["location_id"].as_i64().and_then(|id| locs.iter().position(|l| l["id"].as_i64() == Some(id))).map(|p| p + 1).unwrap_or(0);
+        if let Some(b) = by_item.last_mut() { b.1[at] += r["qty_e4"].as_i64().unwrap_or(0); }
+    }
+    let qty = |q: i64| { let s = format!("{:.4}", q as f64 / 10_000.0); s.trim_end_matches('0').trim_end_matches('.').to_string() };
+    // (Column titles are the location names, so the grid is laid out here rather than with ui::table.)
+    let cell = |t: String, w: u16, right: bool, head: bool| -> Element<'_, Message> {
+        let tx = text(if head { t.to_uppercase() } else { t }).size(if head { 11 } else { 14 }).font(if head { BOLD } else { iced::Font::DEFAULT }).color(if head { k.muted } else { k.text });
+        container(if right { tx.align_x(iced::alignment::Horizontal::Right).width(Length::Fill) } else { tx.width(Length::Fill) }).width(Length::FillPortion(w)).into()
+    };
+    let mut head = row![cell("Item".into(), 30, false, true)].spacing(10);
+    for n in &names { head = head.push(cell(n.clone(), 14, true, true)); }
+    let empty = by_item.is_empty();
+    let mut grid = column![container(head.padding([9, 14])).style(theme::header_row).width(Length::Fill)];
+    for (label, v) in by_item {
+        let mut r = row![cell(label, 30, false, false)].spacing(10);
+        for q in v { r = r.push(cell(qty(q), 14, true, false)); }
+        grid = grid.push(column![container(r.padding([8, 14])), ui::hr()]);
+    }
+    if empty { grid = grid.push(container(ui::muted("No tracked stock yet.")).padding(20)); }
+    // The locations themselves.
+    let mut list = column![row![ui::h2(title), iced::widget::Space::new().width(Length::Fill), ui::btn_primary("New location", Some(Message::Extras(Msg::LocNew(true))))].align_y(Alignment::Center)].spacing(6);
+    list = list.push(row![text(ledger_core::locations::MAIN).size(14).width(Length::Fill), text("Stock with no other location").size(13).color(k.muted)]);
+    for l in &locs {
+        let id = l["id"].as_i64().unwrap_or(0);
+        list = list.push(row![text(l["name"].as_str().unwrap_or("").to_string()).size(14).width(Length::Fill), text(l["address"].as_str().unwrap_or("").to_string()).size(13).color(k.muted).width(Length::Fill), ui::link("Remove", Message::Extras(Msg::LocDelete(id)))].spacing(10));
+    }
+    body = body.push(ui::card(list));
+    // Transfer.
+    let items: Vec<Opt> = app.lk.items.iter().filter(|i| i["is_tracked"] == 1).map(|i| Opt { id: i["id"].as_i64().unwrap_or(0), label: i["name"].as_str().unwrap_or("").to_string() }).collect();
+    let pick = |label: &'static str, opts: Vec<Opt>, cur: Option<Opt>, f: fn(Opt) -> Msg, w: f32| -> Element<'_, Message> {
+        column![lbl(label), pick_list(opts, cur, move |o| Message::Extras(f(o))).placeholder("Choose").padding([5, 7]).text_size(13).style(theme::pick).width(Length::Fixed(w))].spacing(3).into()
+    };
+    let date_shown = if x.tr_date.is_empty() { app.d(&ui::today_iso()) } else { x.tr_date.clone() };
+    body = body.push(ui::card(column![
+        ui::h2("Move stock"),
+        row![pick("ITEM", items, x.tr_item.clone(), Msg::TrItem, 220.0), pick("FROM", app.lk.location_opts(), x.tr_from.clone(), Msg::TrFrom, 180.0), pick("TO", app.lk.location_opts(), x.tr_to.clone(), Msg::TrTo, 180.0),
+            input("QUANTITY", &x.tr_qty, 100.0, |v| Message::Extras(Msg::TrQty(v))), input("DATE", &date_shown, 120.0, |v| Message::Extras(Msg::TrDate(v))),
+            iced::widget::Space::new().width(Length::Fill), ui::btn_primary("Move", Some(Message::Extras(Msg::TrMove)))].spacing(10).align_y(Alignment::End),
+    ].spacing(10)));
+    body = body.push(ui::h2("Stock on hand"));
+    body = body.push(container(grid).style(theme::card).width(Length::Fill));
+    body = body.push(ui::muted("Bills, invoices and credit notes take a location once you have one. Cost is one average per item across locations."));
+    ui::page(ui::h1(title), vec![], body.into())
 }
 
 // ---------------- Batch payments ----------------

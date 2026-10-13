@@ -61,6 +61,8 @@ pub struct Editor {
     pub progress: Option<String>,
     /// Acumatica record screen: the tab showing under the summary (details, financial, address).
     pub acu_tab: &'static str,
+    /// Where the stock on this document leaves from / arrives at (None = main location).
+    pub location: Option<Opt>,
     /// QuickBooks invoices: the customer's open delayed charges/credits, and those added.
     pub delayed: Vec<Value>,
     pub added: Vec<i64>,
@@ -128,6 +130,8 @@ pub enum Msg {
     ProgressOpen, ProgressPct(String), ProgressCreate,
     /// Acumatica record screen tab.
     AcuTab(&'static str),
+    /// The inventory location for the document's stock.
+    Location(Opt),
     Send,
     Sent(Result<Value, String>),
     Delayed(Result<Value, String>),
@@ -255,7 +259,7 @@ impl Editor {
             lat: if app.country() == "US" { "EXCLUSIVE".into() } else { "EXCLUSIVE".into() },
             lines: vec![Line { qty: "1".into(), ..Default::default() }, Line { qty: "1".into(), ..Default::default() }],
             terms: String::new(), busy: false, editing: true,
-            pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false, submit: false, allow_over: false, progress: None, acu_tab: "details",
+            pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false, submit: false, allow_over: false, progress: None, acu_tab: "details", location: None,
             delayed: vec![], added: vec![], items_tab: false, close_after: false, history: vec![], memo_open: false, memo_freq: "Monthly", memo_next: String::new(), memo_auto: false, apply: None, refund_open: false,
         };
         if let Some(a) = default_account(app, kind) { for l in &mut e.lines { l.account = Some(a.clone()); l.tax = default_tax(app, Some(a.id)); } }
@@ -302,7 +306,7 @@ impl Editor {
         }
         if lines.is_empty() { return Err("Add at least one line".into()); }
         let kind = match self.kind.as_str() { "SALESRECEIPT" => "ACCREC", k if quote_variant(k) => "QUOTE", k => k };
-        let mut doc = json!({"type": kind, "date": date, "due_date": due, "reference": self.reference, "line_amount_type": self.lat, "terms": self.terms, "lines": lines, "status": status, "allow_over_limit": self.allow_over});
+        let mut doc = json!({"type": kind, "date": date, "due_date": due, "reference": self.reference, "line_amount_type": self.lat, "terms": self.terms, "lines": lines, "status": status, "allow_over_limit": self.allow_over, "location_id": self.location.as_ref().map(|o| o.id)});
         if self.kind == "QUOTE" { doc["expiry_date"] = doc["due_date"].take(); }
         if self.kind == "PO" { doc["delivery_date"] = doc["due_date"].take(); }
         if !self.number.trim().is_empty() { doc["number"] = json!(self.number.trim()); }
@@ -375,6 +379,7 @@ fn fill_from(app: &App, e: &mut Editor, d: &Value) {
     let due = d["due_date"].as_str().or(d["expiry_date"].as_str()).or(d["delivery_date"].as_str()).unwrap_or("");
     e.due = if due.is_empty() { String::new() } else { ui::date(due, style) };
     e.reference = d["reference"].as_str().unwrap_or("").to_string();
+    e.location = d["location_id"].as_i64().and_then(|id| app.lk.location_opts().into_iter().find(|o| o.id == id));
     e.template = d["branding_theme_id"].as_i64().and_then(|id| app.lk.template_opts().into_iter().find(|t| t.id == id));
     e.number = d["number"].as_str().unwrap_or("").to_string();
     e.lat = d["line_amount_type"].as_str().unwrap_or("EXCLUSIVE").to_string();
@@ -636,6 +641,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         }
         Msg::Submit => { e.submit = true; save(app, &mut e, false, false) }
         Msg::AcuTab(t) => { e.acu_tab = t; Task::none() }
+        Msg::Location(o) => { e.location = (o.id != 0).then_some(o); Task::none() }
         Msg::ProgressOpen => {
             // Suggest what's left to invoice.
             let (total, done) = e.doc.as_ref().map(|d| (d["total"].as_i64().unwrap_or(0), d["progress_invoiced"].as_i64().unwrap_or(0))).unwrap_or((0, 0));
@@ -866,6 +872,15 @@ pub fn view(app: &App) -> Element<'_, Message> {
     fields2 = fields2.push(column![ui::label("Amounts are"), if editable {
         Element::from(pick_list(&LATS[..], Some(LatOpt(match e.lat.as_str() { "INCLUSIVE" => "INCLUSIVE", "NOTAX" => "NOTAX", _ => "EXCLUSIVE" })), |l| Message::Doc(Msg::Lat(l))).padding([7, 10]).text_size(14).style(theme::pick).width(Fill))
     } else { ui::body(LatOpt(match e.lat.as_str() { "INCLUSIVE" => "INCLUSIVE", "NOTAX" => "NOTAX", _ => "EXCLUSIVE" }).to_string()) }].spacing(5).width(Fill));
+
+    // Stock location, once the company has more than one.
+    if !app.lk.locations.is_empty() && ledger_doc(&e.kind) {
+        let label = if vocab::acumatica() { "Warehouse" } else if app.desktop() { "Site" } else { "Location" };
+        let cur = e.location.clone().unwrap_or(Opt { id: 0, label: ledger_core::locations::MAIN.to_string() });
+        fields2 = fields2.push(column![ui::label(label), if editable {
+            Element::from(pick_list(app.lk.location_opts(), Some(cur), |o| Message::Doc(Msg::Location(o))).padding([7, 10]).text_size(14).style(theme::pick).width(Fill))
+        } else { ui::body(cur.label) }].spacing(5).width(Fill));
+    }
 
     // ---- lines ----
     let qb_bill = app.skin == Skin::QuickBooks && !sales(&e.kind);
@@ -1192,7 +1207,7 @@ mod tests {
         app.be.call_now("orgs.create", json!({"org_name": "Test Co", "country": "AU", "demo": false, "owner_name": "Tess"})).unwrap();
         app.session = Some(app.be.call_now("session.get", json!({})).unwrap());
         let get = |m: &str, p: Value| app.be.call_now(m, p).unwrap().as_array().cloned().unwrap();
-        app.lk = crate::app::Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})), price_rules: get("priceRules.list", json!({})) };
+        app.lk = crate::app::Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})), price_rules: get("priceRules.list", json!({})), locations: get("locations.list", json!({})) };
         let mut e = Editor::new(&app, "ACCREC");
         e.contact_text = "New Customer Pty".into();
         e.lines[0].description = "Consulting".into();

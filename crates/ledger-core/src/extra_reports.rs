@@ -32,6 +32,7 @@ pub const CATALOGUE: &[(&str, &str, &str, &str)] = &[
     ("bank-reconciliation", "Bank Reconciliation", "Banking", "Statement vs ledger with unreconciled items"),
     ("tax-reconciliation", "Tax Reconciliation", "Tax", "Tax collected and paid by rate, tied to the ledger"),
     ("inventory-summary", "Inventory Item Summary", "Inventory", "Stock on hand, average cost and value"),
+    ("stock-by-location", "Stock by Location", "Inventory", "Quantity on hand at each location or warehouse"),
     ("fixed-asset-register", "Fixed Asset Register", "Fixed assets", "Cost, depreciation and book value per asset"),
     ("fixed-asset-reconciliation", "Fixed Asset Reconciliation", "Fixed assets", "Movements in asset cost and depreciation"),
     ("depreciation-schedule", "Depreciation Schedule", "Fixed assets", "Projected depreciation per asset"),

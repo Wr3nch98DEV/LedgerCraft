@@ -69,6 +69,8 @@ pub struct DocInput {
     pub repeating_id: Option<i64>,
     /// Approve even though it takes the customer over their credit limit (the user confirmed).
     pub allow_over_limit: bool,
+    /// The inventory location stock leaves from / arrives at (None = the main location).
+    pub location_id: Option<i64>,
 }
 
 pub fn is_sales(kind: &str) -> bool { matches!(kind, "ACCREC" | "ACCRECCREDIT" | "QUOTE") }
@@ -278,6 +280,7 @@ impl Ledger {
                     d.delivery_address, d.attention, d.title, d.summary, d.terms, lat_s, currency, rate, subtotal, total_tax, total,
                     self.to_base_amount(total, &currency, rate)?, d.expected_payment_date.clone().filter(|s| !s.is_empty()), d.planned_payment_date.clone().filter(|s| !s.is_empty()), d.branding_theme_id])?;
             self.write_lines("DOC", doc_id, &lines)?;
+            self.conn.execute("UPDATE documents SET location_id = ?2 WHERE id = ?1", params![doc_id, d.location_id])?;
             self.flag_contact_role(contact_id, sales && kind != "QUOTE" || kind == "QUOTE", !sales)?;
             // Status
             let want = d.status.clone().unwrap_or_else(|| if prior_status == "AUTHORISED" { "AUTHORISED".into() } else { prior_status.clone() });
@@ -368,6 +371,7 @@ impl Ledger {
             "SELECT type, contact_id, date, currency, rate_e8, number, reference FROM documents WHERE id = ?1", [id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?;
         let lines = self.read_lines("DOC", id)?;
+        let location: Option<i64> = self.conn.query_row("SELECT location_id FROM documents WHERE id = ?1", [id], |r| r.get(0))?;
         let s: i64 = match kind.as_str() { "ACCREC" => -1, "ACCRECCREDIT" => 1, "ACCPAY" => 1, "ACCPAYCREDIT" => -1, _ => return invalid("not a ledger document") };
         let control = if is_sales(&kind) { self.sys_account("AR")? } else { self.sys_account("AP")? };
         let gst = self.sys_account("GST")?;
@@ -394,6 +398,7 @@ impl Ledger {
                     let inv = inv.unwrap_or(self.sys_account("INVENTORY")?);
                     match kind.as_str() {
                         "ACCREC" => {
+                            self.check_stock_at(item, location, l.qty_e4)?;
                             let cost = self.inventory_cost_out(item, l.qty_e4)?;
                             let cogs = cogs.ok_or_else(|| Error::Validation("tracked item needs a cost of goods sold account".into()))?;
                             jl.push(JLine::new(cogs, cost).desc(format!("COGS: {}", l.description)).contact(Some(contact)).tracking(l.tracking1, l.tracking2));
@@ -413,7 +418,7 @@ impl Ledger {
                             }
                         }
                         "ACCPAY" => movements.push((item, l.qty_e4, net_b)),
-                        "ACCPAYCREDIT" => { self.inventory_cost_out(item, l.qty_e4)?; movements.push((item, -l.qty_e4, -net_b)) }
+                        "ACCPAYCREDIT" => { self.check_stock_at(item, location, l.qty_e4)?; self.inventory_cost_out(item, l.qty_e4)?; movements.push((item, -l.qty_e4, -net_b)) }
                         _ => {}
                     }
                 }
@@ -424,7 +429,7 @@ impl Ledger {
             currency: Some(currency.clone()), fx_amount: Some(-s * total_fx), ..Default::default() });
         let jid = self.post_journal(NewJournal { date: date.clone(), source_type: kind.clone(), source_id: Some(id), reference: if number.is_empty() { reference.clone() } else { number.clone() },
             narration: reference, lines: jl, cash_basis: false, reverses: None })?;
-        for (item, q, c) in movements { self.record_movement(item, &date, q, c, &kind, Some(id), Some(jid))?; }
+        for (item, q, c) in movements { self.record_movement_at(item, &date, q, c, &kind, Some(id), Some(jid), location)?; }
         self.conn.execute("UPDATE documents SET base_total = ?2 WHERE id = ?1", params![id, other.abs()])?;
         Ok(jid)
     }
@@ -434,11 +439,11 @@ impl Ledger {
         let (jid, kind, date): (Option<i64>, String, String) = self.conn.query_row("SELECT journal_id, type, date FROM documents WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         if let Some(j) = jid {
             let rid = self.reverse_journal(j, None, None)?;
-            let moves: Vec<(i64, i64, i64)> = {
-                let mut st = self.conn.prepare("SELECT item_id, qty_e4, cost FROM inventory_movements WHERE source_type = ?1 AND source_id = ?2 AND journal_id = ?3")?;
-                st.query_map(params![kind, id, j], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?
+            let moves: Vec<(i64, i64, i64, Option<i64>)> = {
+                let mut st = self.conn.prepare("SELECT item_id, qty_e4, cost, location_id FROM inventory_movements WHERE source_type = ?1 AND source_id = ?2 AND journal_id = ?3")?;
+                st.query_map(params![kind, id, j], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<rusqlite::Result<Vec<_>>>()?
             };
-            for (item, q, c) in moves { self.record_movement(item, &date, -q, -c, "REVERSAL", Some(id), Some(rid))?; }
+            for (item, q, c, loc) in moves { self.record_movement_at(item, &date, -q, -c, "REVERSAL", Some(id), Some(rid), loc)?; }
             self.conn.execute("UPDATE documents SET journal_id = NULL, void_journal_id = ?2 WHERE id = ?1", params![id, rid])?;
         }
         Ok(())

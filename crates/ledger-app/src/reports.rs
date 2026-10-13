@@ -266,7 +266,7 @@ fn qb_group(key: &str) -> &'static str {
         "purchases-by-contact" | "purchases-by-item" | "expense-claims" | "contractor-1099" => "Expenses and vendors",
         "tax-reconciliation" | "sales-tax-by-agency" => "Sales tax",
         "payroll-activity" | "leave-balances" | "w2-summary" => "Employees",
-        "inventory-summary" | "fixed-asset-register" | "fixed-asset-reconciliation" | "depreciation-schedule" | "project-profitability" => "Inventory, assets and projects",
+        "inventory-summary" | "stock-by-location" | "fixed-asset-register" | "fixed-asset-reconciliation" | "depreciation-schedule" | "project-profitability" => "Inventory, assets and projects",
         _ => "For my accountant",
     }
 }

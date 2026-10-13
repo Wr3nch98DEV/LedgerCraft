@@ -37,7 +37,7 @@ pub static PLACES: &[(&str, &str, &str)] = &[
     ("banking", "banking", "Bank Accounts"), ("reconcile", "banking", "Reconcile"), ("deposit", "banking", "Bank Deposit"),
     ("transfer", "banking", "Bank Transfer"), ("register", "banking", "Bank Activity"), ("bank_rules", "banking", "Bank Rules"),
     // Products & services
-    ("products", "products", "Products & Services"), ("inventory", "products", "Stock"), ("adjust_inventory", "products", "Stock Movements"),
+    ("products", "products", "Products & Services"), ("inventory", "products", "Stock"), ("locations", "products", "Stock Locations"), ("adjust_inventory", "products", "Stock Movements"),
     ("build_assemblies", "products", "Build Assemblies"), ("price_levels", "products", "Price Bands"),
     // Payroll
     ("payroll", "payroll", "Employees & Pay Runs"), ("pay_liabilities", "payroll", "Pay Liabilities"), ("payroll_forms", "payroll", "Filings"),
@@ -71,7 +71,7 @@ fn menu_of(r: &Route) -> &'static str {
         Route::Doc { kind, .. } => if matches!(kind.as_str(), "ACCPAY" | "ACCPAYCREDIT" | "PO") { "purchases" } else { "sales" },
         Route::Bills | Route::Expenses | Route::PayBills | Route::PurchaseOrders | Route::Spend(_) | Route::Check(_) | Route::ExpenseClaims | Route::Mileage => "purchases",
         Route::Banking(_) | Route::Reconcile | Route::Deposit | Route::Transfer | Route::Register(_) | Route::BankRules | Route::BankTx(_) => "banking",
-        Route::Products | Route::InventoryCenter | Route::AdjustInventory | Route::BuildAssemblies | Route::PriceLevels => "products",
+        Route::Products | Route::InventoryCenter | Route::AdjustInventory | Route::BuildAssemblies | Route::PriceLevels | Route::Locations => "products",
         Route::Payroll | Route::PayRun(_) | Route::PayLiabilities | Route::PayrollForms | Route::PayrollSettings | Route::PayrollItems | Route::EnterTime => "payroll",
         Route::Reports | Route::Report(_) | Route::MemorizedReports | Route::CustomReports | Route::AuditLog => "reporting",
         Route::Settings | Route::ImportExport | Route::Templates | Route::Help | Route::Calendar | Route::DocCenter => "settings",
