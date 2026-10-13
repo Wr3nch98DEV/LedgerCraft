@@ -395,7 +395,7 @@ fn desk_view(app: &App) -> Element<'_, Message> {
 
 pub fn view(app: &App) -> Element<'_, Message> {
     if app.desktop() { return desk_view(app); }
-    let body = column![layout_section(app), appearance_section(app), company_section(app), users_card(app), email_card(app), file_section(app)].spacing(16);
+    let body = column![layout_section(app), appearance_section(app), company_section(app), closing_section(app), users_card(app), email_card(app), file_section(app)].spacing(16);
     let title = app.term("settings");
     ui::page(ui::h1(title), vec![], container(body).max_width(980).into())
 }

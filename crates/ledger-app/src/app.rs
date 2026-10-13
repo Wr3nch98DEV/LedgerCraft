@@ -102,12 +102,13 @@ pub enum Route {
     Reminders,
     /// QuickBooks Desktop Edit ▸ Find (Ctrl+F): transactions by name, number, amount or date.
     Find,
+    /// Apps / connected apps: what LedgerCraft connects to and how.
+    Apps,
     /// QuickBooks Desktop Enter Time (single activity against a project task).
     EnterTime,
     NewProduct,
     NewAccount,
     Journal,
-    Placeholder(&'static str),
 }
 
 /// A choice in a picker (accounts, tax rates, items, contacts…).
@@ -264,7 +265,7 @@ pub fn parse_route(s: &str) -> Option<Route> {
         "customers" => Route::Customers, "products" => Route::Products, "expenses" => Route::Expenses, "bills" => Route::Bills, "vendors" => Route::Vendors,
         "pos" => Route::PurchaseOrders, "contacts" => Route::Contacts, "contact" => Route::Contact(id(1)?), "banking" => Route::Banking(id(1)), "chart" => Route::Chart,
         "reports" => Route::Reports, "report" => Route::Report(parts.get(1)?.to_string()), "settings" => Route::Settings, "setup" => Route::Setup,
-        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "adjustinventory" => Route::AdjustInventory, "help" => Route::Help, "memreports" => Route::MemorizedReports, "docs" => Route::DocCenter, "payliabilities" => Route::PayLiabilities, "classes" => Route::ClassList, "payitems" => Route::PayrollItems, "othernames" => Route::OtherNames, "financecharges" => Route::FinanceCharges, "templates" => Route::Templates, "pricelevels" => Route::PriceLevels, "printforms" => Route::PrintForms, "payrollforms" => Route::PayrollForms, "favorites" => Route::CustomizeFavorites, "build" => Route::BuildAssemblies, "inventory" => Route::InventoryCenter, "editcontact" => Route::EditContact(id(1)?), "edititem" => Route::EditItem(id(1)?), "editaccount" => Route::EditAccount(id(1)?), "batchinvoices" => Route::BatchInvoices, "banktx" => Route::BankTx(id(1)?), "reminders" => Route::Reminders, "find" => Route::Find, "time" => Route::EnterTime, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
+        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "adjustinventory" => Route::AdjustInventory, "help" => Route::Help, "memreports" => Route::MemorizedReports, "docs" => Route::DocCenter, "payliabilities" => Route::PayLiabilities, "classes" => Route::ClassList, "payitems" => Route::PayrollItems, "othernames" => Route::OtherNames, "financecharges" => Route::FinanceCharges, "templates" => Route::Templates, "pricelevels" => Route::PriceLevels, "printforms" => Route::PrintForms, "payrollforms" => Route::PayrollForms, "favorites" => Route::CustomizeFavorites, "build" => Route::BuildAssemblies, "inventory" => Route::InventoryCenter, "editcontact" => Route::EditContact(id(1)?), "edititem" => Route::EditItem(id(1)?), "editaccount" => Route::EditAccount(id(1)?), "batchinvoices" => Route::BatchInvoices, "banktx" => Route::BankTx(id(1)?), "reminders" => Route::Reminders, "find" => Route::Find, "apps" => Route::Apps, "time" => Route::EnterTime, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
         _ => return None,
     })
 }
@@ -525,6 +526,7 @@ impl App {
             Route::ClassList => call("tracking.list", json!({})),
             Route::PayrollItems => call("payroll.settings", json!({})),
             Route::Reminders => crate::desktop::load_reminders(self),
+            Route::Apps => { self.data = Some(json!({})); Task::none() }
             Route::Find => { self.data = Some(json!({"rows": null})); Task::none() }
             Route::BatchInvoices => call("contacts.list", json!({"filter": "customers"})),
             Route::Templates => call("branding.list", json!({})),
@@ -585,7 +587,7 @@ impl App {
             Route::Payroll | Route::PayRun(_) | Route::Taxes | Route::TaxReturn(_) | Route::Projects | Route::Mileage => people::load(self),
             Route::Setup => setup::load(self),
             Route::Settings => crate::settings::load(self),
-            Route::Placeholder(_) | Route::Login => Task::none(),
+            Route::Login => Task::none(),
         }
     }
 

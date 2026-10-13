@@ -123,6 +123,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::BatchInvoices => crate::desktop::batch_invoices(app),
         Route::Reminders => crate::desktop::reminders(app),
         Route::Find => crate::desktop::find(app),
+        Route::Apps => apps(app),
         Route::EnterTime => crate::desktop::enter_time(app),
         Route::Doc { .. } => doc::view(app),
         Route::ReceivePayment(_) | Route::PayBills | Route::Spend(_) | Route::Check(_) | Route::BankTx(_) | Route::Deposit => payments::view(app),
@@ -134,20 +135,27 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::TaxReturn(_) => people::tax_return(app),
         Route::Projects => people::projects(app),
         Route::Mileage => people::mileage(app),
-        Route::Placeholder(name) => placeholder(app, name),
         Route::Setup => setup::view(app),
         Route::Login => setup::login(app),
     }
 }
 
-fn placeholder<'a>(_app: &'a App, name: &'a str) -> Element<'a, Message> {
-    ui::page(ui::h1(name.to_string()), vec![], ui::card(column![
-        ui::h2("Not in the native app yet"),
-        ui::muted(format!("{name} works in the current web version (start.bat web) and is scheduled for a later phase of the native rewrite. Your data is shared, so anything you do there shows up here.")),
-        ui::gap(6.0),
-        ui::btn("Back", Some(Message::Back)),
-    ].spacing(8)))
+/// Apps: what LedgerCraft connects to, and where each connection is set up.
+fn apps(app: &App) -> Element<'_, Message> {
+    let card = |title: &'static str, body: &'static str, action: Option<(&'static str, Message)>| -> Element<'_, Message> {
+        let mut c = column![ui::h2(title), ui::muted(body)].spacing(6);
+        if let Some((label, m)) = action { c = c.push(row![ui::btn(label, Some(m))]); }
+        ui::card(c)
+    };
+    ui::page(ui::h1(if app.skin == Skin::Xero { "Connected apps" } else { "Apps" }), vec![], column![
+        card("Bank statements", "Import OFX, QIF, CSV or QBO statement files; bank rules and suggested matches do the rest. Live bank feeds need an aggregator plugin (Basiq, Plaid, GoCardless).", Some(("Open banking", Message::Nav(Route::Banking(None))))),
+        card("Email", "Send invoices, statements and reminders from your own mail server or a Gmail app password.", Some(("Email settings", Message::Nav(Route::Settings)))),
+        card("Online payments", "Pay-now buttons on invoices come from a payment-gateway plugin (Stripe, PayPal…) — see PLUGINS.md in the LedgerCraft folder.", None),
+        card("REST API", "Other software can read and write your books through LedgerCraft's API with a token — see API.md.", None),
+        card("Import your books", "Bring customers, suppliers, items, the chart of accounts and history across from your previous software (CSV import today; direct imports are on the plan).", Some(("Import", Message::Nav(Route::Settings)))),
+    ].spacing(14).max_width(900).into())
 }
+
 
 // ===================== QuickBooks-style =====================
 
@@ -163,6 +171,7 @@ fn qb_section(r: &Route) -> &'static str {
         Route::Reports | Route::Report(_) => "reports",
         Route::Payroll | Route::PayRun(_) => "payroll",
         Route::Taxes | Route::TaxReturn(_) => "taxes",
+        Route::Settings => "accountant",
         Route::Projects => "projects",
         Route::Mileage => "mileage",
         Route::Chart | Route::Journal | Route::Reconcile | Route::NewAccount => "accounting",
@@ -170,12 +179,17 @@ fn qb_section(r: &Route) -> &'static str {
         Route::Calendar => "dashboard",
         Route::NewContact(true) | Route::NewProduct => "sales",
         Route::NewContact(false) => "expenses",
-        Route::Placeholder(p) => match *p { "Projects" => "projects", "Payroll" => "payroll", "Taxes" => "taxes", "Mileage" => "mileage", "My accountant" => "accountant", "Apps" => "apps", _ => "" },
-        _ => "",
+        Route::Apps => "apps",
+        _ => {
+            // Anything else: the sidebar section the registry puts it in.
+            let here = format!("{:?}", Message::Nav(r.clone()));
+            crate::features::FEATURES.iter().find(|f| format!("{:?}", (f.go)()) == here).map(|f| f.online.0)
+                .filter(|p| matches!(*p, "sales" | "expenses" | "payroll" | "taxes" | "reports" | "accounting")).unwrap_or("")
+        }
     }
 }
 
-fn qb_sidebar(app: &App) -> Element<'_, Message> {
+fn qb_sidebar<'a>(app: &'a App) -> Element<'a, Message> {
     let k = t();
     let sec = qb_section(&app.route);
     let item = |ic: &'static str, label: &'static str, key: &'static str, route: Route, expandable: bool| -> Element<'_, Message> {
@@ -187,33 +201,36 @@ fn qb_sidebar(app: &App) -> Element<'_, Message> {
             row![container(Space::new()).width(3).height(36).style(move |_: &iced::Theme| container::Style { background: Some(iced::Background::Color(k.nav_active)), ..Default::default() }), b].align_y(Alignment::Center).into()
         } else { row![Space::new().width(3), b].into() }
     };
-    let sub = |label: &'static str, route: Route| -> Element<'_, Message> {
-        let active = app.route == route;
-        button(text(label).size(13).font(if active { BOLD } else { iced::Font::DEFAULT })).style(theme::nav_item(active)).padding(Padding { top: 6.0, bottom: 6.0, left: 45.0, right: 10.0 }).width(Fill).on_press(Message::Nav(route)).into()
+    let here = format!("{:?}", Message::Nav(app.route.clone()));
+    let sub = |label: &'static str, msg: Message| -> Element<'_, Message> {
+        let active = format!("{msg:?}") == here;
+        button(text(label).size(13).font(if active { BOLD } else { iced::Font::DEFAULT })).style(theme::nav_item(active)).padding(Padding { top: 6.0, bottom: 6.0, left: 45.0, right: 10.0 }).width(Fill).on_press(msg).into()
+    };
+    // Each expandable section lists its features from the registry.
+    let subs = |nav: iced::widget::Column<'a, Message>, key: &str| -> iced::widget::Column<'a, Message> {
+        let mut nav = nav;
+        if sec == key { for (label, m) in crate::features::online(key) { if let Some(m) = m { nav = nav.push(sub(label, m)); } } }
+        nav
     };
     let mut nav = column![].spacing(2);
     nav = nav.push(item("home", "Dashboard", "dashboard", Route::Dashboard, false));
     nav = nav.push(item("bank", "Banking", "banking", Route::Banking(None), false));
     nav = nav.push(item("sales", "Sales", "sales", Route::AllSales, true));
-    if sec == "sales" {
-        nav = nav.push(sub("All sales", Route::AllSales)).push(sub("Invoices", Route::Invoices)).push(sub("Estimates", Route::Quotes))
-            .push(sub("Customers", Route::Customers)).push(sub("Products and services", Route::Products));
-    }
+    nav = subs(nav, "sales");
     nav = nav.push(item("expenses", "Expenses", "expenses", Route::Expenses, true));
-    if sec == "expenses" {
-        nav = nav.push(sub("Expenses", Route::Expenses)).push(sub("Bills", Route::Bills)).push(sub("Vendors", Route::Vendors)).push(sub("Purchase orders", Route::PurchaseOrders));
-    }
+    nav = subs(nav, "expenses");
     nav = nav.push(item("projects", "Projects", "projects", Route::Projects, false));
-    nav = nav.push(item("payroll", "Payroll", "payroll", Route::Payroll, false));
-    nav = nav.push(item("reports", "Reports", "reports", Route::Reports, false));
-    nav = nav.push(item("taxes", "Taxes", "taxes", Route::Taxes, false));
+    nav = nav.push(item("payroll", "Payroll", "payroll", Route::Payroll, true));
+    nav = subs(nav, "payroll");
+    nav = nav.push(item("reports", "Reports", "reports", Route::Reports, true));
+    nav = subs(nav, "reports");
+    nav = nav.push(item("taxes", "Taxes", "taxes", Route::Taxes, true));
+    nav = subs(nav, "taxes");
     nav = nav.push(item("mileage", "Mileage", "mileage", Route::Mileage, false));
     nav = nav.push(item("accounting", "Accounting", "accounting", Route::Chart, true));
-    if sec == "accounting" {
-        nav = nav.push(sub("Chart of accounts", Route::Chart)).push(sub("Reconcile", Route::Reconcile));
-    }
-    nav = nav.push(item("users", "My accountant", "accountant", Route::Placeholder("My accountant"), false));
-    nav = nav.push(item("apps", "Apps", "apps", Route::Placeholder("Apps"), false));
+    nav = subs(nav, "accounting");
+    nav = nav.push(item("users", "My accountant", "accountant", Route::Settings, false));
+    nav = nav.push(item("apps", "Apps", "apps", Route::Apps, false));
 
     let brand = row![
         container(text("L").size(15).font(BOLD).color(k.accent_ink)).width(28).height(28).center_x(28).center_y(28)
@@ -258,7 +275,7 @@ fn qb_topbar(app: &App) -> Element<'_, Message> {
         text(app.org_name()).size(15).font(BOLD),
         ui::hspace(),
         search,
-        top_icon("help", Message::Nav(Route::Placeholder("Help"))),
+        top_icon("help", Message::Nav(Route::Help)),
         top_icon("bell", Message::Nav(Route::Dashboard)),
         top_icon(if app.dark { "sun" } else { "moon" }, Message::ToggleTheme),
         top_icon("gear", Message::ToggleGear),
@@ -289,29 +306,45 @@ fn doc_route(kind: &str) -> Option<Message> { Some(Message::Nav(Route::Doc { kin
 
 fn new_menu(app: &App) -> Element<'_, Message> {
     let body: Element<Message> = match app.skin {
-        Skin::QuickBooks => row![
-            menu_col("Customers", vec![("Invoice", doc_route("ACCREC")), ("Receive payment", Some(Message::Nav(Route::ReceivePayment(None)))), ("Estimate", doc_route("QUOTE")),
-                ("Credit memo", doc_route("ACCRECCREDIT")), ("Sales receipt", doc_route("SALESRECEIPT")), ("Refund receipt", None), ("Delayed credit", doc_route("DELAYEDCREDIT")), ("Delayed charge", doc_route("DELAYEDCHARGE"))]),
-            menu_col("Vendors", vec![("Expense", Some(Message::Nav(Route::Spend(None)))), ("Check", Some(Message::Nav(Route::Check(None)))), ("Bill", doc_route("ACCPAY")), ("Pay bills", Some(Message::Nav(Route::PayBills))),
-                ("Purchase order", doc_route("PO")), ("Vendor credit", doc_route("ACCPAYCREDIT")), ("Credit card credit", None), ("Print checks", None)]),
-            menu_col("Employees", vec![("Payroll", Some(Message::Nav(Route::Payroll))), ("Single time activity", None), ("Weekly timesheet", None)]),
-            menu_col("Other", vec![("Bank deposit", Some(Message::Nav(Route::Deposit))), ("Transfer", Some(Message::Nav(Route::Transfer))), ("Journal entry", Some(Message::Nav(Route::Journal))), ("Statement", None), ("Inventory qty adjustment", None), ("Pay down credit card", None)]),
-        ].spacing(18).into(),
-        Skin::Xero => column![
-            menu_col("Create new", vec![("Invoice", doc_route("ACCREC")), ("Bill", doc_route("ACCPAY")), ("Contact", Some(Message::Nav(Route::NewContact(true)))), ("Quote", doc_route("QUOTE")),
-                ("Purchase order", doc_route("PO")), ("Credit note", doc_route("ACCRECCREDIT")), ("Spend money", Some(Message::Nav(Route::Spend(None)))), ("Manual journal", Some(Message::Nav(Route::Journal)))]),
-        ].into(),
+        Skin::QuickBooks => {
+            let col = |title: &'static str, extra: Vec<(&'static str, Option<Message>)>| { let mut v = crate::features::online(&format!("new:{title}")); v.extend(extra); menu_col(title, v) };
+            row![
+                col("Customers", vec![("Refund receipt", doc_route("ACCRECCREDIT"))]),
+                col("Vendors", vec![]),
+                col("Employees", vec![("Payroll", Some(Message::Nav(Route::Payroll))), ("Weekly timesheet", Some(Message::Nav(Route::EnterTime)))]),
+                col("Other", vec![("Pay down credit card", Some(Message::Nav(Route::Transfer))), ("Contact", Some(Message::Nav(Route::NewContact(true))))]),
+            ].spacing(18).into()
+        }
+        Skin::Xero => {
+            let mut items = crate::features::xero("new");
+            items.insert(2, ("Contact", Some(Message::Nav(Route::NewContact(true)))));
+            columns_of("Create new", items, 9)
+        }
     };
-    let foot = if app.skin == Skin::QuickBooks { ui::muted("Greyed-out items are planned for the next phase (see UI_REWRITE_PLAN.md).") } else { Space::new().into() };
-    container(column![body, foot].spacing(10)).padding(16).style(theme::menu).into()
+    container(body).padding(16).style(theme::menu).into()
 }
 
 fn gear_menu(app: &App) -> Element<'_, Message> {
     let other = if app.skin == Skin::QuickBooks { Skin::Xero } else { Skin::QuickBooks };
+    let profile_items = vec![
+            (if other == Skin::Xero { "Switch to Xero-style layout" } else { "Switch to QuickBooks Online-style layout" }, Some(Message::SetSkin(other))),
+            ("Switch to QuickBooks Desktop-style layout", Some(Message::SetLayout(crate::theme::Layout::Desktop))),
+            (if app.dark { "Light mode" } else { "Dark mode" }, Some(Message::ToggleTheme)),
+            ("Switch company", Some(Message::Nav(Route::Setup))),
+        ];
+    if app.skin == Skin::Xero {
+        // Xero's organisation settings menu.
+        let body = row![columns_of("Settings", crate::features::xero("settings"), 10), menu_col("Profile", profile_items)].spacing(18);
+        return container(body).padding(16).style(theme::menu).into();
+    }
+    let mut lists = crate::features::online("gear:Lists");
+    lists.insert(0, ("Products and services", Some(Message::Nav(Route::Products))));
+    let mut company = crate::features::online("gear:Your company");
+    company.push(("Chart of accounts", Some(Message::Nav(Route::Chart))));
     let body = row![
-        menu_col("Your company", vec![("Account and settings", Some(Message::Nav(Route::Settings))), ("Manage users", Some(Message::Nav(Route::Settings))), ("Custom form styles", Some(Message::Nav(Route::Settings))), ("Chart of accounts", Some(Message::Nav(Route::Chart)))]),
-        menu_col("Lists", vec![("All lists", None), ("Products and services", Some(Message::Nav(Route::Products))), ("Recurring transactions", None), ("Attachments", None)]),
-        menu_col("Tools", vec![("Import data", None), ("Export data", None), ("Reconcile", Some(Message::Nav(Route::Reconcile))), ("Budgeting", None), ("Audit log", None)]),
+        menu_col("Your company", company),
+        menu_col("Lists", lists),
+        menu_col("Tools", crate::features::online("gear:Tools")),
         menu_col("Profile", vec![
             (if other == Skin::Xero { "Switch to Xero-style layout" } else { "Switch to QuickBooks Online-style layout" }, Some(Message::SetSkin(other))),
             ("Switch to QuickBooks Desktop-style layout", Some(Message::SetLayout(crate::theme::Layout::Desktop))),
@@ -340,18 +373,20 @@ fn xero_section(r: &Route) -> &'static str {
     }
 }
 
-fn xero_menu_left(m: &str) -> f32 { match m { "business" => 250.0, "accounting" => 345.0, "contacts" => 540.0, _ => 200.0 } }
+fn xero_menu_left(m: &str) -> f32 { match m { "business" => 250.0, "accounting" => 345.0, "payroll" => 460.0, "contacts" => 555.0, _ => 200.0 } }
+
+/// A menu with long lists split into side-by-side columns.
+fn columns_of<'a>(title: &'a str, items: Vec<(&'a str, Option<Message>)>, per: usize) -> Element<'a, Message> {
+    let mut r = row![].spacing(14);
+    for (n, chunk) in items.chunks(per).enumerate() { r = r.push(menu_col(if n == 0 { title } else { " " }, chunk.to_vec())); }
+    r.into()
+}
 
 fn xero_menu(_app: &App, m: &'static str) -> Element<'static, Message> {
-    let items: Vec<(&str, Option<Message>)> = match m {
-        "business" => vec![("Invoices", Some(Message::Nav(Route::Invoices))), ("Quotes", Some(Message::Nav(Route::Quotes))), ("Credit notes", Some(Message::Nav(Route::CreditNotes))),
-            ("Bills to pay", Some(Message::Nav(Route::Bills))), ("Purchase orders", Some(Message::Nav(Route::PurchaseOrders))), ("Products and services", Some(Message::Nav(Route::Products))),
-            ("Projects", Some(Message::Nav(Route::Projects))), ("Expense claims", Some(Message::Nav(Route::Mileage)))],
-        "accounting" => vec![("Bank accounts", Some(Message::Nav(Route::Banking(None)))), ("Reconcile account", Some(Message::Nav(Route::Reconcile))), ("Reports", Some(Message::Nav(Route::Reports))), ("Chart of accounts", Some(Message::Nav(Route::Chart))),
-            ("Manual journal", Some(Message::Nav(Route::Journal))), ("Tax returns", Some(Message::Nav(Route::Taxes))), ("Fixed assets", None)],
-        _ => vec![("All contacts", Some(Message::Nav(Route::Contacts))), ("Customers", Some(Message::Nav(Route::Customers))), ("Suppliers", Some(Message::Nav(Route::Vendors)))],
-    };
-    container(menu_col(match m { "business" => "Business", "accounting" => "Accounting", _ => "Contacts" }, items)).padding(14).style(theme::menu).into()
+    let mut items = crate::features::xero(m);
+    if m == "contacts" { items.insert(0, ("All contacts", Some(Message::Nav(Route::Contacts)))); }
+    let title = match m { "business" => "Business", "accounting" => "Accounting", "payroll" => "Payroll", _ => "Contacts" };
+    container(columns_of(title, items, 10)).padding(14).style(theme::menu).into()
 }
 
 fn xero_topbar(app: &App) -> Element<'_, Message> {
@@ -372,7 +407,7 @@ fn xero_topbar(app: &App) -> Element<'_, Message> {
         tab("Dashboard", "dashboard", Message::Nav(Route::Dashboard), false),
         tab("Business", "business", Message::OpenMenu(Some("business")), true),
         tab("Accounting", "accounting", Message::OpenMenu(Some("accounting")), true),
-        tab("Payroll", "payroll", Message::Nav(Route::Payroll), false),
+        tab("Payroll", "payroll", Message::OpenMenu(Some("payroll")), true),
         tab("Contacts", "contacts", Message::OpenMenu(Some("contacts")), true),
         ui::hspace(),
         button(row![icon("plus", 15.0, k.accent_ink), text("New").size(14).font(BOLD)].spacing(6).align_y(Alignment::Center)).style(theme::primary).padding([6, 12]).on_press(Message::ToggleNew),

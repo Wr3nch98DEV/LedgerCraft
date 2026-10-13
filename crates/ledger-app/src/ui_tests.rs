@@ -1745,7 +1745,6 @@ fn desktop_every_menu_item_opens_a_screen() {
             let t = app.update(Message::Nav(r.clone()));
             settle(&mut app, t);
             assert!(app.error.is_none(), "{menu} ▸ {label}: {:?}", app.error);
-            assert!(!matches!(app.route, Route::Placeholder(_)), "{menu} ▸ {label} is a placeholder");
             // Render with the data the screen loads (or while loading).
             let _g = sim_lock();
             let _ui = simulator(app.view());
@@ -2976,4 +2975,85 @@ fn desktop_find_window() {
     let rows = app.data.as_ref().unwrap()["rows"].as_array().unwrap().clone();
     assert!(!rows.is_empty() && rows.iter().all(|r| r["date"] == inv["date"]), "{:?} {:?} {:?} {:?}", inv["date"], app.desk.find_from, app.desk.find_text, rows.iter().map(|r| r["date"].clone()).collect::<Vec<_>>());
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Step 1 of NEXT_STEPS_PLAN: every feature in the registry is reachable from each layout's own
+/// navigation, and clicking it does what the registry says.
+#[test]
+fn every_feature_in_every_layout() {
+    use crate::features::FEATURES;
+    use crate::theme::Layout;
+    let (mut app, dir) = desktop_app("registry");
+    // QuickBooks Desktop: the named menu entry exists and is enabled.
+    for f in FEATURES {
+        let items = crate::desktop::menu_items(&app, f.desktop.0);
+        let hit = items.iter().find(|(l, _, _)| l.trim() == f.desktop.1);
+        assert!(hit.is_some_and(|h| h.2.is_some()), "Desktop: {} ▸ {} missing or disabled (feature {})", f.desktop.0, f.desktop.1, f.id);
+    }
+    let mut ids = std::collections::HashSet::new();
+    for f in FEATURES { assert!(ids.insert(f.id), "duplicate feature id {}", f.id); }
+    for layout in [Layout::Online, Layout::Xero] {
+        let t = app.update(Message::SetLayout(layout)); settle(&mut app, t);
+        for f in FEATURES {
+            let (place, label) = if layout == Layout::Online { f.online } else { f.xero };
+            // Open the place the feature lives in.
+            app.new_menu = false; app.gear_menu = false; app.menu = None;
+            app.route = Route::Dashboard; app.data = None;
+            match (layout, place) {
+                (_, "top") => {}
+                (_, "new") => app.new_menu = true,
+                (_, "settings") => app.gear_menu = true,
+                (Layout::Online, p) if p.starts_with("new:") => app.new_menu = true,
+                (Layout::Online, p) if p.starts_with("gear:") => app.gear_menu = true,
+                (Layout::Online, sec) => app.route = match sec { "sales" => Route::AllSales, "expenses" => Route::Expenses, "payroll" => Route::Payroll, "taxes" => Route::Taxes,
+                    "reports" => Route::Reports, "accounting" => Route::Chart, other => panic!("{}: unknown Online place {other}", f.id) },
+                (_, m) => app.menu = crate::desktop::MENUS.iter().copied().chain(["business", "accounting", "payroll", "contacts"]).find(|x| *x == m),
+            }
+            let msgs = {
+                let _g = sim_lock();
+                let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1600.0, 1400.0), app.view());
+                ui.click(label).unwrap_or_else(|e| panic!("{layout:?}: {place} ▸ {label} not found (feature {}): {e:?}", f.id));
+                ui.into_messages().collect::<Vec<_>>()
+            };
+            assert!(!msgs.is_empty(), "{layout:?}: {place} ▸ {label} is disabled (feature {})", f.id);
+            if place != "top" {
+                let want = format!("{:?}", (f.go)());
+                assert!(msgs.iter().any(|m| format!("{m:?}") == want), "{layout:?}: {place} ▸ {label} did {msgs:?}, expected {want}");
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Snapshot a layout with a menu open: LC_LAYOUT=xero LC_OPEN=business (or new / gear) LC_ROUTE=dashboard
+#[test]
+#[ignore]
+fn render_layout_menu() {
+    use crate::theme::Layout;
+    let (mut app, dir) = desktop_app("menu-shot");
+    let layout = match std::env::var("LC_LAYOUT").as_deref() { Ok("xero") => Layout::Xero, Ok("online") => Layout::Online, _ => Layout::Desktop };
+    let t = app.update(Message::SetLayout(layout)); settle(&mut app, t);
+    if std::env::var("LC_LIGHT").is_ok() { app.dark = false; }
+    let route = crate::app::parse_route(&std::env::var("LC_ROUTE").unwrap_or_else(|_| "dashboard".into())).unwrap();
+    let t = app.update(Message::Nav(route)); settle(&mut app, t);
+    match std::env::var("LC_OPEN").as_deref() {
+        Ok("new") => app.new_menu = true,
+        Ok("gear") => app.gear_menu = true,
+        Ok(m) => app.menu = ["business", "accounting", "payroll", "contacts"].into_iter().find(|x| *x == m),
+        _ => {}
+    }
+    let _ = std::fs::remove_file(std::env::temp_dir().join("lc-route-wgpu.png"));
+    let _g = sim_lock();
+    let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
+    ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join("lc-route.png")).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn xero_business_menu_order_lists_everything() {
+    let order: Vec<&str> = crate::features::xero("business").into_iter().map(|x| x.0).collect();
+    assert_eq!(&order[..3], &["Sales overview", "Invoices", "Quotes"]);
+    // Every Business entry has a place in Xero's order (none fall to the end unsorted).
+    let all = crate::features::FEATURES.iter().filter(|f| f.xero.0 == "business").count();
+    assert_eq!(order.len(), all);
 }
