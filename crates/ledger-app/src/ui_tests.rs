@@ -4031,3 +4031,21 @@ fn inventory_locations_in_the_app() {
     assert!(!click_fails(&app, "Back store"));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn choose_fifo_costing_in_settings() {
+    let (mut app, dir) = desktop_app("fifo");
+    // Desktop: Preferences ▸ Items & Inventory.
+    let t = app.update(Message::Nav(Route::Settings)); settle(&mut app, t);
+    let _ = app.update(Message::Settings(crate::settings::Msg::Cat("Items & Inventory")));
+    press(&mut app, "First in, first out (FIFO)");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert_eq!(app.setting("inventory_costing"), "FIFO");
+    // QuickBooks Online: Account and settings ▸ Advanced.
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Online)); settle(&mut app, t);
+    let t = app.update(Message::Nav(Route::Settings)); settle(&mut app, t);
+    press(&mut app, "Advanced");
+    press(&mut app, "Average cost");
+    assert_eq!(app.setting("inventory_costing"), "AVERAGE");
+    let _ = std::fs::remove_dir_all(dir);
+}

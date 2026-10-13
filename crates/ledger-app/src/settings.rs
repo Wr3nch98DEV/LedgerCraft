@@ -79,6 +79,8 @@ pub enum Msg {
     Cat(&'static str),
     /// Xero: back to the Organisation settings tiles.
     Tiles,
+    /// Inventory costing method: AVERAGE or FIFO.
+    Costing(&'static str), CostingSaved(Reply),
     Edit, Field(usize, String), Save, Saved(Result<Value, String>), Cancel,
     Users(Reply), AddUser, UName(String), UEmail(String), UPassword(String), URole(RoleOpt), SaveUser, UserSaved(Reply), SetActive(i64, bool),
     TfaBegin, TfaBegun(Reply), TfaCode(String), TfaConfirm, TfaDisable, TfaDone(Reply, &'static str), LockEdit, LockField(usize, String), LockSave, LockSaved(Reply), EditSmtp, Smtp(usize, String), SmtpTls(Security), SaveSmtp, SmtpSaved(Reply), TestTo(String), SendTest, TestSent(Reply),
@@ -94,6 +96,11 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
     match m {
         Msg::Cat(c) => { app.settings.cat = Some(c); Task::none() }
         Msg::Tiles => { app.settings.cat = None; Task::none() }
+        Msg::Costing(m) => app.be.call("settings.update", json!({"inventory_costing": m}), |r| Message::Settings(Msg::CostingSaved(r))),
+        Msg::CostingSaved(r) => match r {
+            Ok(_) => { let t = app.toast("Costing method saved", false); Task::batch([t, app.be.call("session.get", json!({}), Message::Session)]) }
+            Err(e) => app.toast(e, true),
+        },
         Msg::Edit => { app.settings.values = FIELDS.iter().map(|(k, _)| app.setting(k)).collect(); app.settings.editing = true; Task::none() }
         Msg::Field(n, v) => { if let Some(x) = app.settings.values.get_mut(n) { *x = v; } Task::none() }
         Msg::Cancel => { app.settings.tfa = None; app.settings.lock = None; app.settings.editing = false; app.settings.adding = false; app.settings.smtp_editing = false; Task::none() }
@@ -407,6 +414,19 @@ fn company_section(app: &App) -> Element<'_, Message> {
 }
 
 /// Accounting ▸ Set Closing Date: transactions on or before it can't be added, changed or deleted.
+/// How stock is costed when it's sold: average cost, or first in, first out.
+fn inventory_section(app: &App) -> Element<'_, Message> {
+    let fifo = app.setting("inventory_costing") == "FIFO";
+    let opt = |label: &'static str, key: &'static str, on: bool| -> Element<'_, Message> {
+        button(text(label).size(14)).style(if on { theme::primary } else { theme::secondary }).padding([7, 14]).on_press(Message::Settings(Msg::Costing(key))).into()
+    };
+    ui::card(column![
+        ui::h2("Inventory costing"),
+        row![opt("Average cost", "AVERAGE", !fifo), opt("First in, first out (FIFO)", "FIFO", fifo)].spacing(8),
+        ui::muted(if fifo { "Sales take the cost of the oldest stock first. Changing the method affects sales from now on." } else { "Sales take the average cost of the stock on hand. Changing the method affects sales from now on." }),
+    ].spacing(10))
+}
+
 fn closing_section(app: &App) -> Element<'_, Message> {
     let k = t();
     let all = app.setting("lock_date_all");
@@ -440,7 +460,7 @@ fn file_section(_app: &App) -> Element<'_, Message> {
 }
 
 /// QuickBooks Desktop Preferences categories (those LedgerCraft has settings for are enabled).
-pub const DESK_CATS: [&str; 12] = ["Accounting", "Bills", "Checking", "Desktop View", "General", "Payments", "Reports & Graphs", "Sales & Customers", "Sales Tax", "Send Forms", "Tax: 1099", "Users & Roles"];
+pub const DESK_CATS: [&str; 13] = ["Accounting", "Bills", "Checking", "Desktop View", "General", "Items & Inventory", "Payments", "Reports & Graphs", "Sales & Customers", "Sales Tax", "Send Forms", "Tax: 1099", "Users & Roles"];
 
 fn desk_view(app: &App) -> Element<'_, Message> {
     let k = t();
@@ -454,6 +474,7 @@ fn desk_view(app: &App) -> Element<'_, Message> {
     let body: Element<Message> = match cat {
         "Desktop View" => column![layout_section(app), appearance_section(app)].spacing(14).into(),
         "Accounting" => column![closing_section(app), company_section(app)].spacing(14).into(),
+        "Items & Inventory" => inventory_section(app),
         "General" => column![company_section(app), file_section(app)].spacing(14).into(),
         "Send Forms" => email_card(app),
         "Users & Roles" => column![users_card(app), security_card(app)].spacing(14).into(),
@@ -509,7 +530,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             let content: Element<Message> = match cur {
                 "Sales" => column![email_card(app)].spacing(16).into(),
                 "Users" => column![users_card(app), security_card(app)].spacing(16).into(),
-                "Advanced" => column![closing_section(app), file_section(app)].spacing(16).into(),
+                "Advanced" => column![closing_section(app), inventory_section(app), file_section(app)].spacing(16).into(),
                 "Layout" => column![layout_section(app), appearance_section(app)].spacing(16).into(),
                 _ => column![company_section(app)].spacing(16).into(),
             };
@@ -521,7 +542,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
                     let content: Element<Message> = match cur {
                         "Users" => column![users_card(app), security_card(app)].spacing(16).into(),
                         "Email settings" => email_card(app),
-                        "Financial settings" => closing_section(app),
+                        "Financial settings" => column![closing_section(app), inventory_section(app)].spacing(16).into(),
                         "Layout and appearance" => column![layout_section(app), appearance_section(app)].spacing(16).into(),
                         "Data and backups" => file_section(app),
                         _ => company_section(app),

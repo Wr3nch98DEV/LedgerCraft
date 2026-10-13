@@ -185,7 +185,7 @@ The first task of step 4 is to verify this column feature by feature; the table 
 | Feature | From | Now |
 |---|---|---|
 | Stock, reorder points, low-stock alerts, valuation | all | Have |
-| FIFO and LIFO costing (not only average) | QB, Sage | Missing |
+| FIFO and LIFO costing (not only average) | QB, Sage | Have: average or FIFO, chosen in settings (LIFO isn't allowed under IFRS, so it's left out) |
 | Multiple locations / warehouses / bins | all | Have: locations (stock per location, transfers, a location on bills/invoices/credits, Stock by Location report); bins still to add |
 | Lot and serial numbers, expiry | QB, Sage, Acumatica | Missing |
 | Landed costs (freight, duty, insurance) | QB, Acumatica | Missing |

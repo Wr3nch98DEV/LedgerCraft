@@ -105,7 +105,38 @@ impl Ledger {
         let (qoh, cost, code): (i64, i64, String) = self.conn.query_row("SELECT qty_on_hand_e4, total_cost, code FROM items WHERE id = ?1", [item_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         if qty_e4 > qoh { return invalid(format!("not enough stock of {code}: {} on hand", money::fmt_fixed(qoh, 4).trim_end_matches('0').trim_end_matches('.'))); }
         if qty_e4 == qoh { return Ok(cost); }
+        if self.setting_or("inventory_costing", "AVERAGE")? == "FIFO" { return self.fifo_cost_out(item_id, qty_e4); }
         Ok(money::div_round(cost as i128 * qty_e4 as i128, qoh as i128) as i64)
+    }
+
+    /// First in, first out: the cost of the next `qty_e4` units after what has already gone out,
+    /// taken from the stock layers in the order they came in. (Moves between locations don't
+    /// change the order.)
+    fn fifo_cost_out(&self, item_id: i64, qty_e4: i64) -> Result<i64> {
+        let moves: Vec<(i64, i64)> = {
+            let mut st = self.conn.prepare("SELECT qty_e4, cost FROM inventory_movements WHERE item_id = ?1 AND source_type <> 'TRANSFER' ORDER BY date, id")?;
+            st.query_map([item_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let consumed: i64 = moves.iter().filter(|m| m.0 < 0).map(|m| -m.0).sum();
+        let (mut skip, mut need, mut cost) = (consumed, qty_e4, 0i64);
+        for (q, c) in moves.into_iter().filter(|m| m.0 > 0) {
+            let at = |n: i64| money::div_round(c as i128 * n as i128, q as i128) as i64;
+            let used = skip.min(q);
+            skip -= used;
+            let avail = q - used;
+            if avail == 0 { continue; }
+            let take = need.min(avail);
+            // Cost of units [used, used+take) of this layer, without rounding drift.
+            cost += at(used + take) - at(used);
+            need -= take;
+            if need == 0 { break; }
+        }
+        if need > 0 {
+            // Shouldn't happen (quantity on hand was checked); fall back to the average for the rest.
+            let (qoh, total): (i64, i64) = self.conn.query_row("SELECT qty_on_hand_e4, total_cost FROM items WHERE id = ?1", [item_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            if qoh > 0 { cost += money::div_round(total as i128 * need as i128, qoh as i128) as i64; }
+        }
+        Ok(cost)
     }
 
     pub fn record_movement(&self, item_id: i64, date: &str, qty_e4: i64, cost: i64, source_type: &str, source_id: Option<i64>, journal_id: Option<i64>) -> Result<()> {

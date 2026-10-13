@@ -916,3 +916,22 @@ fn inventory_locations_receive_transfer_and_sell() {
     assert_eq!(r["sections"][0]["rows"][0]["values"], serde_json::json!([200_000, 750_000, 950_000]));
     assert_invariants(&l);
 }
+
+#[test]
+fn fifo_costing() {
+    let l = org();
+    l.update_settings(&serde_json::json!({"inventory_costing": "FIFO"})).unwrap();
+    let item = l.create_item(&ItemInput { code: "NUT".into(), name: "Nut".into(), is_tracked: true, sale_price: Some("20".into()), sale_account_id: Some(acct(&l, "200")),
+        purchase_account_id: Some(acct(&l, "310")), purchase_price: Some("5".into()), ..Default::default() }).unwrap();
+    for (date, price) in [("2026-06-01", "5"), ("2026-06-02", "7")] {
+        l.save_document(None, &DocInput { kind: "ACCPAY".into(), contact_name: Some("Supplier".into()), date: date.into(), line_amount_type: Some("NOTAX".into()),
+            lines: vec![LineInput { item_id: Some(item), quantity: Some("10".into()), unit_price: Some(price.into()), ..Default::default() }], status: Some("AUTHORISED".into()), ..Default::default() }).unwrap();
+    }
+    assert_eq!(l.inventory_cost_out(item, 150_000).unwrap(), 8_500, "10 @ 5 then 5 @ 7");
+    l.save_document(None, &DocInput { kind: "ACCREC".into(), contact_name: Some("Acme".into()), date: "2026-06-03".into(), line_amount_type: Some("NOTAX".into()),
+        lines: vec![LineInput { item_id: Some(item), quantity: Some("15".into()), unit_price: Some("20".into()), ..Default::default() }], status: Some("AUTHORISED".into()), ..Default::default() }).unwrap();
+    // The last 5 are the 7.00 ones.
+    assert_eq!(l.get_item(item).unwrap()["total_cost"].as_i64().unwrap(), 3_500);
+    assert_eq!(l.inventory_cost_out(item, 50_000).unwrap(), 3_500);
+    assert_invariants(&l);
+}
