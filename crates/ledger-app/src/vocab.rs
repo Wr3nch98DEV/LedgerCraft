@@ -1,9 +1,35 @@
 //! Terminology per layout. Screens ask for a concept and get the word each product uses.
 
 use crate::theme::Skin;
+use std::cell::Cell;
+
+thread_local! { static ACUMATICA: Cell<bool> = const { Cell::new(false) }; }
+
+/// MYOB Acumatica-style shares the QuickBooks skin (Customers, Vendors, Bills) but has its own
+/// words for screens, buttons and statuses. The view publishes which layout is showing.
+pub fn set_acumatica(on: bool) { ACUMATICA.with(|c| c.set(on)); }
+pub fn acumatica() -> bool { ACUMATICA.with(|c| c.get()) }
+
+/// Acumatica's words, where they differ from QuickBooks'.
+fn acumatica_term(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "contact" => "Business account", "contacts" => "Business accounts",
+        "invoices" => "Invoices and Memos", "quote" => "Sales quote", "quotes" => "Sales Quotes",
+        "credit_note" => "Credit memo", "credit_notes" => "Credit Memos",
+        "supplier_credit" => "Debit adjustment", "bills" => "Bills and Adjustments", "pos" => "Purchase Orders",
+        "spend" => "Cash disbursement", "receive" => "Cash receipt",
+        "journal" => "Journal transaction", "journals" => "Journal Transactions",
+        "items" => "Stock and Non-Stock Items", "tracking" => "Subaccounts", "repeating" => "Recurring Transactions",
+        "reconcile" => "Process Bank Transactions", "receive_payment" => "Enter Payment", "pay_bill" => "Pay",
+        "approve" => "Release", "draft" => "Save", "due" => "Balance",
+        "aged_ar" => "AR Aging", "aged_ap" => "AP Aging", "settings" => "Company and Preferences",
+        _ => return None,
+    })
+}
 
 pub fn term(skin: Skin, key: &str) -> &'static str {
     use Skin::*;
+    if skin == QuickBooks && acumatica() { if let Some(w) = acumatica_term(key) { return w; } }
     match (key, skin) {
         ("contact", QuickBooks) => "Customer/vendor", ("contact", Xero) => "Contact",
         ("contacts", QuickBooks) => "Customers & vendors", ("contacts", Xero) => "Contacts",
@@ -44,6 +70,22 @@ pub fn term(skin: Skin, key: &str) -> &'static str {
 
 /// Status names as each product shows them.
 pub fn status(skin: Skin, kind: &str, status: &str, overdue: bool) -> &'static str {
+    // Acumatica: documents start On Hold, are Open once released and Closed when settled.
+    if skin == Skin::QuickBooks && acumatica() {
+        return match (kind, status) {
+            (_, "DRAFT") => "On Hold",
+            (_, "SUBMITTED") => "Pending Approval",
+            ("QUOTE", "ACCEPTED") => "Approved",
+            ("QUOTE", "DECLINED") => "Rejected",
+            ("QUOTE", "INVOICED") | ("DELAYEDCHARGE" | "DELAYEDCREDIT", "INVOICED") => "Closed",
+            ("SALESORDER", "INVOICED") => "Completed",
+            (_, "SENT" | "AUTHORISED") => "Open",
+            (_, "PAID" | "BILLED") => "Closed",
+            (_, "VOIDED") => "Voided",
+            (_, "DELETED") => "Deleted",
+            _ => { let _ = overdue; "—" }
+        };
+    }
     match skin {
         Skin::QuickBooks => match (kind, status) {
             (_, "DRAFT") => "Draft",

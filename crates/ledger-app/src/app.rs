@@ -623,7 +623,9 @@ impl App {
     }
 
     pub fn update(&mut self, msg: Message) -> Task<Message> {
+        crate::vocab::set_acumatica(self.layout == theme::Layout::Acumatica);
         let t = self.update_inner(msg);
+        crate::vocab::set_acumatica(self.layout == theme::Layout::Acumatica);
         // Desktop grids' type-ahead boxes follow their lines (cheap when nothing changed).
         doc::sync_boxes(self);
         payments::sync_boxes(self);
@@ -844,6 +846,7 @@ impl App {
 
     pub fn view(&self) -> Element<'_, Message> {
         theme::set_current(theme::tokens_for(self.layout, self.dark));
+        crate::vocab::set_acumatica(self.layout == theme::Layout::Acumatica);
         shell::view(self)
     }
 }

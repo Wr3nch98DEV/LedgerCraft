@@ -13,7 +13,7 @@ fn st<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 
 pub fn status_color(label: &str) -> Color {
     let k = t();
-    match label { "Overdue" => k.bad, "Paid" | "Closed" | "Accepted" | "Billed" | "Invoiced" => k.ok, "Draft" | "Voided" | "Deleted" => k.muted, "Pending approval" | "Awaiting approval" => k.warn, _ => k.info }
+    match label { "Overdue" => k.bad, "Paid" | "Closed" | "Accepted" | "Billed" | "Invoiced" => k.ok, "Completed" | "Approved" => k.ok, "Draft" | "On Hold" | "Voided" | "Deleted" => k.muted, "Pending approval" | "Pending Approval" | "Awaiting approval" => k.warn, _ => k.info }
 }
 
 fn loading_or_error<'a>(app: &'a App, title: &str) -> Option<Element<'a, Message>> {
@@ -183,13 +183,13 @@ pub fn docs(app: &App) -> Element<'_, Message> {
             money_bar(vec![
                 ("Overdue", format!("{} overdue", i(&counts["overdue"])), i(&counts["overdue_total"]), k.bad),
                 ("Open bills", format!("{} open", i(&counts["awaiting"])), i(&counts["awaiting_total"]), k.warn),
-                ("Draft", format!("{} draft", i(&counts["draft"])), i(&counts["draft_total"]), k.line2),
+                (if vocab::acumatica() { "On Hold" } else { "Draft" }, format!("{} draft", i(&counts["draft"])), i(&counts["draft_total"]), k.line2),
             ])
         } else {
             money_bar(vec![
                 ("Overdue", format!("{} overdue", i(&counts["overdue"])), i(&counts["overdue_total"]), k.bad),
                 ("Open invoices", format!("{} open", i(&counts["awaiting"])), i(&counts["awaiting_total"]), k.info),
-                ("Draft", format!("{} draft", i(&counts["draft"])), i(&counts["draft_total"]), k.line2),
+                (if vocab::acumatica() { "On Hold" } else { "Draft" }, format!("{} draft", i(&counts["draft"])), i(&counts["draft_total"]), k.line2),
             ])
         }
     } else if xero_list {
@@ -197,6 +197,7 @@ pub fn docs(app: &App) -> Element<'_, Message> {
     } else { Space::new().into() };
 
     let tabs: Vec<(&'static str, String)> = match app.skin {
+        Skin::QuickBooks if vocab::acumatica() => [("all", "All"), ("draft", "On Hold"), ("awaiting", "Open"), ("overdue", "Past due"), ("paid", "Closed")].into_iter().map(|(k, l)| (k, l.to_string())).collect(),
         Skin::QuickBooks => [("all", "All"), ("awaiting", "Unpaid"), ("overdue", "Overdue"), ("paid", "Paid"), ("draft", "Draft")].into_iter().map(|(k, l)| (k, l.to_string())).collect(),
         // Xero shows how many are waiting on the tabs that need action, e.g. "Awaiting payment (5)".
         Skin::Xero => [("all", "All"), ("draft", "Draft"), ("submitted", "Awaiting approval"), ("awaiting", "Awaiting payment"), ("paid", "Paid")].into_iter().map(|(k, l)| {

@@ -112,6 +112,8 @@ pub enum Msg {
     Print,
     Printed(Result<String, String>),
     SaveAndSend,
+    /// Acumatica record toolbar: go to the first / previous / next / last document of this type.
+    Step(&'static str),
     /// Xero: save for someone else to approve.
     Submit,
     Send,
@@ -580,6 +582,26 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::SaveAndNew => save(app, &mut e, true, true),
         Msg::SaveClose => { e.close_after = true; save(app, &mut e, true, false) }
         Msg::SaveAndSend => { e.send_after = true; save(app, &mut e, true, false) }
+        Msg::Step(dir) => {
+            let (kind, cur) = (e.kind.clone(), e.id);
+            let (be, k2) = (app.be.clone(), kind.clone());
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Option<i64> {
+                    let list = be.call_now("docs.list", json!({"type": kind, "limit": 2000})).ok()?;
+                    let mut rows: Vec<(String, i64)> = list["rows"].as_array()?.iter().filter(|r| r["type"] == kind.as_str())
+                        .filter_map(|r| Some((r["date"].as_str().unwrap_or("").to_string(), r["id"].as_i64()?))).collect();
+                    rows.sort();
+                    let ids: Vec<i64> = rows.into_iter().map(|r| r.1).collect();
+                    let at = cur.and_then(|c| ids.iter().position(|x| *x == c));
+                    let to = match (dir, at) {
+                        ("first", _) => Some(0), ("last", _) => ids.len().checked_sub(1),
+                        ("prev", Some(i)) => i.checked_sub(1), ("prev", None) => ids.len().checked_sub(1),
+                        ("next", Some(i)) => Some(i + 1), _ => None,
+                    }?;
+                    ids.get(to).copied().filter(|id| Some(*id) != cur)
+                }).await.ok().flatten()
+            }, move |id| match id { Some(id) => Message::Nav(Route::Doc { kind: k2.clone(), id: Some(id) }), None => Message::Noop })
+        }
         Msg::Submit => { e.submit = true; save(app, &mut e, false, false) }
         Msg::Send => {
             let Some(id) = e.id else { app.doc = Some(e); return Task::none() };
@@ -874,6 +896,16 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let m = |x: Msg| if busy { None } else { Some(Message::Doc(x)) };
     if editable {
         match app.skin {
+            Skin::QuickBooks if vocab::acumatica() => {
+                // Acumatica: a new document is saved On Hold; Release posts it.
+                if e.doc.is_none() || status == "DRAFT" {
+                    actions.push(ui::btn("Save", m(Msg::Save(false))));
+                    if sales(&e.kind) && ledger_doc(&e.kind) { actions.push(ui::btn("Release & Email", m(Msg::SaveAndSend))); }
+                    actions.push(ui::btn_primary("Release", m(Msg::Save(true))));
+                } else {
+                    actions.push(ui::btn_primary("Save", m(Msg::Save(true))));
+                }
+            }
             Skin::QuickBooks => {
                 if e.doc.is_none() || status == "DRAFT" { actions.push(ui::btn("Save draft", m(Msg::Save(false)))); }
                 actions.push(ui::btn("Save and new", m(Msg::SaveAndNew)));
@@ -918,6 +950,28 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let status_chip = ui::chip(status_label, crate::lists::status_color(status_label));
     let error: Element<Message> = match &e.error { Some(err) => container(text(err.clone()).size(13).color(k2.bad)).padding([8, 12]).style(theme::bad_soft).width(Fill).into(), None => Space::new().into() };
     let body: Element<Message> = match app.skin {
+        Skin::QuickBooks if vocab::acumatica() => {
+            // Acumatica record screen: toolbar along the top, summary area, then the details grid.
+            let tb = |ic: &'static str, tip: &'static str, msg: Option<Message>| -> Element<Message> {
+                iced::widget::tooltip(button(icon(ic, 16.0, if msg.is_some() { k.text } else { k.faint })).style(theme::row_btn).padding(6).on_press_maybe(msg),
+                    container(text(tip).size(12)).padding([4, 8]).style(theme::menu), iced::widget::tooltip::Position::Bottom).into()
+            };
+            let can_delete = e.id.is_some() && matches!(status, "DRAFT" | "SUBMITTED");
+            let toolbar = container(row![
+                tb("save", "Save", if editable { m(if e.doc.is_none() || status == "DRAFT" { Msg::Save(false) } else { Msg::Save(true) }) } else { None }),
+                tb("undo", "Cancel", Some(Message::Doc(Msg::Cancel))),
+                tb("plus", "Add new record", Some(Message::Nav(Route::Doc { kind: e.kind.clone(), id: None }))),
+                tb("trash", "Delete", if can_delete { m(Msg::Action("delete")) } else { None }),
+                container(Space::new()).width(1).height(20).style(move |_: &iced::Theme| container::Style { background: Some(iced::Background::Color(k.line)), ..Default::default() }),
+                tb("first", "First", m(Msg::Step("first"))), tb("prev", "Previous", m(Msg::Step("prev"))),
+                tb("next", "Next", m(Msg::Step("next"))), tb("last", "Last", m(Msg::Step("last"))),
+                container(Space::new()).width(1).height(20).style(move |_: &iced::Theme| container::Style { background: Some(iced::Background::Color(k.line)), ..Default::default() }),
+            ].extend(actions).spacing(6).align_y(Alignment::Center)).padding([6, 10]).style(theme::topbar).width(Fill);
+            let summary = ui::card(column![row![column![fields].width(Fill), Space::new().width(30),
+                column![text("BALANCE").size(12).font(BOLD).color(k.muted), text(ui::money(if e.doc.is_some() { due_amt } else { total })).size(24).font(BOLD)].spacing(2).align_x(Alignment::End)].align_y(Alignment::Start), fields2].spacing(14));
+            let tabs = row![text("Details").size(14).font(BOLD), text("Financial").size(14).color(k.muted), text("Address").size(14).color(k.muted)].spacing(18);
+            column![toolbar, error, summary, tabs, table, add_line, ui::card(bottom), pay_panel].spacing(12).into()
+        }
         Skin::QuickBooks => {
             // QuickBooks: big "balance due" on the right of the header card.
             let balance = column![text(if ledger_doc(&e.kind) { if sales(&e.kind) { "BALANCE DUE" } else { "BALANCE DUE" } } else { "TOTAL" }).size(12).font(BOLD).color(k.muted), text(ui::money(if e.doc.is_some() { due_amt } else { total })).size(30).font(BOLD)]

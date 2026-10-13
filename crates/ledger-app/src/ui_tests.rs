@@ -3716,3 +3716,28 @@ fn every_feature_in_the_acumatica_layout() {
     assert_eq!(app.menu, None);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn acumatica_invoice_hold_release_and_record_navigation() {
+    let (mut app, dir) = desktop_app("acu-doc");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Acumatica)); settle(&mut app, t);
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None })); settle(&mut app, t);
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    { let e = app.doc.as_mut().unwrap(); e.contact = Some(cust); e.lines[0].description = "Setup".into(); e.lines[0].price = "300".into(); }
+    // Save keeps it On Hold; Release opens it.
+    press(&mut app, "Save");
+    let id = app.doc.as_ref().and_then(|e| e.id).expect("saved");
+    assert_eq!(app.be.call_now("docs.get", json!({"id": id})).unwrap()["status"], "DRAFT");
+    assert_eq!(crate::vocab::status(Skin::QuickBooks, "ACCREC", "DRAFT", false), "On Hold");
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: Some(id) })); settle(&mut app, t);
+    press(&mut app, "Release");
+    assert_eq!(app.be.call_now("docs.get", json!({"id": id})).unwrap()["status"], "AUTHORISED");
+    // First / Next move through the invoices.
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: Some(id) })); settle(&mut app, t);
+    let t = app.update(Message::Doc(crate::doc::Msg::Step("first"))); settle(&mut app, t);
+    let first = match &app.route { Route::Doc { id: Some(x), .. } => *x, r => panic!("{r:?}") };
+    assert_ne!(first, id);
+    let t = app.update(Message::Doc(crate::doc::Msg::Step("next"))); settle(&mut app, t);
+    assert!(matches!(&app.route, Route::Doc { id: Some(x), .. } if *x != first));
+    let _ = std::fs::remove_dir_all(dir);
+}
