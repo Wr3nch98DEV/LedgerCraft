@@ -191,7 +191,7 @@ pub fn docs(app: &App) -> Element<'_, Message> {
         }).chain(xero_list.then(|| ("repeating", "Repeating".to_string()))).collect(),
     };
     let cols = match app.skin {
-        Skin::QuickBooks => vec![col("Date", 10), col("Type", 10), col("No.", 9), col(if purchases { "Payee" } else { "Customer" }, 22), col("Due date", 10), coln("Balance", 11), coln("Total", 11), col("Status", 11)],
+        Skin::QuickBooks => vec![col("Date", 10), col("Type", 10), col("No.", 9), col(if purchases { "Payee" } else { "Customer" }, 20), col("Due date", 10), coln("Balance", 11), coln("Total", 11), col("Status", 10), col("Action", 12)],
         Skin::Xero => vec![col("Number", 10), col("Ref", 10), col("To", 22), col("Date", 11), col("Due date", 11), coln("Paid", 11), coln("Due", 11), col("Status", 12)],
     };
     let rows = rows_v.iter().map(|r| {
@@ -207,6 +207,13 @@ pub fn docs(app: &App) -> Element<'_, Message> {
             Skin::QuickBooks => vec![
                 ui::cell(app.d(st(r, "date"))), ui::cell_muted(type_label(app, kind)), ui::cell(st(r, "number")), ui::cell(st(r, "contact_name")),
                 ui::cell_muted(if kind.ends_with("CREDIT") { String::new() } else { app.d(st(r, "due_date")) }), ui::cell_money(i(&r["amount_due"])), ui::cell_money(i(&r["total"])), ui::chip(label, status_color(label)),
+                // QuickBooks Online's Action column: the next thing to do with the transaction.
+                match (kind, st(r, "status")) {
+                    ("ACCREC", "AUTHORISED") => ui::link("Receive payment", Message::Nav(Route::ReceivePayment(r["contact_id"].as_i64()))),
+                    ("ACCPAY", "AUTHORISED") => ui::link("Make payment", Message::Nav(Route::PayBills)),
+                    (_, "DRAFT") => match &msg { Some(m) => ui::link("Edit", m.clone()), None => ui::cell("") },
+                    _ => match &msg { Some(m) => ui::link("View", m.clone()), None => ui::cell("") },
+                },
             ],
             Skin::Xero => vec![
                 ui::cell(st(r, "number")), ui::cell_muted(st(r, "reference")), ui::cell(st(r, "contact_name")), ui::cell(app.d(st(r, "date"))),

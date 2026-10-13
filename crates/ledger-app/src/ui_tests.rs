@@ -3597,3 +3597,18 @@ fn find_and_recode_moves_lines_to_another_account() {
     assert_eq!(on_office(&app), before + 1);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn online_sales_action_column_receives_payment() {
+    let (mut app, dir) = desktop_app("qbo-action");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Online)); settle(&mut app, t);
+    let t = app.update(Message::Nav(Route::AllSales)); settle(&mut app, t);
+    let msgs = click(&app, "Receive payment");
+    // The header button comes first; a row's link carries its customer.
+    assert!(!msgs.is_empty());
+    let _g = sim_lock();
+    let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 1400.0), app.view());
+    assert!(ui.find("ACTION").is_ok() && ui.find("View").is_ok() && ui.find("Edit").is_ok());
+    drop(ui); drop(_g);
+    let _ = std::fs::remove_dir_all(dir);
+}
