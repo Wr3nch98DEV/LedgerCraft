@@ -90,7 +90,8 @@ pub fn status(skin: Skin, kind: &str, status: &str, overdue: bool) -> &'static s
     if skin == Skin::QuickBooks && acumatica() {
         return match (kind, status) {
             (_, "DRAFT") => "On Hold",
-            (_, "SUBMITTED") => "Pending Approval",
+            // Taken off hold, waiting to be released to the general ledger.
+            (_, "SUBMITTED") => "Balanced",
             ("QUOTE", "ACCEPTED") => "Approved",
             ("QUOTE", "DECLINED") => "Rejected",
             ("QUOTE", "INVOICED") | ("DELAYEDCHARGE" | "DELAYEDCREDIT", "INVOICED") => "Closed",

@@ -210,6 +210,8 @@ pub enum Message {
     OpenResult(String, i64),
     ListQuery(String),
     ListTab(&'static str),
+    /// A list screen's column filter changed (filtered in place).
+    ListFilter(&'static str, String),
     DropToast(u64),
     Key(keyboard::Event),
     Doc(doc::Msg),
@@ -259,6 +261,8 @@ pub struct App {
     pub search: String,
     pub search_results: Vec<Value>,
     pub list_q: String,
+    /// Column filters on list screens (MYOB Acumatica-style generic inquiries): column → text.
+    pub list_filter: std::collections::BTreeMap<&'static str, String>,
     pub list_tab: &'static str,
     pub toasts: Vec<(u64, String, bool)>,
     pub toast_seq: u64,
@@ -349,6 +353,7 @@ impl App {
             search: String::new(),
             search_results: vec![],
             list_q: String::new(),
+            list_filter: Default::default(),
             list_tab: "all",
             toasts: vec![],
             toast_seq: 0,
@@ -488,6 +493,7 @@ impl App {
         if self.route != r { self.history.push(self.route.clone()); if self.history.len() > 50 { self.history.remove(0); } }
         self.route = r;
         self.list_q.clear();
+        self.list_filter.clear();
         self.list_tab = "all";
         self.new_menu = false;
         self.gear_menu = false;
@@ -738,6 +744,7 @@ impl App {
             // The reports page filters what it already has; lists search in the engine.
             Message::ListQuery(q) => { self.list_q = q; if self.route == Route::Reports { Task::none() } else { self.load() } }
             // Xero's "Repeating" tab on invoices and bills is the repeating transactions list.
+            Message::ListFilter(k, v) => { if v.is_empty() { self.list_filter.remove(k); } else { self.list_filter.insert(k, v); } Task::none() }
             Message::ListTab("repeating") => self.update(Message::Nav(Route::Memorized)),
             Message::ListTab("statements") => self.update(Message::Nav(Route::Statements)),
             Message::ListTab(t) => { self.list_tab = t; self.load() }

@@ -13,7 +13,7 @@ fn st<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 
 pub fn status_color(label: &str) -> Color {
     let k = t();
-    match label { "Overdue" => k.bad, "Paid" | "Closed" | "Accepted" | "Billed" | "Invoiced" => k.ok, "Completed" | "Approved" => k.ok, "Draft" | "On Hold" | "Voided" | "Void" | "Deleted" => k.muted, "Pending approval" | "Pending Approval" | "Awaiting approval" => k.warn, _ => k.info }
+    match label { "Overdue" => k.bad, "Paid" | "Closed" | "Accepted" | "Billed" | "Invoiced" => k.ok, "Completed" | "Approved" => k.ok, "Balanced" => k.warn, "Draft" | "On Hold" | "Voided" | "Void" | "Deleted" => k.muted, "Pending approval" | "Pending Approval" | "Awaiting approval" => k.warn, _ => k.info }
 }
 
 fn loading_or_error<'a>(app: &'a App, title: &str) -> Option<Element<'a, Message>> {
@@ -209,7 +209,24 @@ pub fn docs(app: &App) -> Element<'_, Message> {
         Skin::QuickBooks => vec![col("Date", 10), col("Type", 10), col("No.", 9), col(if purchases { "Payee" } else { "Customer" }, 20), col("Due date", 10), coln("Balance", 11), coln("Total", 11), col("Status", 10), col("Action", 12)],
         Skin::Xero => vec![col("Number", 10), col("Ref", 10), col("To", 22), col("Date", 11), col("Due date", 11), coln("Paid", 11), coln("Due", 11), col("Status", 12)],
     };
-    let rows = rows_v.iter().map(|r| {
+    // Acumatica generic inquiries filter each column in place.
+    let acu = vocab::acumatica();
+    let f = |col: &str| app.list_filter.get(col).map(|s| s.to_lowercase());
+    let keep = |r: &&Value| -> bool {
+        if !acu { return true; }
+        let has = |col: &str, v: String| f(col).is_none_or(|q| v.to_lowercase().contains(&q));
+        let kind = st(r, "type");
+        has("number", st(r, "number").to_string()) && has("contact", st(r, "contact_name").to_string())
+            && has("status", vocab::status(app.skin, kind, st(r, "status"), i(&r["overdue"]) == 1).to_string())
+    };
+    let filter_row: Element<Message> = if acu {
+        let input = |col: &'static str, ph: &'static str| -> Element<'_, Message> {
+            text_input(ph, app.list_filter.get(col).map(String::as_str).unwrap_or("")).on_input(move |v| Message::ListFilter(col, v)).padding([5, 8]).size(13).style(theme::input).width(Fill).into()
+        };
+        row![text("Filter").size(12).font(BOLD).color(k.muted), input("number", "Reference nbr. contains…"), input("contact", if purchases { "Vendor contains…" } else { "Customer contains…" }), input("status", "Status contains…")]
+            .spacing(10).align_y(Alignment::Center).into()
+    } else { Space::new().into() };
+    let rows = rows_v.iter().filter(keep).map(|r| {
         let kind = match st(r, "subtype") { "RECEIPT" => "SALESRECEIPT_ROW", s @ ("DELAYEDCHARGE" | "DELAYEDCREDIT") => s, _ => st(r, "type") };
         let label = vocab::status(app.skin, kind, st(r, "status"), i(&r["overdue"]) == 1);
         let msg = match kind {
@@ -237,7 +254,7 @@ pub fn docs(app: &App) -> Element<'_, Message> {
         };
         (cells, msg)
     }).collect();
-    let body = column![top, search_and_tabs(app, &tabs), ui::table(&cols, rows, "Nothing here yet.")].spacing(16);
+    let body = column![top, search_and_tabs(app, &tabs), filter_row, ui::table(&cols, rows, "Nothing here yet.")].spacing(16);
     ui::page(ui::h1(title.to_string()), actions, body.into())
 }
 

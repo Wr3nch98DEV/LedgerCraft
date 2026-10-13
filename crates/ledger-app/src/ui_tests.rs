@@ -3763,3 +3763,30 @@ fn every_feature_in_the_sage_layout() {
     assert_eq!(crate::vocab::status(Skin::Xero, "ACCREC", "AUTHORISED", false), "Outstanding");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn acumatica_remove_hold_and_column_filters() {
+    let (mut app, dir) = desktop_app("acu-hold");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Acumatica)); settle(&mut app, t);
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None })); settle(&mut app, t);
+    let cust = app.lk.contact_opts(true).into_iter().next().unwrap();
+    { let e = app.doc.as_mut().unwrap(); e.contact = Some(cust.clone()); e.lines[0].description = "Audit".into(); e.lines[0].price = "90".into(); }
+    press(&mut app, "Remove Hold");
+    let id = app.doc.as_ref().and_then(|e| e.id).expect("saved");
+    assert_eq!(app.be.call_now("docs.get", json!({"id": id})).unwrap()["status"], "SUBMITTED");
+    assert_eq!(crate::vocab::status(Skin::QuickBooks, "ACCREC", "SUBMITTED", false), "Balanced");
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: Some(id) })); settle(&mut app, t);
+    assert!(click_fails(&app, "Remove Hold"), "already off hold");
+    press(&mut app, "Release");
+    assert_eq!(app.be.call_now("docs.get", json!({"id": id})).unwrap()["status"], "AUTHORISED");
+    // Column filters narrow the list in place.
+    let t = app.update(Message::Nav(Route::Invoices)); settle(&mut app, t);
+    let number = app.be.call_now("docs.get", json!({"id": id})).unwrap()["number"].as_str().unwrap().to_string();
+    let _ = app.update(Message::ListFilter("number", number.clone()));
+    assert!(!click_fails(&app, &number));
+    let others: Vec<String> = app.data.as_ref().unwrap()["rows"].as_array().unwrap().iter().map(|r| r["number"].as_str().unwrap_or("").to_string()).filter(|n| *n != number && !n.is_empty()).take(2).collect();
+    for n in &others { assert!(click_fails(&app, n), "{n} filtered out"); }
+    let _ = app.update(Message::ListFilter("number", String::new()));
+    for n in &others { assert!(!click_fails(&app, n), "{n} back"); }
+    let _ = std::fs::remove_dir_all(dir);
+}

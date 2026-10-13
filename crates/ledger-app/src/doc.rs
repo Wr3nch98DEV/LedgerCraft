@@ -898,8 +898,10 @@ pub fn view(app: &App) -> Element<'_, Message> {
         match app.skin {
             Skin::QuickBooks if vocab::acumatica() => {
                 // Acumatica: a new document is saved On Hold; Release posts it.
-                if e.doc.is_none() || status == "DRAFT" {
-                    actions.push(ui::btn("Save", m(Msg::Save(false))));
+                if e.doc.is_none() || matches!(status, "DRAFT" | "SUBMITTED") {
+                    actions.push(ui::btn("Save", m(if status == "SUBMITTED" { Msg::Submit } else { Msg::Save(false) })));
+                    // On Hold → Balanced (ready to release) → Release posts it.
+                    if ledger_doc(&e.kind) && status != "SUBMITTED" { actions.push(ui::btn("Remove Hold", m(Msg::Submit))); }
                     if sales(&e.kind) && ledger_doc(&e.kind) { actions.push(ui::btn("Release & Email", m(Msg::SaveAndSend))); }
                     actions.push(ui::btn_primary("Release", m(Msg::Save(true))));
                 } else {
@@ -968,7 +970,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             };
             let can_delete = e.id.is_some() && matches!(status, "DRAFT" | "SUBMITTED");
             let toolbar = container(row![
-                tb("save", "Save", if editable { m(if e.doc.is_none() || status == "DRAFT" { Msg::Save(false) } else { Msg::Save(true) }) } else { None }),
+                tb("save", "Save", if editable { m(match status { "SUBMITTED" => Msg::Submit, "DRAFT" => Msg::Save(false), _ if e.doc.is_none() => Msg::Save(false), _ => Msg::Save(true) }) } else { None }),
                 tb("undo", "Cancel", Some(Message::Doc(Msg::Cancel))),
                 tb("plus", "Add new record", Some(Message::Nav(Route::Doc { kind: e.kind.clone(), id: None }))),
                 tb("trash", "Delete", if can_delete { m(Msg::Action("delete")) } else { None }),
