@@ -118,6 +118,25 @@ My recommendation is **Sage Accounting** for the Sage style. It's the closest fi
 
 **Done when** both layouts pass the step 1 reachability test and the step 2 side-by-side review.
 
+**Status (13 Oct, 16:15): both layouts built.** I went with Sage Accounting, as recommended, because there was no answer yet; say if you'd rather have Sage 50 or Intacct. Both pass the reachability tests (`every_feature_in_the_acumatica_layout`, `every_feature_in_the_sage_layout`). The side-by-side review needs your screenshots.
+
+MYOB Acumatica-style:
+- Workspace main menu, with a Transactions / Processes / Inquiries / Profiles / Reports / Preferences panel for each workspace.
+- Acumatica wording.
+- Record screens with the toolbar: Save, Cancel, Add, Delete, First/Previous/Next/Last.
+- On Hold → Remove Hold (Balanced) → Release.
+- Column filters on lists.
+- Its own colours.
+
+Sage Accounting-style:
+- Black top bar with Summary / Contacts / Sales / Purchases / Banking / Products & Services / Payroll / Reporting / Accounting menus and a settings menu.
+- Sage wording: Sales Invoices, Purchase Invoices, Customer Receipts, Outstanding, Save & Email…
+- Its own colours.
+
+Still to do:
+- Sage's bank-feed screen still uses the Xero reconcile layout.
+- Acumatica's Financial and Address tabs on record screens are labels only, for now.
+
 ---
 
 ## Step 4 — Every feature from the four guides, in every layout
