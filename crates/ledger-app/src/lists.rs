@@ -97,6 +97,20 @@ pub(crate) fn search_and_tabs<'a>(app: &'a App, tabs: &[(&'static str, String)])
     row![r, ui::hspace(), text_input("Search", &app.list_q).on_input(Message::ListQuery).padding([7, 10]).size(14).width(260).style(theme::input)].align_y(Alignment::Center).into()
 }
 
+/// Tabs without the search box (contact pages).
+fn tab_row<'a>(app: &'a App, tabs: &[(&'static str, String)]) -> Element<'a, Message> {
+    let k = t();
+    let mut r = row![].spacing(2).align_y(Alignment::Center);
+    for (key, label) in tabs {
+        let active = app.list_tab == *key;
+        r = r.push(column![
+            button(text(label.clone()).size(14).font(if active { BOLD } else { iced::Font::DEFAULT })).style(theme::tab(active)).padding([8, 12]).on_press(Message::ListTab(key)),
+            container(Space::new()).width(Fill).height(2).style(move |_: &iced::Theme| container::Style { background: if active { Some(iced::Background::Color(k.accent)) } else { None }, ..Default::default() }),
+        ].width(iced::Shrink));
+    }
+    r.into()
+}
+
 /// Money summary bar (QuickBooks' coloured "money bar" above sales/expense lists).
 fn money_bar<'a>(parts: Vec<(&'a str, String, i64, Color)>) -> Element<'a, Message> {
     row(parts.into_iter().map(|(label, sub, amount, c)| {
@@ -307,7 +321,55 @@ pub fn contact(app: &App) -> Element<'_, Message> {
     } else { info };
     let back = if is_supplier { Route::Vendors } else { Route::Customers };
     let title = column![ui::link(if is_supplier { app.term("suppliers") } else { app.term("customers") }, Message::Nav(back)), ui::h1(st(c, "name").to_string())].spacing(4);
-    ui::page(title.into(), actions, column![info, ui::h2("Transaction list"), ui::table(&cols, rows, "No transactions yet.")].spacing(16).into())
+    // QuickBooks Online: Transaction list / Customer details / Notes tabs (Statements opens Create Statements).
+    let who = if is_supplier { "Vendor details" } else { "Customer details" };
+    let mut tabs: Vec<(&'static str, String)> = vec![("all", "Transaction list".into()), ("details", who.into()), ("notes", "Notes".into())];
+    if !is_supplier { tabs.insert(1, ("statements", "Statements".into())); }
+    let body: Element<Message> = match app.list_tab {
+        "details" => ui::card(contact_details(c)).into(),
+        "notes" => ui::card(contact_history(app, d, id)).into(),
+        _ => ui::table(&cols, rows, "No transactions yet."),
+    };
+    ui::page(title.into(), actions, column![info, tab_row(app, &tabs), body].spacing(16).into())
+}
+
+/// A contact's details as label/value pairs (only the ones filled in).
+fn contact_details(c: &Value) -> iced::widget::Column<'static, Message> {
+    let mut details = column![ui::h2("Contact details")].spacing(10);
+    let person = format!("{} {}", st(c, "first_name"), st(c, "last_name")).trim().to_string();
+    for (label, v) in [("Primary person", person), ("Email", st(c, "email").to_string()), ("Phone", st(c, "phone").to_string()), ("Mobile", st(c, "mobile").to_string()),
+        ("Website", st(c, "website").to_string()), ("Postal address", st(c, "postal_address").to_string()), ("Street address", st(c, "street_address").to_string()),
+        ("Tax number", st(c, "tax_number").to_string()), ("Account number", st(c, "account_number").to_string())] {
+        if !v.trim().is_empty() { details = details.push(column![ui::label(label), text(v).size(14)].spacing(2)); }
+    }
+    let groups: Vec<String> = c["groups"].as_array().cloned().unwrap_or_default().iter().map(|g| st(g, "name").to_string()).collect();
+    if !groups.is_empty() { details = details.push(column![ui::label("Groups"), text(groups.join(", ")).size(14)].spacing(2)); }
+    details
+}
+
+/// History & notes for a contact, with a box to add a note.
+fn contact_history<'a>(app: &'a App, d: &'a Value, id: i64) -> iced::widget::Column<'a, Message> {
+    let k = t();
+    let mut hist = column![
+        row![
+            text_input("Add a note", &app.extras.contact_note).on_input(|s| Message::Extras(crate::extras::Msg::ContactNote(s)))
+                .on_submit(Message::Extras(crate::extras::Msg::ContactNoteAdd(id))).padding([7, 10]).size(14).style(theme::input),
+            ui::btn("Add note", Some(Message::Extras(crate::extras::Msg::ContactNoteAdd(id)))),
+        ].spacing(8),
+    ].spacing(8);
+    let entries = d["history"].as_array().cloned().unwrap_or_default();
+    if entries.is_empty() { hist = hist.push(ui::muted("No history yet.")); }
+    for h in entries.iter().take(20) {
+        let when = st(h, "at");
+        let day = app.d(when.get(..10).unwrap_or(when));
+        hist = hist.push(row![
+            text(day).size(13).color(k.muted).width(110),
+            text(if st(h, "kind") == "NOTE" { "Note" } else { "History" }).size(13).color(k.muted).width(70),
+            text(st(h, "text").to_string()).size(14).width(Fill),
+            text(st(h, "user").to_string()).size(13).color(k.muted),
+        ].spacing(10));
+    }
+    hist
 }
 
 /// Xero's contact page: details down the left; money in / money out, recent activity and
@@ -320,16 +382,7 @@ fn xero_contact(app: &App) -> Element<'_, Message> {
     let sum = &c["summary"];
     let customer = c["is_customer"] == 1 || c["is_supplier"] != 1;
     let supplier = c["is_supplier"] == 1;
-    // ---- details ----
-    let mut details = column![ui::h2("Contact details")].spacing(10);
-    let person = format!("{} {}", st(c, "first_name"), st(c, "last_name")).trim().to_string();
-    for (label, v) in [("Primary person", person), ("Email", st(c, "email").to_string()), ("Phone", st(c, "phone").to_string()), ("Mobile", st(c, "mobile").to_string()),
-        ("Website", st(c, "website").to_string()), ("Postal address", st(c, "postal_address").to_string()), ("Street address", st(c, "street_address").to_string()),
-        ("Tax number", st(c, "tax_number").to_string()), ("Account number", st(c, "account_number").to_string())] {
-        if !v.trim().is_empty() { details = details.push(column![ui::label(label), text(v).size(14)].spacing(2)); }
-    }
-    let groups: Vec<String> = c["groups"].as_array().cloned().unwrap_or_default().iter().map(|g| st(g, "name").to_string()).collect();
-    if !groups.is_empty() { details = details.push(column![ui::label("Groups"), text(groups.join(", ")).size(14)].spacing(2)); }
+    let details = contact_details(c);
     let left = column![ui::card(details)].width(320);
     // ---- money in / out ----
     let money = |title: &'static str, out: i64, over: i64, year: i64, new: Element<'static, Message>| -> Element<'static, Message> {
@@ -358,26 +411,7 @@ fn xero_contact(app: &App) -> Element<'_, Message> {
             ui::cell_money(i(&r["amount_due"])), ui::cell_money(i(&r["total"])), ui::chip(label, status_color(label))],
          Some(Message::Nav(Route::Doc { kind: kind.into(), id: r["id"].as_i64() })))
     }).collect();
-    // ---- history & notes ----
-    let mut hist = column![
-        row![
-            text_input("Add a note", &app.extras.contact_note).on_input(|s| Message::Extras(crate::extras::Msg::ContactNote(s)))
-                .on_submit(Message::Extras(crate::extras::Msg::ContactNoteAdd(id))).padding([7, 10]).size(14).style(theme::input),
-            ui::btn("Add note", Some(Message::Extras(crate::extras::Msg::ContactNoteAdd(id)))),
-        ].spacing(8),
-    ].spacing(8);
-    let entries = d["history"].as_array().cloned().unwrap_or_default();
-    if entries.is_empty() { hist = hist.push(ui::muted("No history yet.")); }
-    for h in entries.iter().take(20) {
-        let when = st(h, "at");
-        let day = app.d(when.get(..10).unwrap_or(when));
-        hist = hist.push(row![
-            text(day).size(13).color(k.muted).width(110),
-            text(if st(h, "kind") == "NOTE" { "Note" } else { "History" }).size(13).color(k.muted).width(70),
-            text(st(h, "text").to_string()).size(14).width(Fill),
-            text(st(h, "user").to_string()).size(13).color(k.muted),
-        ].spacing(10));
-    }
+    let hist = contact_history(app, d, id);
     let right = column![
         panels,
         ui::h2("Recent activity"), ui::table(&cols, rows, "No transactions yet."),

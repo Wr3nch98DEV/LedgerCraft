@@ -3637,3 +3637,20 @@ fn reports_page_star_search_and_custom_tab() {
     let _ = click(&app, "New custom report");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn online_customer_page_tabs() {
+    let (mut app, dir) = desktop_app("qbo-contact");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Online)); settle(&mut app, t);
+    let id = app.lk.contact_opts(true).into_iter().next().unwrap().id;
+    let t = app.update(Message::Nav(Route::Contact(id))); settle(&mut app, t);
+    press(&mut app, "Customer details");
+    assert_eq!(app.list_tab, "details");
+    press(&mut app, "Notes");
+    let _ = app.update(Message::Extras(crate::extras::Msg::ContactNote("Call before delivery".into())));
+    press(&mut app, "Add note");
+    assert!(app.data.as_ref().unwrap()["history"].as_array().unwrap().iter().any(|h| h["text"] == "Call before delivery"));
+    press(&mut app, "Statements");
+    assert_eq!(app.route, Route::Statements);
+    let _ = std::fs::remove_dir_all(dir);
+}
