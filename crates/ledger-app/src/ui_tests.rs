@@ -15,7 +15,7 @@ fn demo_app(tag: &str, skin: Skin) -> (App, std::path::PathBuf) {
     let session = app.be.call_now("session.get", json!({})).unwrap();
     let _ = app.update(Message::Session(Ok(session)));
     let get = |m: &str, p: Value| app.be.call_now(m, p).unwrap().as_array().cloned().unwrap();
-    let lk = Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})) };
+    let lk = Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})), price_rules: get("priceRules.list", json!({})) };
     let _ = app.update(Message::LookupsLoaded(Box::new(lk)));
     (app, dir)
 }
@@ -728,7 +728,7 @@ fn desktop_app(tag: &str) -> (App, std::path::PathBuf) {
     let session = app.be.call_now("session.get", json!({})).unwrap();
     let _ = app.update(Message::Session(Ok(session)));
     let get = |m: &str, p: Value| app.be.call_now(m, p).unwrap().as_array().cloned().unwrap();
-    let lk = Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})) };
+    let lk = Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})), price_rules: get("priceRules.list", json!({})) };
     let _ = app.update(Message::LookupsLoaded(Box::new(lk)));
     (app, dir)
 }
@@ -3883,5 +3883,29 @@ fn payment_reminder_levels() {
     // Each level goes once per invoice.
     assert_eq!(app.be.call_now("reminders.run", json!({})).unwrap()["queued"], 0);
     assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn price_rule_quantity_break_on_an_invoice() {
+    use crate::extras::Msg as X;
+    use crate::doc::Msg as D;
+    let (mut app, dir) = desktop_app("pricerules");
+    let item = app.lk.items.iter().find(|x| x["is_sold"] == 1 && x["sale_unit_e2"].as_i64().unwrap_or(0) > 0).cloned().unwrap();
+    let opt = crate::app::Opt { id: item["id"].as_i64().unwrap(), label: item["name"].as_str().unwrap_or("").to_string() };
+    let t = app.update(Message::Nav(Route::PriceLevels)); settle(&mut app, t);
+    let _ = app.update(Message::Extras(X::PrNew(true)));
+    for (n, v) in [(0, "Bulk"), (1, "10"), (2, "-20")] { let _ = app.update(Message::Extras(X::PrField(n, v.into()))); }
+    let _ = app.update(Message::Extras(X::PrItem(opt.clone())));
+    press(&mut app, "Save rule");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert_eq!(app.lk.price_rules.len(), 1);
+    // On an invoice: 1 at the normal price, 10 at 20% off.
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None })); settle(&mut app, t);
+    let t = app.update(Message::Doc(D::Item(0, opt))); settle(&mut app, t);
+    let base = crate::doc::parse_e4(&app.doc.as_ref().unwrap().lines[0].price).unwrap();
+    let t = app.update(Message::Doc(D::Qty(0, "10".into()))); settle(&mut app, t);
+    let bulk = crate::doc::parse_e4(&app.doc.as_ref().unwrap().lines[0].price).unwrap();
+    assert_eq!(bulk, ledger_core::pricelevels::apply_level(base, -2_000));
     let _ = std::fs::remove_dir_all(dir);
 }

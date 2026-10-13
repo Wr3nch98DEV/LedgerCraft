@@ -6,6 +6,33 @@ use rusqlite::params;
 use serde_json::{json, Value};
 
 impl Ledger {
+    pub fn list_price_rules(&self) -> Result<Vec<Value>> {
+        util::query_json(&self.conn,
+            "SELECT r.*, i.name AS item_name, p.name AS level_name FROM price_rules r LEFT JOIN items i ON i.id = r.item_id LEFT JOIN price_levels p ON p.id = r.price_level_id
+             WHERE r.active = 1 ORDER BY r.name COLLATE NOCASE", [])
+    }
+
+    /// Create a price rule. `percent_bp` changes the item's price (negative = discount).
+    pub fn save_price_rule(&self, name: &str, item: Option<i64>, level: Option<i64>, min_qty_e4: i64, percent_bp: i64, start: Option<&str>, end: Option<&str>) -> Result<i64> {
+        let name = name.trim();
+        if name.is_empty() { return invalid("the price rule needs a name"); }
+        if !(-10_000..=100_000).contains(&percent_bp) || percent_bp == 0 { return invalid("enter a percentage to raise or lower prices by, e.g. -10 or 5"); }
+        if min_qty_e4 < 0 { return invalid("the minimum quantity can't be negative"); }
+        for d in [start, end].into_iter().flatten() { util::parse_date(d)?; }
+        if let (Some(s), Some(e)) = (start, end) { if e < s { return invalid("the end date is before the start date"); } }
+        self.conn.execute("INSERT INTO price_rules(name, item_id, price_level_id, min_qty_e4, percent_bp, start_date, end_date) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![name, item, level, min_qty_e4, percent_bp, start, end])?;
+        let id = self.conn.last_insert_rowid();
+        self.audit("CREATE", "price_rule", Some(id), None, Some(json!({"name": name, "percent_bp": percent_bp})))?;
+        Ok(id)
+    }
+
+    pub fn delete_price_rule(&self, id: i64) -> Result<()> {
+        self.conn.execute("UPDATE price_rules SET active = 0 WHERE id = ?1", [id])?;
+        self.audit("DELETE", "price_rule", Some(id), None, None)?;
+        Ok(())
+    }
+
     pub fn list_price_levels(&self) -> Result<Vec<Value>> {
         util::query_json(&self.conn,
             "SELECT p.id, p.name, p.percent_bp, p.status, (SELECT COUNT(*) FROM contacts c WHERE c.price_level_id = p.id AND c.merged_into IS NULL) AS customers
@@ -47,6 +74,16 @@ impl Ledger {
         self.conn.execute("UPDATE contacts SET price_level_id = ?2 WHERE id = ?1", params![contact_id, level])?;
         Ok(())
     }
+}
+
+/// The best (lowest-price) price rule for a sale: rules for this item or every item, for this
+/// customer's price level or everyone, at or above their minimum quantity, within their dates.
+pub fn rule_bp(rules: &[Value], item: i64, level: Option<i64>, qty_e4: i64, date: &str) -> Option<i64> {
+    rules.iter().filter(|r| {
+        r["item_id"].as_i64().is_none_or(|i| i == item) && r["price_level_id"].as_i64().is_none_or(|l| Some(l) == level)
+            && qty_e4 >= r["min_qty_e4"].as_i64().unwrap_or(0)
+            && r["start_date"].as_str().is_none_or(|s| date >= s) && r["end_date"].as_str().is_none_or(|e| date <= e)
+    }).filter_map(|r| r["percent_bp"].as_i64()).min()
 }
 
 /// An item price (in e4 units) at a price level, rounded to the cent.

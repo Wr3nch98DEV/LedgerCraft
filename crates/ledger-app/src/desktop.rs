@@ -1837,8 +1837,9 @@ pub fn price_levels(app: &App) -> Element<'_, Message> {
             ui::btn_primary("New Price Level", Some(Message::Desk(Msg::PlAdd))),
             ui::hspace(),
             text("Item prices on invoices and sales receipts change by the customer's level.").size(12).color(k.muted).into(),
-        ])).height(Fill),
+        ])).height(Length::FillPortion(1)),
         container(assign).padding(Padding { left: 12.0, right: 12.0, bottom: 12.0, top: 0.0 }),
+        container(iced::widget::scrollable(container(crate::extras::price_rules_section(app)).padding(12)).style(theme::scroll)).height(Length::FillPortion(1)),
     ].height(Fill).into()
 }
 

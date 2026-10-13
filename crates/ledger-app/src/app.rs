@@ -148,6 +148,8 @@ pub struct Lookups {
     pub price_levels: Vec<Value>,
     /// Form templates (branding themes), default first.
     pub templates: Vec<Value>,
+    /// Price rules (quantity breaks, dates) applied when an item goes on a sale.
+    pub price_rules: Vec<Value>,
 }
 impl Lookups {
     pub fn template_opts(&self) -> Vec<Opt> {
@@ -453,7 +455,7 @@ impl App {
                 tokio::task::spawn_blocking(move || {
                     if qb { let _ = be.call_now("accounts.undeposited", json!({})); }
                     let get = |m: &str, p: Value| be.call_now(m, p).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
-                    Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})) }
+                    Lookups { accounts: get("accounts.list", json!({})), tax_rates: get("taxRates.list", json!({})), items: get("items.list", json!({})), contacts: get("contacts.list", json!({"filter": "all"})), price_levels: get("priceLevels.list", json!({})), templates: get("branding.list", json!({})), price_rules: get("priceRules.list", json!({})) }
                 }).await.unwrap_or_default()
             },
             |l| Message::LookupsLoaded(Box::new(l)),

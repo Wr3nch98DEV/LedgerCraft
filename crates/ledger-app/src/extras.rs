@@ -30,6 +30,10 @@ pub struct State {
     pub rc_sel: std::collections::BTreeSet<i64>,
     pub rc_to_account: Option<Opt>,
     pub rc_to_tax: Option<Opt>,
+    /// Price rules: the new rule being entered (name, min qty, percent, start, end) and its item / level.
+    pub pr_new: Option<[String; 5]>,
+    pub pr_item: Option<Opt>,
+    pub pr_level: Option<Opt>,
     /// Payment reminders: a new level's days after the due date, as typed.
     pub dun_days: String,
     /// Contact page: the credit limit being typed (None = not being edited).
@@ -93,6 +97,7 @@ pub enum Msg {
     /// Contact credit: the limit as typed, on/off hold, save the limit.
     CreditText(String), CreditHold(i64, bool), CreditSave(i64),
     /// Payment reminders: on/off, a new level's days, add, switch a level on/off, delete, send due reminders now.
+    PrNew(bool), PrField(usize, String), PrItem(Opt), PrLevel(Opt), PrSave, PrDelete(i64),
     DunOn(bool), DunDays(String), DunAdd, DunActive(i64, i64, bool), DunDelete(i64), DunRun,
     /// Find & recode.
     RcAccount(Opt), RcTax(Opt), RcContact(Opt), RcText(&'static str, String), RcFind, RcClear, RcToggle(i64), RcAll(bool), RcToAccount(Opt), RcToTax(Opt), RcApply,
@@ -197,6 +202,26 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.extras.busy = true;
             app.be.call("recode.apply", p, |r| Message::Extras(Msg::Done(r.map(|v| { let n = v["transactions"].as_i64().unwrap_or(0); json!({"n": n}) }), "Recoded — the transactions were reposted")))
         }
+        // ---- price rules ----
+        Msg::PrNew(on) => { app.extras.pr_new = on.then(|| [String::new(), "1".into(), String::new(), String::new(), String::new()]); app.extras.pr_item = None; app.extras.pr_level = None; Task::none() }
+        Msg::PrField(n, v) => {
+            if let Some(f) = app.extras.pr_new.as_mut() { f[n] = if n >= 3 { ui::date_keys(&f[n], &v, style) } else { v }; }
+            Task::none()
+        }
+        Msg::PrItem(o) => { app.extras.pr_item = Some(o); Task::none() }
+        Msg::PrLevel(o) => { app.extras.pr_level = Some(o); Task::none() }
+        Msg::PrSave => {
+            let Some(f) = app.extras.pr_new.clone() else { return Task::none() };
+            let Some(pct) = f[2].trim().trim_end_matches('%').parse::<f64>().ok() else { return app.toast("Enter the percentage, e.g. -10 for 10% off", true) };
+            let qty = f[1].trim().parse::<f64>().unwrap_or(0.0);
+            let date = |s: &str| if s.trim().is_empty() { Some(None) } else { ui::to_iso(s, style).map(Some) };
+            let (Some(start), Some(end)) = (date(&f[3]), date(&f[4])) else { return app.toast("Check the dates", true) };
+            app.extras.busy = true;
+            app.extras.pr_new = None;
+            app.be.call("priceRules.save", json!({"name": f[0], "item_id": app.extras.pr_item.as_ref().map(|o| o.id), "price_level_id": app.extras.pr_level.as_ref().map(|o| o.id),
+                "min_qty_e4": (qty * 10_000.0).round() as i64, "percent_bp": (pct * 100.0).round() as i64, "start_date": start, "end_date": end}), |r| Message::Extras(Msg::Done(r, "Price rule saved")))
+        }
+        Msg::PrDelete(id) => app.be.call("priceRules.delete", json!({"id": id}), |r| Message::Extras(Msg::Done(r, "Price rule removed"))),
         // ---- payment reminders ----
         Msg::DunOn(on) => app.be.call("settings.update", json!({"invoice_reminders_enabled": if on { "1" } else { "0" }}), move |r| Message::Extras(Msg::Done(r, if on { "Payment reminders are on" } else { "Payment reminders are off" }))),
         Msg::DunDays(s) => { app.extras.dun_days = s.chars().filter(|c| c.is_ascii_digit() || *c == '-').collect(); Task::none() }
@@ -897,6 +922,37 @@ pub fn bank_rules(app: &App) -> Element<'_, Message> {
     body = body.push(ui::table(&[ui::col("Rule", 20), ui::col("Applies to", 14), ui::col("When", 34), ui::col("Then", 22), ui::col("", 8)], rows, "No bank rules yet."));
     body = body.push(ui::muted("Rules fill in matching bank statement lines for you when you review them in Banking."));
     ui::page(ui::h1("Bank rules"), vec![ui::btn_primary("New rule", Some(Message::Extras(Msg::BrNew(true))))], body.max_width(1150).into())
+}
+
+// ---------------- Price rules ----------------
+
+/// Price rules under the price levels: quantity breaks, item- and date-specific prices.
+pub fn price_rules_section(app: &App) -> Element<'_, Message> {
+    let x = &app.extras;
+    let mut col = column![row![ui::h2("Price rules"), iced::widget::Space::new().width(Length::Fill), ui::btn("New price rule", Some(Message::Extras(Msg::PrNew(true))))].align_y(Alignment::Center)].spacing(10);
+    if let Some(f) = &x.pr_new {
+        let items: Vec<Opt> = app.lk.items.iter().filter(|i| i["is_sold"] == 1).map(|i| Opt { id: i["id"].as_i64().unwrap_or(0), label: i["name"].as_str().unwrap_or("").to_string() }).collect();
+        let levels: Vec<Opt> = app.lk.price_levels.iter().map(|p| Opt { id: p["id"].as_i64().unwrap_or(0), label: p["name"].as_str().unwrap_or("").to_string() }).collect();
+        col = col.push(ui::card(column![
+            row![input("RULE NAME", &f[0], 220.0, |v| Message::Extras(Msg::PrField(0, v))),
+                column![lbl("ITEM"), pick_list(items, x.pr_item.clone(), |o| Message::Extras(Msg::PrItem(o))).placeholder("Every item").padding([5, 7]).text_size(13).style(theme::pick).width(220)].spacing(3),
+                column![lbl("CUSTOMERS AT PRICE LEVEL"), pick_list(levels, x.pr_level.clone(), |o| Message::Extras(Msg::PrLevel(o))).placeholder("Every customer").padding([5, 7]).text_size(13).style(theme::pick).width(200)].spacing(3)].spacing(12),
+            row![input("FROM QUANTITY", &f[1], 110.0, |v| Message::Extras(Msg::PrField(1, v))), input("CHANGE PRICE BY %", &f[2], 130.0, |v| Message::Extras(Msg::PrField(2, v))),
+                input("START DATE", &f[3], 130.0, |v| Message::Extras(Msg::PrField(3, v))), input("END DATE", &f[4], 130.0, |v| Message::Extras(Msg::PrField(4, v))),
+                iced::widget::Space::new().width(Length::Fill), ui::btn("Cancel", Some(Message::Extras(Msg::PrNew(false)))), ui::btn_primary("Save rule", Some(Message::Extras(Msg::PrSave)))].spacing(12).align_y(Alignment::End),
+        ].spacing(12)));
+    }
+    let rows = app.lk.price_rules.iter().map(|r| {
+        let id = r["id"].as_i64().unwrap_or(0);
+        let pct = r["percent_bp"].as_i64().unwrap_or(0) as f64 / 100.0;
+        let qty = r["min_qty_e4"].as_i64().unwrap_or(0) as f64 / 10_000.0;
+        let dates = match (r["start_date"].as_str(), r["end_date"].as_str()) { (None, None) => "Always".to_string(), (s, e) => format!("{} – {}", s.map(|d| app.d(d)).unwrap_or_default(), e.map(|d| app.d(d)).unwrap_or_default()) };
+        (vec![ui::cell(r["name"].as_str().unwrap_or("").to_string()), ui::cell(r["item_name"].as_str().unwrap_or("Every item").to_string()),
+            ui::cell_muted(r["level_name"].as_str().unwrap_or("Every customer").to_string()), ui::cell(if qty > 0.0 { format!("{qty} or more") } else { "Any".into() }),
+            ui::cell(format!("{pct:+}%")), ui::cell_muted(dates), ui::link("Remove", Message::Extras(Msg::PrDelete(id)))], None)
+    }).collect();
+    col = col.push(ui::table(&[ui::col("Rule", 16), ui::col("Item", 18), ui::col("Customers", 16), ui::col("Quantity", 10), ui::col("Change", 9), ui::col("Dates", 20), ui::col("", 9)], rows, "No price rules yet."));
+    col.push(ui::muted("The lowest matching price wins. Rules apply after the customer's price level, when an item goes on a sale or its quantity changes.")).into()
 }
 
 // ---------------- Payment reminders ----------------

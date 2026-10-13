@@ -870,3 +870,17 @@ fn progress_invoicing_from_an_estimate() {
     assert_eq!(l.get_document(quote).unwrap()["status"], "INVOICED");
     assert!(l.progress_invoice(quote, 1_000, None).is_err());
 }
+
+#[test]
+fn price_rules_quantity_breaks_and_dates() {
+    let l = org();
+    l.save_price_rule("Bulk", None, None, 100_000, -2_000, None, None).unwrap();
+    l.save_price_rule("Spring sale", None, None, 0, -500, Some("2026-09-01"), Some("2026-11-30")).unwrap();
+    assert!(l.save_price_rule("Bad", None, None, 0, -500, Some("2026-12-01"), Some("2026-11-01")).is_err());
+    let rules = l.list_price_rules().unwrap();
+    use ledger_core::pricelevels::rule_bp;
+    assert_eq!(rule_bp(&rules, 1, None, 10_000, "2026-01-05"), None);
+    assert_eq!(rule_bp(&rules, 1, None, 10_000, "2026-10-05"), Some(-500));
+    // The lowest price wins: 10 or more gets the bulk 20% off.
+    assert_eq!(rule_bp(&rules, 1, None, 100_000, "2026-10-05"), Some(-2_000));
+}
