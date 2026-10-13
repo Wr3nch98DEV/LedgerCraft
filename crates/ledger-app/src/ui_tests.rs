@@ -3822,3 +3822,22 @@ fn credit_limit_save_anyway_and_credit_hold() {
     assert!(click_fails(&app, "Save anyway"));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn invoice_profitability_from_item_costs() {
+    use crate::doc::Msg as D;
+    let (mut app, dir) = demo_app("profit", Skin::QuickBooks);
+    let item = app.lk.items.iter().find(|x| x["purchase_unit_e2"].as_i64().unwrap_or(0) > 0 && x["is_sold"] == 1).cloned().expect("an item with a cost");
+    let unit_cost = item["avg_cost"].as_i64().filter(|v| *v > 0 && item["is_tracked"] == 1).unwrap_or(item["purchase_unit_e2"].as_i64().unwrap() / 100);
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None })); settle(&mut app, t);
+    let opt = crate::app::Opt { id: item["id"].as_i64().unwrap(), label: item["name"].as_str().unwrap_or("").to_string() };
+    let t = app.update(Message::Doc(D::Item(0, opt))); settle(&mut app, t);
+    let t = app.update(Message::Doc(D::Qty(0, "2".into()))); settle(&mut app, t);
+    let price = app.doc.as_ref().unwrap().lines[0].price.clone();
+    let _g = sim_lock();
+    let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 1400.0), app.view());
+    assert!(ui.find("PROFITABILITY").is_ok(), "price {price}");
+    assert!(ui.find(crate::ui::money(unit_cost * 2).as_str()).is_ok(), "cost of 2 = {}", crate::ui::money(unit_cost * 2));
+    drop(ui); drop(_g);
+    let _ = std::fs::remove_dir_all(dir);
+}

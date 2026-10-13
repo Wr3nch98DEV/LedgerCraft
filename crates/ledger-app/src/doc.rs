@@ -876,6 +876,23 @@ pub fn view(app: &App) -> Element<'_, Message> {
         for a in d["allocations"].as_array().cloned().unwrap_or_default() { totals = totals.push(row![ui::muted(format!("Credit {}", a["credit_number"].as_str().unwrap_or(""))), ui::hspace(), ui::muted(format!("-{}", ui::money(a["amount"].as_i64().unwrap_or(0))))]); }
         if ledger_doc(&e.kind) { totals = totals.push(ui::hr()).push(tot_row(app.term("due").into(), due_amt, true)); }
     }
+    // Profitability (QuickBooks): what the items on this sale cost, and the margin left.
+    if sales(&e.kind) && !e.kind.ends_with("CREDIT") {
+        let (cost, costed_sales) = e.lines.iter().fold((0i64, 0i64), |(c, sl), l| {
+            let Some(item) = l.item.as_ref().and_then(|o| app.lk.items.iter().find(|x| x["id"].as_i64() == Some(o.id))) else { return (c, sl) };
+            let unit = item["avg_cost"].as_i64().filter(|v| *v > 0 && item["is_tracked"] == 1).unwrap_or(item["purchase_unit_e2"].as_i64().unwrap_or(0) / 100);
+            if unit <= 0 { return (c, sl); }
+            let q = parse_e4(&l.qty).unwrap_or(0);
+            (c + div_round(unit as i128 * q as i128, 10_000), sl + line_cents(q, parse_e4(&l.price).unwrap_or(0)))
+        });
+        if cost > 0 {
+            let margin = costed_sales - cost;
+            let pct = if costed_sales != 0 { margin as f64 * 100.0 / costed_sales as f64 } else { 0.0 };
+            totals = totals.push(ui::hr()).push(text("PROFITABILITY").size(11).font(BOLD).color(k.muted))
+                .push(row![ui::muted("Cost of items"), ui::hspace(), ui::muted(ui::money(cost))])
+                .push(row![text("Gross margin").size(14), ui::hspace(), text(format!("{} ({pct:.0}%)", ui::money(margin))).size(14).color(if margin < 0 { k.bad } else { k.ok })]);
+        }
+    }
     let memo: Element<Message> = if editable {
         column![ui::label(if app.skin == Skin::QuickBooks { "Message displayed on invoice" } else { "Notes / terms" }), text_input("", &e.terms).on_input(|s| Message::Doc(Msg::Terms(s))).padding([7, 10]).size(14).style(theme::input)].spacing(5).width(Fill).into()
     } else if !e.terms.is_empty() { column![ui::label("Notes"), ui::body(e.terms.clone())].spacing(5).width(Fill).into() } else { Space::new().width(Fill).into() };
