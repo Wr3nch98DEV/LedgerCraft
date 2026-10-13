@@ -2523,15 +2523,16 @@ fn desktop_menu_arrow_keys() {
         physical_key: iced::keyboard::key::Physical::Code(code), location: iced::keyboard::Location::Standard, modifiers: Modifiers::empty(), text: None, repeat: false };
     let (mut app, dir) = desktop_app("menukeys");
     let _ = app.update(Message::OpenMenu(Some("Customers")));
-    // Down highlights the first command (Customer Center), Down again skips the separator.
+    // Down highlights the first command (Customer Center); Down moves on, skipping separators.
     let _ = app.update(Message::Key(named(Named::ArrowDown, Code::ArrowDown)));
     assert_eq!(app.desk.menu_sel, Some(0));
     let _ = app.update(Message::Key(named(Named::ArrowDown, Code::ArrowDown)));
     let items = crate::desktop::menu_items(&app, "Customers");
-    assert_eq!(items[app.desk.menu_sel.unwrap()].0, "Create Estimates");
-    // Up twice wraps past the top to the last command.
-    let _ = app.update(Message::Key(named(Named::ArrowUp, Code::ArrowUp)));
-    let _ = app.update(Message::Key(named(Named::ArrowUp, Code::ArrowUp)));
+    assert_eq!(items[app.desk.menu_sel.unwrap()].0, "Job Costing Center");
+    let _ = app.update(Message::Key(named(Named::ArrowDown, Code::ArrowDown)));
+    assert_eq!(items[app.desk.menu_sel.unwrap()].0, "Create Estimates", "the separator is skipped");
+    // Up three times wraps past the top to the last command.
+    for _ in 0..3 { let _ = app.update(Message::Key(named(Named::ArrowUp, Code::ArrowUp))); }
     assert!(items[app.desk.menu_sel.unwrap()].2.is_some());
     assert!(app.desk.menu_sel.unwrap() > 2);
     // Back to Customer Center and Enter opens it.
