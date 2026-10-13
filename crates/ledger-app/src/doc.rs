@@ -57,6 +57,8 @@ pub struct Editor {
     pub submit: bool,
     /// The user chose to approve over the customer's credit limit.
     pub allow_over: bool,
+    /// Progress invoice: the percentage being entered (None = closed).
+    pub progress: Option<String>,
     /// QuickBooks invoices: the customer's open delayed charges/credits, and those added.
     pub delayed: Vec<Value>,
     pub added: Vec<i64>,
@@ -120,6 +122,8 @@ pub enum Msg {
     Submit,
     /// Approve anyway, over the customer's credit limit.
     OverLimit,
+    /// Progress invoicing on an estimate: open the box, the percentage, create the invoice.
+    ProgressOpen, ProgressPct(String), ProgressCreate,
     Send,
     Sent(Result<Value, String>),
     Delayed(Result<Value, String>),
@@ -235,7 +239,7 @@ impl Editor {
             lat: if app.country() == "US" { "EXCLUSIVE".into() } else { "EXCLUSIVE".into() },
             lines: vec![Line { qty: "1".into(), ..Default::default() }, Line { qty: "1".into(), ..Default::default() }],
             terms: String::new(), busy: false, editing: true,
-            pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false, submit: false, allow_over: false,
+            pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false, submit: false, allow_over: false, progress: None,
             delayed: vec![], added: vec![], items_tab: false, close_after: false, history: vec![], memo_open: false, memo_freq: "Monthly", memo_next: String::new(), memo_auto: false, apply: None, refund_open: false,
         };
         if let Some(a) = default_account(app, kind) { for l in &mut e.lines { l.account = Some(a.clone()); l.tax = default_tax(app, Some(a.id)); } }
@@ -607,6 +611,22 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, move |id| match id { Some(id) => Message::Nav(Route::Doc { kind: k2.clone(), id: Some(id) }), None => Message::Noop })
         }
         Msg::Submit => { e.submit = true; save(app, &mut e, false, false) }
+        Msg::ProgressOpen => {
+            // Suggest what's left to invoice.
+            let (total, done) = e.doc.as_ref().map(|d| (d["total"].as_i64().unwrap_or(0), d["progress_invoiced"].as_i64().unwrap_or(0))).unwrap_or((0, 0));
+            let left = if total > 0 { ((total - done) as f64 * 100.0 / total as f64).round() } else { 100.0 };
+            e.progress = if e.progress.is_some() { None } else { Some(format!("{left:.0}")) };
+            Task::none()
+        }
+        Msg::ProgressPct(s) => { e.progress = Some(s.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect()); Task::none() }
+        Msg::ProgressCreate => {
+            let Some(id) = e.id else { app.doc = Some(e); return Task::none() };
+            let Some(pct) = e.progress.as_deref().and_then(|s| s.parse::<f64>().ok()).filter(|p| *p > 0.0 && *p <= 100.0) else { app.doc = Some(e); return app.toast("Enter a percentage between 0 and 100", true) };
+            e.busy = true;
+            e.progress = None;
+            app.doc = Some(e);
+            return app.be.call("docs.progressInvoice", json!({"id": id, "percent_bp": (pct * 100.0).round() as i64}), |r| Message::Doc(Msg::ActionDone(r, "to_invoice")));
+        }
         Msg::OverLimit => { e.allow_over = true; e.error = None; save(app, &mut e, true, false) }
         Msg::Send => {
             let Some(id) = e.id else { app.doc = Some(e); return Task::none() };
@@ -965,6 +985,12 @@ pub fn view(app: &App) -> Element<'_, Message> {
         match (e.kind.as_str(), status) {
             ("QUOTE", "SENT" | "AUTHORISED" | "DRAFT") => { actions.push(ui::btn("Mark accepted", m(Msg::Action("accept")))); actions.push(ui::btn_primary(if app.skin == Skin::QuickBooks { "Create invoice" } else { "Convert to invoice" }, m(Msg::Action("to_invoice")))); }
             ("QUOTE", "ACCEPTED") => actions.push(ui::btn_primary(if app.skin == Skin::QuickBooks { "Create invoice" } else { "Convert to invoice" }, m(Msg::Action("to_invoice")))),
+            _ => {}
+        }
+        if e.kind == "QUOTE" && matches!(status, "SENT" | "AUTHORISED" | "ACCEPTED" | "DRAFT") && e.id.is_some() {
+            actions.insert(0, ui::btn("Progress invoice", m(Msg::ProgressOpen)));
+        }
+        match (e.kind.as_str(), status) {
             ("PO", "AUTHORISED") => actions.push(ui::btn_primary("Copy to bill", m(Msg::Action("to_bill")))),
             _ => {}
         }
@@ -991,6 +1017,23 @@ pub fn view(app: &App) -> Element<'_, Message> {
         Some(err) => container(text(err.clone()).size(13).color(k2.bad)).padding([8, 12]).style(theme::bad_soft).width(Fill).into(),
         None => Space::new().into(),
     };
+    // Progress invoicing: how much of the estimate is invoiced, and the box for the next part.
+    let progress_panel: Element<Message> = match (&e.doc, e.kind.as_str()) {
+        (Some(d), "QUOTE") if d["progress_invoiced"].as_i64().unwrap_or(0) > 0 || e.progress.is_some() => {
+            let (qt, done) = (d["total"].as_i64().unwrap_or(0), d["progress_invoiced"].as_i64().unwrap_or(0));
+            let pct = if qt > 0 { done as f64 * 100.0 / qt as f64 } else { 0.0 };
+            let mut col = column![row![ui::h2("Progress invoicing"), ui::hspace(), text(format!("Invoiced so far: {} of {} ({pct:.0}%)", ui::money(done), ui::money(qt))).size(14)].align_y(Alignment::Center)].spacing(10);
+            if let Some(p) = &e.progress {
+                col = col.push(row![
+                    text("Invoice").size(14), text_input("50", p).on_input(|s| Message::Doc(Msg::ProgressPct(s))).on_submit(Message::Doc(Msg::ProgressCreate)).padding([6, 9]).size(14).style(theme::input).width(80),
+                    text("% of the estimate").size(14), ui::hspace(),
+                    ui::btn("Cancel", m(Msg::ProgressOpen)), ui::btn_primary("Create invoice", m(Msg::ProgressCreate)),
+                ].spacing(8).align_y(Alignment::Center));
+            }
+            ui::card(col)
+        }
+        _ => Space::new().into(),
+    };
     let body: Element<Message> = match app.skin {
         Skin::QuickBooks if vocab::acumatica() => {
             // Acumatica record screen: toolbar along the top, summary area, then the details grid.
@@ -1012,20 +1055,20 @@ pub fn view(app: &App) -> Element<'_, Message> {
             let summary = ui::card(column![row![column![fields].width(Fill), Space::new().width(30),
                 column![text("BALANCE").size(12).font(BOLD).color(k.muted), text(ui::money(if e.doc.is_some() { due_amt } else { total })).size(24).font(BOLD)].spacing(2).align_x(Alignment::End)].align_y(Alignment::Start), fields2].spacing(14));
             let tabs = row![text("Details").size(14).font(BOLD), text("Financial").size(14).color(k.muted), text("Address").size(14).color(k.muted)].spacing(18);
-            column![toolbar, error, summary, tabs, table, add_line, ui::card(bottom), pay_panel].spacing(12).into()
+            column![toolbar, error, summary, progress_panel, tabs, table, add_line, ui::card(bottom), pay_panel].spacing(12).into()
         }
         Skin::QuickBooks => {
             // QuickBooks: big "balance due" on the right of the header card.
             let balance = column![text(if ledger_doc(&e.kind) { if sales(&e.kind) { "BALANCE DUE" } else { "BALANCE DUE" } } else { "TOTAL" }).size(12).font(BOLD).color(k.muted), text(ui::money(if e.doc.is_some() { due_amt } else { total })).size(30).font(BOLD)]
                 .spacing(2).align_x(Alignment::End);
             let header = ui::card(column![row![column![fields].width(Fill), Space::new().width(30), balance].align_y(Alignment::Start), fields2].spacing(16));
-            column![error, header, pay_panel, add_delayed(app, e), table, add_line, ui::card(bottom), footer_bar(actions)].spacing(14).into()
+            column![error, header, pay_panel, progress_panel, add_delayed(app, e), table, add_line, ui::card(bottom), footer_bar(actions)].spacing(14).into()
         }
         Skin::Xero => {
             let header = ui::card(column![fields, fields2].spacing(14));
             // Xero only offers Cancel while editing; an approved document just has its options.
             let cancel: Element<Message> = if editable { ui::btn("Cancel", Some(Message::Doc(Msg::Cancel))) } else { Space::new().into() };
-            column![error, header, table, add_line, ui::card(bottom), pay_panel, row![cancel, ui::hspace()].extend(actions).spacing(8)].spacing(14).into()
+            column![error, header, progress_panel, table, add_line, ui::card(bottom), pay_panel, row![cancel, ui::hspace()].extend(actions).spacing(8)].spacing(14).into()
         }
     };
     let title_el = column![

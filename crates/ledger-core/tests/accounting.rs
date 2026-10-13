@@ -850,3 +850,23 @@ fn credit_limit_and_credit_hold() {
     l.save_document(None, &doc("AUTHORISED", false)).unwrap();
     assert_invariants(&l);
 }
+
+#[test]
+fn progress_invoicing_from_an_estimate() {
+    let l = org();
+    let sales = acct(&l, "200");
+    let quote = l.save_document(None, &DocInput { kind: "QUOTE".into(), contact_name: Some("Acme".into()), date: "2026-02-01".into(), line_amount_type: Some("NOTAX".into()),
+        lines: vec![line(sales, None, "4", "250")], status: Some("SENT".into()), ..Default::default() }).unwrap();
+    let total = |id: i64| l.get_document(id).unwrap()["total"].as_i64().unwrap();
+    assert_eq!(total(quote), 100_000);
+    let first = l.progress_invoice(quote, 4_000, Some("2026-02-10")).unwrap();
+    assert_eq!(total(first), 40_000);
+    assert_eq!(l.get_document(quote).unwrap()["progress_invoiced"], 40_000);
+    // 70% more would be over the estimate.
+    let err = l.progress_invoice(quote, 7_000, None).unwrap_err().to_string();
+    assert!(err.contains("left to invoice"), "{err}");
+    let rest = l.progress_invoice(quote, 6_000, None).unwrap();
+    assert_eq!(total(rest), 60_000);
+    assert_eq!(l.get_document(quote).unwrap()["status"], "INVOICED");
+    assert!(l.progress_invoice(quote, 1_000, None).is_err());
+}

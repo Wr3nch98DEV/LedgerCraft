@@ -269,6 +269,7 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
         "docs.saveDelayed" => { need("sales:write")?; Ok(json!({"id": l.save_delayed(oi(p, "id"), &de::<DocInput>(&p["doc"])?, p["credit"].as_bool().unwrap_or(false))?})) }
         "docs.openDelayed" => { need("sales:read")?; Ok(json!(l.open_delayed(i(p, "contact_id")?)?)) }
         "docs.setStatus" => { let d = l.get_document(id(p)?)?; need(doc_perm(&d, true))?; l.set_document_status(id(p)?, s(p, "status"))?; ok() }
+        "docs.progressInvoice" => { need("sales:write")?; Ok(json!({"id": l.progress_invoice(id(p)?, p["percent_bp"].as_i64().unwrap_or(0), p["date"].as_str())?})) }
         "docs.copy" => { let d = l.get_document(id(p)?)?; need(doc_perm(&d, true))?; Ok(json!({"id": l.copy_document(id(p)?, s(p, "to"), p["date"].as_str())?})) }
         "docs.markSent" => { l.mark_sent(id(p)?)?; ok() }
         "docs.email" => { let d = l.get_document(id(p)?)?; need(doc_perm(&d, true))?; Ok(ledger_core::email::email_document(l, id(p)?, os(p, "to"), os(p, "subject"), os(p, "body"))?) }

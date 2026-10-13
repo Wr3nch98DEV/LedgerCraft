@@ -3841,3 +3841,25 @@ fn invoice_profitability_from_item_costs() {
     drop(ui); drop(_g);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn progress_invoice_from_an_estimate_in_the_app() {
+    use crate::doc::Msg as D;
+    let (mut app, dir) = desktop_app("progress");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Online)); settle(&mut app, t);
+    let cust = app.lk.contact_opts(true)[0].id;
+    let q = app.be.call_now("docs.save", json!({"doc": {"type": "QUOTE", "contact_id": cust, "date": "2026-10-01", "line_amount_type": "NOTAX", "status": "SENT",
+        "lines": [{"description": "Fit-out", "quantity": "1", "unit_price": "2000"}]}})).unwrap()["id"].as_i64().unwrap();
+    let t = app.update(Message::Nav(Route::Doc { kind: "QUOTE".into(), id: Some(q) })); settle(&mut app, t);
+    press(&mut app, "Progress invoice");
+    assert_eq!(app.doc.as_ref().unwrap().progress.as_deref(), Some("100"), "suggests what's left");
+    let _ = app.update(Message::Doc(D::ProgressPct("25".into())));
+    press(&mut app, "Create invoice");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let inv = match &app.route { Route::Doc { kind, id: Some(id) } if kind == "ACCREC" => *id, r => panic!("{r:?}") };
+    assert_eq!(app.be.call_now("docs.get", json!({"id": inv})).unwrap()["total"], 50000);
+    // Back on the estimate: 25% invoiced so far.
+    let t = app.update(Message::Nav(Route::Doc { kind: "QUOTE".into(), id: Some(q) })); settle(&mut app, t);
+    assert!(!click_fails(&app, "Progress invoicing"));
+    let _ = std::fs::remove_dir_all(dir);
+}

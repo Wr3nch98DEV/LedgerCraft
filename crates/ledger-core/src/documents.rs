@@ -468,7 +468,53 @@ impl Ledger {
              WHERE li.parent_kind = 'DOC' AND li.parent_id = ?1 AND li.tax_amount <> 0 GROUP BY t.id", [id])?);
         d["history"] = json!(self.history("document", id)?);
         d["attachments"] = json!(util::query_json(&self.conn, "SELECT id, filename, mime, size, created_at FROM attachments WHERE entity = 'document' AND entity_id = ?1", [id])?);
+        // Estimates: how much has been invoiced from them so far (progress invoicing).
+        if d["type"] == "QUOTE" { d["progress_invoiced"] = json!(self.progress_invoiced(id)?); }
         Ok(d)
+    }
+
+    /// Total of the (live) invoices made from an estimate.
+    pub fn progress_invoiced(&self, quote: i64) -> Result<i64> {
+        Ok(self.conn.query_row("SELECT COALESCE(SUM(total), 0) FROM documents WHERE type = 'ACCREC' AND source_document_id = ?1 AND status NOT IN ('DELETED','VOIDED')", [quote], |r| r.get(0))?)
+    }
+
+    /// Progress invoicing (QuickBooks, Sage, Acumatica): a draft invoice for a percentage of an
+    /// estimate (each line's price scaled), never more than what's left to invoice. The estimate
+    /// closes (Invoiced) once it's fully invoiced.
+    pub fn progress_invoice(&self, quote: i64, percent_bp: i64, date: Option<&str>) -> Result<i64> {
+        let d = self.get_document(quote)?;
+        if d["type"] != "QUOTE" { return invalid("progress invoices are made from estimates/quotes"); }
+        if !matches!(d["status"].as_str(), Some("SENT" | "ACCEPTED" | "AUTHORISED" | "DRAFT")) { return invalid("this estimate is already fully invoiced or closed"); }
+        if percent_bp <= 0 || percent_bp > 10_000 { return invalid("enter a percentage between 0 and 100"); }
+        let total = d["total"].as_i64().unwrap_or(0);
+        let done = self.progress_invoiced(quote)?;
+        let want = (total as i128 * percent_bp as i128 / 10_000) as i64;
+        if done + want > total + 1 {
+            let left = total - done;
+            return invalid(format!("only {} ({:.0}%) of this estimate is left to invoice", money::fmt_money(left), if total > 0 { left as f64 * 100.0 / total as f64 } else { 0.0 }));
+        }
+        let pct = money::fmt_fixed(percent_bp, 2);
+        let lines: Vec<LineInput> = d["lines"].as_array().unwrap().iter().map(|l| LineInput {
+            item_id: l["item_id"].as_i64(),
+            description: format!("{} ({}% of estimate {})", l["description"].as_str().unwrap_or(""), pct.trim_end_matches('0').trim_end_matches('.'), d["number"].as_str().unwrap_or("")),
+            quantity: Some(money::fmt_fixed(l["qty_e4"].as_i64().unwrap_or(0), 4)),
+            unit_price: Some(money::fmt_fixed((l["unit_e2"].as_i64().unwrap_or(0) as i128 * percent_bp as i128 / 10_000) as i64, 4)),
+            discount: Some(money::fmt_fixed(l["discount_bp"].as_i64().unwrap_or(0), 2)), account_id: l["account_id"].as_i64(), tax_rate_id: l["tax_rate_id"].as_i64(),
+            tracking1: l["tracking1"].as_i64(), tracking2: l["tracking2"].as_i64(), amount: None,
+        }).collect();
+        let input = DocInput {
+            kind: "ACCREC".into(), contact_id: d["contact_id"].as_i64(), reference: d["number"].as_str().unwrap_or("").into(),
+            date: date.map(String::from).unwrap_or_else(util::today), line_amount_type: d["line_amount_type"].as_str().map(String::from), currency: d["currency"].as_str().map(String::from),
+            lines, title: d["title"].as_str().unwrap_or("").into(), terms: d["terms"].as_str().unwrap_or("").into(), source_document_id: Some(quote), ..Default::default()
+        };
+        self.atomic(|| {
+            let nid = self.save_document(None, &input)?;
+            let invoiced = self.progress_invoiced(quote)?;
+            if invoiced >= total - 1 { self.set_document_status_inner(quote, "INVOICED", false)?; }
+            self.add_note("document", nid, "HISTORY", &format!("Progress invoice for {pct}% of {}", d["number"].as_str().unwrap_or("")))?;
+            self.add_note("document", quote, "HISTORY", &format!("Progress invoice for {pct}% created ({} invoiced so far)", money::fmt_money(invoiced)))?;
+            Ok(nid)
+        })
     }
 
     /// List documents of a type, filtered by a status tab, with per-tab counts.
