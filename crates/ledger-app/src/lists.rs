@@ -84,7 +84,7 @@ fn type_label(app: &App, kind: &str) -> &'static str {
         "ACCPAYCREDIT" => app.term("supplier_credit"), "PO" => app.term("po"), _ => "Transaction" }
 }
 
-fn search_and_tabs<'a>(app: &'a App, tabs: &[(&'static str, String)]) -> Element<'a, Message> {
+pub(crate) fn search_and_tabs<'a>(app: &'a App, tabs: &[(&'static str, String)]) -> Element<'a, Message> {
     let k = t();
     let mut r = row![].spacing(2).align_y(Alignment::Center);
     for (key, label) in tabs {

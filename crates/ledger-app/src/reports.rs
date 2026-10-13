@@ -57,6 +57,8 @@ impl std::fmt::Display for Negative {
 
 #[derive(Default)]
 pub struct State {
+    /// Starred reports (QuickBooks Favorites, Xero Favourites), kept in the company's prefs.
+    pub favs: Option<Vec<String>>,
     pub period: Period,
     pub cash: bool,
     /// Customize panel open.
@@ -79,6 +81,8 @@ pub struct State {
 pub enum Msg {
     Period(Period), Basis(bool), Export(bool), Exported(Result<String, String>),
     Customize, From(String), To(String), Columns(Columns), Negative(Negative), ShowZero(bool), Contact(Option<Opt>), Run, HideHeader, Zoom(i64), Memorize, MemoName(String), MemoSave, RunMemorized(usize), DeleteMemorized(usize),
+    /// Star or unstar a report on the reports page.
+    Star(String),
 }
 
 /// The report's dates: the chosen period, or the custom dates when they parse.
@@ -177,6 +181,18 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             if r.period != Period::Custom { let (f, t) = r.period.range(); let (f, t) = (app.d(&f), app.d(&t)); app.report.from = f; app.report.to = t; }
             return app.go(Route::Report(s("key")));
         }
+        Msg::Star(key) => {
+            let mut favs = favourites(app);
+            if let Some(i) = favs.iter().position(|f| *f == key) { favs.remove(i); } else { favs.push(key); }
+            // Kept per company, like memorized reports.
+            let org = app.org_name();
+            let mut p = app.prefs();
+            if !p["report_favs"].is_object() { p["report_favs"] = json!({}); }
+            p["report_favs"][org.as_str()] = json!(favs);
+            app.write_prefs(&p);
+            app.report.favs = Some(favs);
+            return Task::none();
+        }
         Msg::DeleteMemorized(n) => {
             let org = app.org_name();
             let mut prefs = app.prefs();
@@ -257,25 +273,65 @@ fn qb_group(key: &str) -> &'static str {
 
 const FAVOURITES: [&str; 5] = ["profit-and-loss", "balance-sheet", "cash-flow-statement", "aged-receivables", "aged-payables"];
 
+/// The starred reports: the user's choice, or the usual favourites until they pick.
+pub fn favourites(app: &App) -> Vec<String> {
+    app.report.favs.clone().unwrap_or_else(|| FAVOURITES.iter().map(|s| s.to_string()).collect())
+}
+
 pub fn centre(app: &App) -> Element<'_, Message> {
     let Some(d) = &app.data else { return ui::page(ui::h1("Reports"), vec![], ui::muted("Loading…")) };
     let k = t();
+    let qb = app.skin == Skin::QuickBooks;
+    // Tabs (QuickBooks: Standard / Custom reports; Xero: All reports / Custom) and a search box.
+    let tabs: Vec<(&'static str, String)> = if qb { vec![("all", "Standard reports".into()), ("custom", "Custom reports".into())] } else { vec![("all", "All reports".into()), ("custom", "Custom".into())] };
+    let top = crate::lists::search_and_tabs(app, &tabs);
+    if app.list_tab == "custom" {
+        let q = app.list_q.to_lowercase();
+        let saved = app.memorized_reports();
+        let mut list = column![].spacing(0);
+        for (n, m) in saved.iter().enumerate().filter(|(_, m)| m["name"].as_str().unwrap_or("").to_lowercase().contains(&q)) {
+            list = list.push(button(row![icon("reports", 16.0, k.accent), text(m["name"].as_str().unwrap_or("").to_string()).size(14).color(k.accent)].spacing(10).align_y(Alignment::Center))
+                .style(theme::row_btn).padding([8, 10]).width(Fill).on_press(Message::Report(Msg::RunMemorized(n))));
+        }
+        for l in d.as_array().cloned().unwrap_or_default().into_iter().filter(|l| l["name"].as_str().unwrap_or("").to_lowercase().contains(&q)) {
+            let id = l["id"].as_i64().unwrap_or(0);
+            list = list.push(button(row![icon("layout", 16.0, k.accent), text(l["name"].as_str().unwrap_or("").to_string()).size(14).color(k.accent)].spacing(10).align_y(Alignment::Center))
+                .style(theme::row_btn).padding([8, 10]).width(Fill).on_press(Message::Nav(Route::Report(format!("layout:{id}")))));
+        }
+        let empty = saved.is_empty() && d.as_array().is_none_or(|a| a.is_empty());
+        let body = column![top, ui::card(column![
+            row![ui::h2(if qb { "Custom reports" } else { "Custom" }), ui::hspace(), ui::btn("New custom report", Some(Message::Nav(Route::CustomReports)))].align_y(Alignment::Center),
+            if empty { ui::muted("Nothing saved yet. Customise a report and save it, or build your own layout.") } else { list.into() },
+        ].spacing(8))].spacing(16);
+        return ui::page(ui::h1("Reports"), vec![], body.into());
+    }
+    let favs = favourites(app);
+    let q = app.list_q.to_lowercase();
     // 1099s are US-only.
     let us = app.country() == "US";
-    let cat: Vec<Value> = d.as_array().cloned().unwrap_or_default().into_iter().filter(|r| us || !matches!(r["key"].as_str(), Some("contractor-1099" | "sales-tax-by-agency"))).collect();
+    let cat: Vec<Value> = d.as_array().cloned().unwrap_or_default().into_iter().filter(|r| us || !matches!(r["key"].as_str(), Some("contractor-1099" | "sales-tax-by-agency")))
+        .filter(|r| q.is_empty() || name(app.skin, r["key"].as_str().unwrap_or(""), r["title"].as_str().unwrap_or("")).to_lowercase().contains(&q) || r["description"].as_str().unwrap_or("").to_lowercase().contains(&q)).collect();
     let link_row = |key: String, title: String, desc: String| -> Element<'_, Message> {
-        button(row![icon("reports", 16.0, k.accent), column![text(title).size(14).color(k.accent), ui::muted(desc)].spacing(1)].spacing(10).align_y(Alignment::Center))
-            .style(theme::row_btn).padding([8, 10]).width(Fill).on_press(Message::Nav(Route::Report(key))).into()
+        let on = favs.contains(&key);
+        let star = button(icon(if on { "star-on" } else { "star" }, 16.0, if on { k.warn } else { k.faint })).style(theme::row_btn).padding(6).on_press(Message::Report(Msg::Star(key.clone())));
+        row![
+            button(row![icon("reports", 16.0, k.accent), column![text(title).size(14).color(k.accent), ui::muted(desc)].spacing(1)].spacing(10).align_y(Alignment::Center))
+                .style(theme::row_btn).padding([8, 10]).width(Fill).on_press(Message::Nav(Route::Report(key))),
+            star,
+        ].align_y(Alignment::Center).into()
     };
     let groups: Vec<(String, Vec<Value>)> = match app.skin {
         Skin::QuickBooks => {
             let order = ["Favourites", "Business overview", "Who owes you", "Sales and customers", "What you owe", "Expenses and vendors", "Sales tax", "Employees", "For my accountant", "Inventory, assets and projects"];
-            order.iter().map(|g| (g.to_string(), cat.iter().filter(|r| if *g == "Favourites" { FAVOURITES.contains(&r["key"].as_str().unwrap_or("")) } else { qb_group(r["key"].as_str().unwrap_or("")) == *g }).cloned().collect())).collect()
+            order.iter().map(|g| (if *g == "Favourites" { "Favorites".to_string() } else { g.to_string() }, cat.iter().filter(|r| if *g == "Favourites" { favs.iter().any(|f| r["key"] == f.as_str()) } else { qb_group(r["key"].as_str().unwrap_or("")) == *g }).cloned().collect())).collect()
         }
         Skin::Xero => {
             let mut seen: Vec<String> = vec![];
             for r in &cat { let c = r["category"].as_str().unwrap_or("").to_string(); if !seen.contains(&c) { seen.push(c); } }
-            seen.into_iter().map(|g| { let items = cat.iter().filter(|r| r["category"] == g.as_str()).cloned().collect(); (g, items) }).collect()
+            // Xero puts the starred reports in a Favourites section at the top.
+            let starred: Vec<Value> = cat.iter().filter(|r| favs.iter().any(|f| r["key"] == f.as_str())).cloned().collect();
+            std::iter::once(("Favourites".to_string(), starred))
+                .chain(seen.into_iter().map(|g| { let items = cat.iter().filter(|r| r["category"] == g.as_str()).cloned().collect(); (g, items) })).collect()
         }
     };
     let mut col = column![].spacing(16);
@@ -287,7 +343,8 @@ pub fn centre(app: &App) -> Element<'_, Message> {
         }
         col = col.push(ui::card(column![ui::h2(g), list].spacing(8)));
     }
-    ui::page(ui::h1("Reports"), vec![], col.into())
+    if cat.is_empty() { col = col.push(ui::card(ui::muted("No reports match that search."))); }
+    ui::page(ui::h1("Reports"), vec![], column![top, col].spacing(16).into())
 }
 
 /// QuickBooks wording for the engine's report section names.

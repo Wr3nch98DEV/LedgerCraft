@@ -3612,3 +3612,28 @@ fn online_sales_action_column_receives_payment() {
     drop(ui); drop(_g);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn reports_page_star_search_and_custom_tab() {
+    use crate::reports::Msg as R;
+    let (mut app, dir) = desktop_app("rep-favs");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Xero)); settle(&mut app, t);
+    let t = app.update(Message::Nav(Route::Reports)); settle(&mut app, t);
+    assert!(!crate::reports::favourites(&app).contains(&"trial-balance".to_string()));
+    let _ = app.update(Message::Report(R::Star("trial-balance".into())));
+    assert!(crate::reports::favourites(&app).contains(&"trial-balance".to_string()));
+    // Kept for next time.
+    app.report.favs = None;
+    let t = app.update(Message::Nav(Route::Reports)); settle(&mut app, t);
+    assert!(crate::reports::favourites(&app).contains(&"trial-balance".to_string()));
+    // Search narrows the list; Custom shows saved layouts.
+    let _ = app.update(Message::ListQuery("aged".into()));
+    {
+        let _g = sim_lock();
+        let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 1400.0), app.view());
+        assert!(ui.find("Balance Sheet").is_err() && ui.find("Favourites").is_ok());
+    }
+    let t = app.update(Message::ListTab("custom")); settle(&mut app, t);
+    let _ = click(&app, "New custom report");
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -537,7 +537,10 @@ impl App {
                 }, move |r| Message::Loaded(g, r))
             }
             Route::Banking(acc) => banking::load(self, acc),
-            Route::Reports => call("reports.catalogue", json!({})),
+            Route::Reports => {
+                self.report.favs = self.prefs()["report_favs"][self.org_name().as_str()].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect());
+                if self.list_tab == "custom" && !self.desktop() { call("layouts.list", json!({})) } else { call("reports.catalogue", json!({})) }
+            }
             Route::Report(key) => reports::load(self, &key),
             Route::Doc { kind, id } => doc::open(self, kind, id),
             Route::ReceivePayment(contact) => payments::open_receive(self, contact),
@@ -728,7 +731,8 @@ impl App {
                 };
                 self.go(r)
             }
-            Message::ListQuery(q) => { self.list_q = q; self.load() }
+            // The reports page filters what it already has; lists search in the engine.
+            Message::ListQuery(q) => { self.list_q = q; if self.route == Route::Reports { Task::none() } else { self.load() } }
             // Xero's "Repeating" tab on invoices and bills is the repeating transactions list.
             Message::ListTab("repeating") => self.update(Message::Nav(Route::Memorized)),
             Message::ListTab(t) => { self.list_tab = t; self.load() }

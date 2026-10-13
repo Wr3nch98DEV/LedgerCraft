@@ -43,6 +43,8 @@ fn path(name: &str) -> &'static str {
         "menu" => r#"<path d="M4 6h16M4 12h16M4 18h16"/>"#,
         "x" => r#"<path d="M6 6l12 12M18 6L6 18"/>"#,
         "check" => r#"<path d="M5 12.5l4.5 4.5L19 7.5"/>"#,
+        "star" => r#"<path d="M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/>"#,
+        "star-on" => r#"<path fill="black" d="M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/>"#,
         "trash" => r#"<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>"#,
         "swap" => r#"<path d="M4 8h14l-3-3M20 16H6l3 3"/>"#,
         "file" => r#"<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>"#,
