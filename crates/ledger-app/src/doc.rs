@@ -59,6 +59,8 @@ pub struct Editor {
     pub allow_over: bool,
     /// Progress invoice: the percentage being entered (None = closed).
     pub progress: Option<String>,
+    /// Acumatica record screen: the tab showing under the summary (details, financial, address).
+    pub acu_tab: &'static str,
     /// QuickBooks invoices: the customer's open delayed charges/credits, and those added.
     pub delayed: Vec<Value>,
     pub added: Vec<i64>,
@@ -124,6 +126,8 @@ pub enum Msg {
     OverLimit,
     /// Progress invoicing on an estimate: open the box, the percentage, create the invoice.
     ProgressOpen, ProgressPct(String), ProgressCreate,
+    /// Acumatica record screen tab.
+    AcuTab(&'static str),
     Send,
     Sent(Result<Value, String>),
     Delayed(Result<Value, String>),
@@ -251,7 +255,7 @@ impl Editor {
             lat: if app.country() == "US" { "EXCLUSIVE".into() } else { "EXCLUSIVE".into() },
             lines: vec![Line { qty: "1".into(), ..Default::default() }, Line { qty: "1".into(), ..Default::default() }],
             terms: String::new(), busy: false, editing: true,
-            pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false, submit: false, allow_over: false, progress: None,
+            pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false, submit: false, allow_over: false, progress: None, acu_tab: "details",
             delayed: vec![], added: vec![], items_tab: false, close_after: false, history: vec![], memo_open: false, memo_freq: "Monthly", memo_next: String::new(), memo_auto: false, apply: None, refund_open: false,
         };
         if let Some(a) = default_account(app, kind) { for l in &mut e.lines { l.account = Some(a.clone()); l.tax = default_tax(app, Some(a.id)); } }
@@ -631,6 +635,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, move |id| match id { Some(id) => Message::Nav(Route::Doc { kind: k2.clone(), id: Some(id) }), None => Message::Noop })
         }
         Msg::Submit => { e.submit = true; save(app, &mut e, false, false) }
+        Msg::AcuTab(t) => { e.acu_tab = t; Task::none() }
         Msg::ProgressOpen => {
             // Suggest what's left to invoice.
             let (total, done) = e.doc.as_ref().map(|d| (d["total"].as_i64().unwrap_or(0), d["progress_invoiced"].as_i64().unwrap_or(0))).unwrap_or((0, 0));
@@ -1074,8 +1079,36 @@ pub fn view(app: &App) -> Element<'_, Message> {
             ].extend(actions).spacing(6).align_y(Alignment::Center)).padding([6, 10]).style(theme::topbar).width(Fill);
             let summary = ui::card(column![row![column![fields].width(Fill), Space::new().width(30),
                 column![text("BALANCE").size(12).font(BOLD).color(k.muted), text(ui::money(if e.doc.is_some() { due_amt } else { total })).size(24).font(BOLD)].spacing(2).align_x(Alignment::End)].align_y(Alignment::Start), fields2].spacing(14));
-            let tabs = row![text("Details").size(14).font(BOLD), text("Financial").size(14).color(k.muted), text("Address").size(14).color(k.muted)].spacing(18);
-            column![toolbar, error, summary, progress_panel, tabs, table, add_line, ui::card(bottom), pay_panel].spacing(12).into()
+            let tabs = row(["Details", "Financial", "Address"].into_iter().map(|label| {
+                let key: &'static str = match label { "Financial" => "financial", "Address" => "address", _ => "details" };
+                let on = e.acu_tab == key;
+                button(text(label).size(14).font(if on { BOLD } else { iced::Font::DEFAULT })).style(theme::tab(on)).padding([6, 12]).on_press(Message::Doc(Msg::AcuTab(key))).into()
+            })).spacing(4);
+            let pair = |l: &'static str, v: String| -> Element<'_, Message> { column![ui::label(l), text(if v.is_empty() { "—".to_string() } else { v }).size(14)].spacing(4).width(Fill).into() };
+            let d = e.doc.clone().unwrap_or(Value::Null);
+            let contact = e.contact.as_ref().and_then(|c| app.lk.contacts.iter().find(|x| x["id"].as_i64() == Some(c.id))).cloned().unwrap_or(Value::Null);
+            let sv = |v: &Value, k: &str| v[k].as_str().unwrap_or("").to_string();
+            let tab_body: Element<Message> = match e.acu_tab {
+                "financial" => {
+                    let iso = ui::to_iso(&e.date, app.date_style()).unwrap_or_default();
+                    let period = if iso.len() >= 7 { format!("{}-{}", &iso[5..7], &iso[..4]) } else { String::new() };
+                    let rate = d["rate_e8"].as_i64().filter(|r| *r != 100_000_000).map(|r| format!("{:.6}", r as f64 / 1e8)).unwrap_or_else(|| "1.000000".into());
+                    let source = d["source_document_id"].as_i64();
+                    ui::card(column![
+                        row![pair("Post period", period), pair("Currency", sv(&d, "currency")), pair("Exchange rate", rate)].spacing(14),
+                        row![pair("Due date", e.due.clone()), pair("GL batch", d["journal_id"].as_i64().map(|j| format!("Journal {j}")).unwrap_or_default()), pair("Company", app.org_name())].spacing(14),
+                        row![pair("Emailed", if d["sent"] == 1 { "Yes".into() } else { "No".into() }),
+                            column![ui::label("Original document"), match source { Some(id) => ui::link("Open", Message::Nav(Route::Doc { kind: "QUOTE".into(), id: Some(id) })), None => text("—").size(14).into() }].spacing(4).width(Fill),
+                            pair("Status", status_label.to_string())].spacing(14),
+                    ].spacing(14)).into()
+                }
+                "address" => ui::card(column![
+                    row![pair("Business account", e.contact.as_ref().map(|c| c.label.clone()).unwrap_or_default()), pair("Email", sv(&contact, "email")), pair("Phone", sv(&contact, "phone"))].spacing(14),
+                    row![pair("Bill-to address", sv(&contact, "postal_address")), pair("Ship-to address", { let a = sv(&d, "delivery_address"); if a.is_empty() { sv(&contact, "street_address") } else { a } }), pair("Attention", sv(&d, "attention"))].spacing(14),
+                ].spacing(14)).into(),
+                _ => column![table, add_line].spacing(12).into(),
+            };
+            column![toolbar, error, summary, progress_panel, tabs, tab_body, ui::card(bottom), pay_panel].spacing(12).into()
         }
         Skin::QuickBooks => {
             // QuickBooks: big "balance due" on the right of the header card.

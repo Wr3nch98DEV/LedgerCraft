@@ -3965,3 +3965,34 @@ fn w2_wage_and_tax_summary() {
     assert!(!click_fails(&app, "W-2 Wage and Tax Summary"));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn acumatica_record_tabs() {
+    let (mut app, dir) = desktop_app("acu-tabs");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Acumatica)); settle(&mut app, t);
+    let inv = app.be.call_now("docs.list", json!({"type": "ACCREC", "limit": 5})).unwrap()["rows"][0]["id"].as_i64().unwrap();
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: Some(inv) })); settle(&mut app, t);
+    press(&mut app, "Financial");
+    assert!(!click_fails(&app, "Post period") && !click_fails(&app, "Exchange rate"));
+    press(&mut app, "Address");
+    assert!(!click_fails(&app, "Bill-to address"));
+    press(&mut app, "Details");
+    assert_eq!(app.doc.as_ref().unwrap().acu_tab, "details");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn sage_bank_feed_table() {
+    let (mut app, dir) = demo_app("sage-bank", Skin::Xero);
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Sage)); settle(&mut app, t);
+    let t = app.update(Message::Nav(Route::Banking(None))); settle(&mut app, t);
+    for label in ["Bank Feed Transactions", "Matched", "Ignored", "LEDGER ACCOUNT / MATCH", "Other payment"] { assert!(!click_fails(&app, label), "{label}"); }
+    // Rule suggestions are created with one click.
+    let before = app.data.as_ref().unwrap()["lines"].as_array().unwrap().len();
+    let msgs = click(&app, "Create");
+    assert!(!msgs.is_empty());
+    for m in msgs { let t = app.update(m); settle(&mut app, t); }
+    let after = app.data.as_ref().unwrap()["lines"].as_array().unwrap().len();
+    assert!(after <= before);
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -354,7 +354,8 @@ fn map_view<'a>(app: &'a App, m: &'a CsvMap) -> Element<'a, Message> {
 pub fn view(app: &App) -> Element<'_, Message> {
     if let Some(m) = &app.bank.map { return map_view(app, m); }
     let qb = app.skin == Skin::QuickBooks;
-    let title = if qb { "Bank transactions" } else { "Bank accounts" };
+    let sage = crate::vocab::sage();
+    let title = if qb { "Bank transactions" } else if sage { "Bank Feed Transactions" } else { "Bank accounts" };
     let Some(d) = &app.data else {
         let body: Element<Message> = match &app.error { Some(e) => ui::card(column![ui::h2("Couldn't load"), ui::muted(e.clone())].spacing(6)), None => ui::muted("Loading…") };
         return ui::page(ui::h1(title), vec![], body);
@@ -371,7 +372,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             text(b["name"].as_str().unwrap_or("").to_string()).size(14).font(BOLD),
             row![ui::muted("Bank balance"), ui::hspace(), text(if b["last_statement_date"].is_null() { "—".into() } else { ui::money(i(&b["statement_balance"])) }).size(13)],
             row![ui::muted("In LedgerCraft"), ui::hspace(), text(ui::money(i(&b["ledger_balance_fx"]))).size(13)],
-            if review > 0 { ui::chip(&format!("{review} {}", if qb { "for review" } else { "to reconcile" }), k.accent) } else { ui::chip("Up to date", k.ok) },
+            if review > 0 { ui::chip(&format!("{review} {}", if qb { "for review" } else if crate::vocab::sage() { "to review" } else { "to reconcile" }), k.accent) } else { ui::chip("Up to date", k.ok) },
         ].spacing(5);
         button(content).padding(14).width(if desk { Length::Fill } else { Length::Fixed(260.0) }).on_press(Message::Bank(Msg::Account(id)))
             .style(move |_, s| {
@@ -392,9 +393,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
     };
     let lines: &[Value] = d["lines"].as_array().map(|v| v.as_slice()).unwrap_or(&[]);
     let tabs = row![
-        tab(if qb { format!("For review ({})", if app.bank.tab == Tab::Review { lines.len() } else { 0 }) } else { "Reconcile".into() }, Tab::Review),
-        tab(if qb { "Categorized".into() } else { "Reconciled".into() }, Tab::Categorized),
-        tab(if qb { "Excluded".into() } else { "Deleted lines".into() }, Tab::Excluded),
+        tab(if qb { format!("For review ({})", if app.bank.tab == Tab::Review { lines.len() } else { 0 }) } else if sage { format!("To Review ({})", if app.bank.tab == Tab::Review { lines.len() } else { 0 }) } else { "Reconcile".into() }, Tab::Review),
+        tab(if qb { "Categorized".into() } else if sage { "Matched".into() } else { "Reconciled".into() }, Tab::Categorized),
+        tab(if qb { "Excluded".into() } else if sage { "Ignored".into() } else { "Deleted lines".into() }, Tab::Excluded),
         ui::hspace(),
         if app.bank.tab == Tab::Review && !lines.is_empty() { ui::btn(if qb { "Accept all matches" } else { "Auto-reconcile exact matches" }, Some(Message::Bank(Msg::AcceptAll))) } else { Space::new().into() },
     ].align_y(Alignment::Center).spacing(4);
@@ -402,7 +403,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     // ---- table ----
     let review = app.bank.tab == Tab::Review;
     let cols: Vec<(&str, u16, bool)> = if review {
-        vec![("Date", 10, false), ("Description", 30, false), ("Spent", 11, true), ("Received", 11, true), (if qb { "Assign to" } else { "Match / create" }, 25, false), ("Action", 13, false)]
+        vec![("Date", 10, false), ("Description", 30, false), ("Spent", 11, true), ("Received", 11, true), (if qb { "Assign to" } else if sage { "Ledger account / match" } else { "Match / create" }, 25, false), ("Action", 13, false)]
     } else {
         vec![("Date", 10, false), ("Description", 40, false), ("Spent", 12, true), ("Received", 12, true), ("Action", 12, false)]
     };
@@ -426,7 +427,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             let s = &l["suggest"];
             let _ = (s, is_match);
             let action: Element<Message> = if let Some(a) = primary_action(l) {
-                let label = if qb { if matches!(a, Msg::ApplyRule(_)) { "Add" } else { "Match" } } else { "OK" };
+                let label = if qb { if matches!(a, Msg::ApplyRule(_)) { "Add" } else { "Match" } } else if sage { if matches!(a, Msg::ApplyRule(_)) { "Create" } else { "Match" } } else { "OK" };
                 ui::btn_primary(label, if busy { None } else { Some(Message::Bank(a)) })
             } else {
                 ui::btn(if app.bank.expanded == Some(id) { "Close" } else { if qb { "Categorize" } else { "Create" } }, Some(Message::Bank(Msg::Expand(id))))
@@ -442,7 +443,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
         if review && app.bank.expanded == Some(id) { table = table.push(detail(app, l)); }
         table = table.push(ui::hr());
     }
-    let list: Element<Message> = if !qb && review { xero_cards(app, lines) } else { container(table).style(theme::card).width(Fill).clip(true).into() };
+    // Sage lists its bank feed as a table, like QuickBooks; Xero pairs each line with its match.
+    let list: Element<Message> = if !qb && !sage && review { xero_cards(app, lines) } else { container(table).style(theme::card).width(Fill).clip(true).into() };
     if desk {
         // QuickBooks Desktop Bank Feeds Center: accounts down the left, transactions to review on the right.
         let head = row![text("Bank Feeds Center").size(20).font(BOLD), ui::hspace(),
@@ -454,7 +456,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let body = column![tiles, tabs, list].spacing(16);
     let actions: Vec<Element<Message>> = vec![
         ui::btn(if qb { "Upload from file" } else { "Import a statement" }, acc.map(|_| Message::Bank(Msg::Upload))),
-        ui::btn(if qb { "Record expense" } else { "Spend money" }, Some(Message::Nav(Route::Spend(acc)))),
+        ui::btn(if qb { "Record expense" } else if sage { "Other payment" } else { "Spend money" }, Some(Message::Nav(Route::Spend(acc)))),
     ];
     ui::page(ui::h1(title), actions, body.into())
 }
@@ -579,7 +581,7 @@ fn detail<'a>(app: &'a App, l: &'a Value) -> Element<'a, Message> {
     container(column![
         text(if qb { "Categorize" } else { "Create a transaction" }).size(13).font(BOLD).color(k.muted), cat_form(app, l),
         text(if qb { "Or find a match" } else { "Or match an existing transaction" }).size(13).font(BOLD).color(k.muted), matches,
-        row![ui::hspace(), ui::btn(if qb { "Exclude" } else { "Delete statement line" }, if app.bank.busy { None } else { Some(Message::Bank(Msg::Exclude(id, true))) })],
+        row![ui::hspace(), ui::btn(if qb { "Exclude" } else if crate::vocab::sage() { "Ignore" } else { "Delete statement line" }, if app.bank.busy { None } else { Some(Message::Bank(Msg::Exclude(id, true))) })],
     ].spacing(10)).padding([14, 16]).style(theme::soft).width(Fill).into()
 }
 
