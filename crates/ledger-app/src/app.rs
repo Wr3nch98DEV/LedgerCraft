@@ -104,6 +104,12 @@ pub enum Route {
     Find,
     /// Apps / connected apps: what LedgerCraft connects to and how.
     Apps,
+    /// Fixed assets register: draft, registered and disposed assets; depreciation runs.
+    FixedAssets,
+    /// Audit log / History and notes.
+    AuditLog,
+    /// Currencies and exchange rates.
+    Currencies,
     /// QuickBooks Desktop Enter Time (single activity against a project task).
     EnterTime,
     NewProduct,
@@ -167,6 +173,8 @@ impl Lookups {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// The fixed assets, audit log and currencies screens.
+    Extras(crate::extras::Msg),
     Nav(Route),
     Back,
     Session(Reply),
@@ -221,6 +229,7 @@ pub struct App {
     pub skin: Skin,
     pub layout: Layout,
     pub desk: crate::desktop::State,
+    pub extras: crate::extras::State,
     pub dark: bool,
     pub route: Route,
     pub history: Vec<Route>,
@@ -265,7 +274,7 @@ pub fn parse_route(s: &str) -> Option<Route> {
         "customers" => Route::Customers, "products" => Route::Products, "expenses" => Route::Expenses, "bills" => Route::Bills, "vendors" => Route::Vendors,
         "pos" => Route::PurchaseOrders, "contacts" => Route::Contacts, "contact" => Route::Contact(id(1)?), "banking" => Route::Banking(id(1)), "chart" => Route::Chart,
         "reports" => Route::Reports, "report" => Route::Report(parts.get(1)?.to_string()), "settings" => Route::Settings, "setup" => Route::Setup,
-        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "adjustinventory" => Route::AdjustInventory, "help" => Route::Help, "memreports" => Route::MemorizedReports, "docs" => Route::DocCenter, "payliabilities" => Route::PayLiabilities, "classes" => Route::ClassList, "payitems" => Route::PayrollItems, "othernames" => Route::OtherNames, "financecharges" => Route::FinanceCharges, "templates" => Route::Templates, "pricelevels" => Route::PriceLevels, "printforms" => Route::PrintForms, "payrollforms" => Route::PayrollForms, "favorites" => Route::CustomizeFavorites, "build" => Route::BuildAssemblies, "inventory" => Route::InventoryCenter, "editcontact" => Route::EditContact(id(1)?), "edititem" => Route::EditItem(id(1)?), "editaccount" => Route::EditAccount(id(1)?), "batchinvoices" => Route::BatchInvoices, "banktx" => Route::BankTx(id(1)?), "reminders" => Route::Reminders, "find" => Route::Find, "apps" => Route::Apps, "time" => Route::EnterTime, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
+        "doc" => Route::Doc { kind: parts.get(1)?.to_string(), id: id(2) }, "journal" => Route::Journal, "payroll" => Route::Payroll, "payrun" => Route::PayRun(id(1)?), "taxes" => Route::Taxes, "projects" => Route::Projects, "mileage" => Route::Mileage, "transfer" => Route::Transfer, "check" => Route::Check(id(1)), "deposit" => Route::Deposit, "reconcile" => Route::Reconcile, "register" => Route::Register(id(1)), "calendar" => Route::Calendar, "statements" => Route::Statements, "memorized" => Route::Memorized, "paysalestax" => Route::PaySalesTax, "adjustinventory" => Route::AdjustInventory, "help" => Route::Help, "memreports" => Route::MemorizedReports, "docs" => Route::DocCenter, "payliabilities" => Route::PayLiabilities, "classes" => Route::ClassList, "payitems" => Route::PayrollItems, "othernames" => Route::OtherNames, "financecharges" => Route::FinanceCharges, "templates" => Route::Templates, "pricelevels" => Route::PriceLevels, "printforms" => Route::PrintForms, "payrollforms" => Route::PayrollForms, "favorites" => Route::CustomizeFavorites, "build" => Route::BuildAssemblies, "inventory" => Route::InventoryCenter, "editcontact" => Route::EditContact(id(1)?), "edititem" => Route::EditItem(id(1)?), "editaccount" => Route::EditAccount(id(1)?), "batchinvoices" => Route::BatchInvoices, "banktx" => Route::BankTx(id(1)?), "reminders" => Route::Reminders, "find" => Route::Find, "apps" => Route::Apps, "assets" => Route::FixedAssets, "audit" => Route::AuditLog, "currencies" => Route::Currencies, "time" => Route::EnterTime, "taxreturn" => Route::TaxReturn(id(1)?), "newcustomer" => Route::NewContact(true), "newvendor" => Route::NewContact(false), "newproduct" => Route::NewProduct, "newaccount" => Route::NewAccount, "receive" => Route::ReceivePayment(id(1)), "paybills" => Route::PayBills, "spend" => Route::Spend(id(1)),
         _ => return None,
     })
 }
@@ -310,6 +319,7 @@ impl App {
             skin: saved.skin(),
             layout: saved,
             desk: Default::default(),
+            extras: Default::default(),
             dark: prefs["dark"].as_bool().unwrap_or(true),
             be,
             route: Route::Dashboard,
@@ -526,6 +536,7 @@ impl App {
             Route::ClassList => call("tracking.list", json!({})),
             Route::PayrollItems => call("payroll.settings", json!({})),
             Route::Reminders => crate::desktop::load_reminders(self),
+            Route::FixedAssets | Route::AuditLog | Route::Currencies => crate::extras::load(self),
             Route::Apps => { self.data = Some(json!({})); Task::none() }
             Route::Find => { self.data = Some(json!({"rows": null})); Task::none() }
             Route::BatchInvoices => call("contacts.list", json!({"filter": "customers"})),
@@ -609,6 +620,7 @@ impl App {
                 if let Some(r) = self.history.pop() { self.route = r; self.load() } else { Task::none() }
             }
             Message::Desk(m) => crate::desktop::update(self, m),
+            Message::Extras(m) => crate::extras::update(self, m),
             Message::SetLayout(l) => {
                 self.set_layout(l);
                 self.save_prefs();

@@ -3058,3 +3058,64 @@ fn xero_business_menu_order_lists_everything() {
     let all = crate::features::FEATURES.iter().filter(|f| f.xero.0 == "business").count();
     assert_eq!(order.len(), all);
 }
+
+#[test]
+fn end_to_end_fixed_assets() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = desktop_app("fixedassets");
+    let t = app.update(Message::Nav(Route::FixedAssets)); settle(&mut app, t);
+    press(&mut app, "New asset");
+    for (k, v) in [("name", "Laptop"), ("purchase_price", "2400"), ("life_years", "3")] { let _ = app.update(Message::Extras(X::FaField(k, v.into()))); }
+    let _ = app.update(Message::Extras(X::FaField("purchase_date", app.d("2026-01-01"))));
+    let _ = app.update(Message::Extras(X::FaMethod("STRAIGHTLINE")));
+    press(&mut app, "Save");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let asset = app.data.as_ref().unwrap()["assets"].as_array().unwrap().iter().find(|a| a["name"] == "Laptop").cloned().expect("draft saved");
+    assert_eq!(asset["status"], "DRAFT");
+    let id = asset["id"].as_i64().unwrap();
+    let t = app.update(Message::Extras(X::FaRegister(id))); settle(&mut app, t);
+    let _ = app.update(Message::Extras(X::FaDepDate(app.d("2026-06-30"))));
+    let t = app.update(Message::Extras(X::FaRun)); settle(&mut app, t);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let a = app.be.call_now("assets.get", json!({"id": id})).unwrap();
+    assert!(a["accum_dep"].as_i64().unwrap() > 0, "depreciated: {a}");
+    // Dispose for 1,500.
+    let t = app.update(Message::Extras(X::FaDisposeOpen(id))); settle(&mut app, t);
+    let _ = app.update(Message::Extras(X::FaDisposeField(1, "1500".into())));
+    let t = app.update(Message::Extras(X::FaDispose)); settle(&mut app, t);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert_eq!(app.be.call_now("assets.get", json!({"id": id})).unwrap()["status"], "DISPOSED");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn audit_log_and_currencies() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = desktop_app("audit-fx");
+    let t = app.update(Message::Nav(Route::AuditLog)); settle(&mut app, t);
+    assert!(!app.data.as_ref().unwrap().as_array().unwrap().is_empty(), "demo has history");
+    let t = app.update(Message::Extras(X::AuditEntity("Contacts"))); settle(&mut app, t);
+    assert!(app.data.as_ref().unwrap().as_array().unwrap().iter().all(|e| e["entity"] == "contact"));
+    // Currencies: turn one on, set a rate, revalue.
+    let t = app.update(Message::Nav(Route::Currencies)); settle(&mut app, t);
+    let code = app.data.as_ref().unwrap().as_array().unwrap().iter().find(|c| c["enabled"].as_i64() != Some(1) && c["code"] != app.setting("base_currency").as_str()).unwrap()["code"].as_str().unwrap().to_string();
+    let t = app.update(Message::Extras(X::FxEnable(code.clone(), true))); settle(&mut app, t);
+    let _ = app.update(Message::Extras(X::FxRateOpen(code.clone())));
+    let _ = app.update(Message::Extras(X::FxRateField(1, "0.61".into())));
+    let t = app.update(Message::Extras(X::FxRateSave)); settle(&mut app, t);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let c = app.data.as_ref().unwrap().as_array().unwrap().iter().find(|c| c["code"] == code.as_str()).cloned().unwrap();
+    assert_eq!(c["enabled"], 1);
+    assert_eq!(c["latest_rate_e8"], 61_000_000);
+    let t = app.update(Message::Extras(X::FxRevalue)); settle(&mut app, t);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn audit_details_are_readable() {
+    use crate::extras::describe;
+    assert_eq!(describe(&json!("{\"name\":\"Alex Morgan\"}")), "name: Alex Morgan");
+    assert_eq!(describe(&json!({"status": "AUTHORISED", "total": 5000, "type": "ACCRECCREDIT"})), "status: AUTHORISED · total: 50.00 · type: ACCRECCREDIT");
+    assert_eq!(describe(&serde_json::Value::Null), "");
+}

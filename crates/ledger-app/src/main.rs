@@ -9,6 +9,7 @@ mod coa;
 mod dashboard;
 mod desktop;
 mod doc;
+mod extras;
 mod features;
 mod docdesk;
 mod forms;

@@ -986,6 +986,9 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::Reminders => "Reminders".into(),
         Route::Find => "Find".into(),
         Route::Apps => "Apps".into(),
+        Route::FixedAssets => "Fixed Asset Manager".into(),
+        Route::AuditLog => "Audit Trail".into(),
+        Route::Currencies => "Currency List".into(),
         Route::BankTx(_) => if app.pay.as_ref().is_some_and(|s| !s.check) { "Enter Credit Card Charges".into() } else { "Write Checks".into() },
         Route::EditContact(id) => if app.lk.contacts.iter().find(|c| c["id"].as_i64() == Some(*id)).is_some_and(|c| c["is_supplier"].as_i64() == Some(1) && c["is_customer"].as_i64() != Some(1)) { "Edit Vendor".into() } else { "Edit Customer".into() },
         Route::EnterTime => "Time/Enter Single Activity".into(),
@@ -1038,7 +1041,7 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
             e("Open Window List", "", Some(Message::Desk(Msg::Pane(Pane::Windows)))), e("View Balances", "", Some(Message::Desk(Msg::Pane(Pane::Balances)))),
             e("My Shortcuts", "", Some(Message::Desk(Msg::Pane(Pane::Shortcuts)))), sep(), e(if app.dark { "Light Mode" } else { "Dark Mode" }, "Alt+T", Some(Message::ToggleTheme)), sep(),
             e("Switch to QuickBooks Online-style layout", "", Some(Message::SetLayout(theme::Layout::Online))), e("Switch to Xero-style layout", "", Some(Message::SetLayout(theme::Layout::Xero)))],
-        "Lists" => vec![e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)), e("Item List", "", nav(Route::Products)), e("Fixed Asset Item List", "", rep("fixed-asset-register")), e("Price Level List", "", nav(Route::PriceLevels)),
+        "Lists" => vec![e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)), e("Item List", "", nav(Route::Products)), e("Fixed Asset Item List", "", nav(Route::FixedAssets)), e("Currency List", "", nav(Route::Currencies)), e("Price Level List", "", nav(Route::PriceLevels)),
             e("Sales Tax Code List", "", nav(Route::Taxes)), e("Payroll Item List", "", nav(Route::PayrollItems)), e("Class List", "", nav(Route::ClassList)), e("Other Names List", "", nav(Route::OtherNames)), e("Templates", "", nav(Route::Templates)), e("Memorized Transaction List", "Ctrl+T", nav(Route::Memorized))],
         "Favorites" => {
             let mut v: Vec<(String, &'static str, Option<Message>)> = app.desk.favorites.iter().filter_map(|f| favorite_action(app, f).map(|m| (f.split(" ▸ ").last().unwrap_or(f).to_string(), "", Some(m)))).collect();
@@ -1069,7 +1072,7 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
             e("#Sales", "", None), e("Sales by Customer Summary", "", rep("sales-by-contact")), e("Sales by Item Summary", "", rep("sales-by-item")),
             e("#Vendors & Payables", "", None), e("A/P Aging Summary", "", rep("aged-payables")), e("1099 Summary", "", rep("contractor-1099")),
             e("#Banking", "", None), e("Reconciliation Discrepancy", "", rep("bank-reconciliation")),
-            e("#Accountant & Taxes", "", None), e("Trial Balance", "", rep("trial-balance")), e("General Ledger", "", rep("general-ledger-detail")), e("Journal", "", rep("journal-report"))],
+            e("#Accountant & Taxes", "", None), e("Trial Balance", "", rep("trial-balance")), e("General Ledger", "", rep("general-ledger-detail")), e("Journal", "", rep("journal-report")), e("Audit Trail", "", nav(Route::AuditLog))],
         "Window" => {
             let mut v = vec![e("Close All", "", Some(Message::Desk(Msg::CloseAll))), sep()];
             for (n, w) in app.desk.windows.iter().enumerate() { v.push((format!("{}{}", if n == app.desk.active { "✓ " } else { "   " }, title(app, &w.route)), "", Some(Message::Desk(Msg::Activate(n))))); }

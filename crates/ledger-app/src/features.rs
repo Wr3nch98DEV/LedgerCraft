@@ -16,6 +16,7 @@ use crate::desktop::Msg as Desk;
 ///
 /// Where it lives in Xero-style: `"top"`, `"business"`, `"accounting"`, `"payroll"`, `"contacts"`
 /// (the top-bar menus), `"new"` (the + New menu) or `"settings"` (the organisation/gear menu).
+#[cfg_attr(not(test), allow(dead_code))]
 pub struct Feature {
     pub id: &'static str,
     pub go: fn() -> Message,
@@ -82,7 +83,9 @@ pub static FEATURES: &[Feature] = &[
     Feature { id: "register", go: || nav(Route::Register(None)), online: ("accounting", "Registers"), xero: ("accounting", "Account transactions"), desktop: ("Banking", "Use Register") },
     Feature { id: "reconcile", go: || nav(Route::Reconcile), online: ("accounting", "Reconcile"), xero: ("accounting", "Reconcile account"), desktop: ("Banking", "Reconcile") },
     Feature { id: "chart", go: || nav(Route::Chart), online: ("accounting", "Chart of accounts"), xero: ("accounting", "Chart of accounts"), desktop: ("Lists", "Chart of Accounts") },
-    Feature { id: "fixed_assets", go: || rep("fixed-asset-register"), online: ("accounting", "Fixed assets"), xero: ("accounting", "Fixed assets"), desktop: ("Lists", "Fixed Asset Item List") },
+    Feature { id: "fixed_assets", go: || nav(Route::FixedAssets), online: ("accounting", "Fixed assets"), xero: ("accounting", "Fixed assets"), desktop: ("Lists", "Fixed Asset Item List") },
+    Feature { id: "audit_log", go: || nav(Route::AuditLog), online: ("gear:Tools", "Audit log"), xero: ("accounting", "History and notes"), desktop: ("Reports", "Audit Trail") },
+    Feature { id: "currencies", go: || nav(Route::Currencies), online: ("gear:Lists", "Currencies"), xero: ("settings", "Currencies"), desktop: ("Lists", "Currency List") },
     Feature { id: "find", go: || nav(Route::Find), online: ("accounting", "Advanced search"), xero: ("accounting", "Find and recode"), desktop: ("Edit", "Find…") },
     Feature { id: "taxes", go: || nav(Route::Taxes), online: ("taxes", "Sales tax"), xero: ("accounting", "Tax returns"), desktop: ("Vendors", "Sales Tax: Manage Sales Tax…") },
     Feature { id: "pay_sales_tax", go: || nav(Route::PaySalesTax), online: ("taxes", "Record tax payment"), xero: ("accounting", "Pay tax"), desktop: ("Vendors", "Sales Tax: Pay Sales Tax…") },
