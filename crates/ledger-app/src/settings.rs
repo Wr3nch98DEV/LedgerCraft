@@ -68,6 +68,8 @@ pub struct State {
     pub smtp_tls: Security,
     pub smtp_editing: bool,
     pub test_to: String,
+    /// Two-step verification being set up: the secret, its QR code, and the code typed back.
+    pub tfa: Option<(String, iced::widget::qr_code::Data, String)>,
     /// Set Closing Date: [closing date for most users, closing date for everyone] while editing.
     pub lock: Option<[String; 2]>,
 }
@@ -76,7 +78,7 @@ pub struct State {
 pub enum Msg {
     Cat(&'static str), Edit, Field(usize, String), Save, Saved(Result<Value, String>), Cancel,
     Users(Reply), AddUser, UName(String), UEmail(String), UPassword(String), URole(RoleOpt), SaveUser, UserSaved(Reply), SetActive(i64, bool),
-    LockEdit, LockField(usize, String), LockSave, LockSaved(Reply), EditSmtp, Smtp(usize, String), SmtpTls(Security), SaveSmtp, SmtpSaved(Reply), TestTo(String), SendTest, TestSent(Reply),
+    TfaBegin, TfaBegun(Reply), TfaCode(String), TfaConfirm, TfaDisable, TfaDone(Reply, &'static str), LockEdit, LockField(usize, String), LockSave, LockSaved(Reply), EditSmtp, Smtp(usize, String), SmtpTls(Security), SaveSmtp, SmtpSaved(Reply), TestTo(String), SendTest, TestSent(Reply),
 }
 
 pub fn load(app: &mut App) -> Task<Message> {
@@ -90,7 +92,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         Msg::Cat(c) => { app.settings.cat = Some(c); Task::none() }
         Msg::Edit => { app.settings.values = FIELDS.iter().map(|(k, _)| app.setting(k)).collect(); app.settings.editing = true; Task::none() }
         Msg::Field(n, v) => { if let Some(x) = app.settings.values.get_mut(n) { *x = v; } Task::none() }
-        Msg::Cancel => { app.settings.lock = None; app.settings.editing = false; app.settings.adding = false; app.settings.smtp_editing = false; Task::none() }
+        Msg::Cancel => { app.settings.tfa = None; app.settings.lock = None; app.settings.editing = false; app.settings.adding = false; app.settings.smtp_editing = false; Task::none() }
         Msg::Save => {
             if app.settings.values.first().map(|v| v.trim().is_empty()).unwrap_or(true) { return app.toast("Company name can't be empty", true); }
             let mut p = serde_json::Map::new();
@@ -105,6 +107,29 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                 Err(e) => app.toast(e, true),
             }
         }
+        // ---- two-step verification ----
+        Msg::TfaBegin => app.be.call("users.begin2fa", json!({}), |r| Message::Settings(Msg::TfaBegun(r))),
+        Msg::TfaBegun(r) => match r {
+            Ok(v) => {
+                let uri = v["uri"].as_str().unwrap_or("").to_string();
+                match iced::widget::qr_code::Data::new(uri.as_bytes()) {
+                    Ok(qr) => { app.settings.tfa = Some((v["secret"].as_str().unwrap_or("").to_string(), qr, String::new())); Task::none() }
+                    Err(_) => app.toast("Couldn't make the QR code — enter the key by hand", true),
+                }
+            }
+            Err(e) => app.toast(e, true),
+        },
+        Msg::TfaCode(c) => { if let Some(t) = app.settings.tfa.as_mut() { t.2 = c.chars().filter(|c| c.is_ascii_digit()).take(6).collect(); } Task::none() }
+        Msg::TfaConfirm => {
+            let Some((_, _, code)) = &app.settings.tfa else { return Task::none() };
+            if code.len() != 6 { return app.toast("Enter the 6-digit code from your authenticator app", true); }
+            app.be.call("users.confirm2fa", json!({"code": code}), |r| Message::Settings(Msg::TfaDone(r, "Two-step verification is on — you'll be asked for a code when you sign in")))
+        }
+        Msg::TfaDisable => app.be.call("users.disable2fa", json!({}), |r| Message::Settings(Msg::TfaDone(r, "Two-step verification is off"))),
+        Msg::TfaDone(r, what) => match r {
+            Ok(_) => { app.settings.tfa = None; let t1 = app.toast(what, false); Task::batch([t1, app.be.call("users.list", json!({}), |r| Message::Settings(Msg::Users(r)))]) }
+            Err(e) => app.toast(e, true),
+        },
         // ---- closing date ----
         Msg::LockEdit => { app.settings.lock = Some([app.d(&app.setting("lock_date_all")), app.d(&app.setting("lock_date_others"))]); Task::none() }
         Msg::LockField(n, v) => { if let Some(l) = app.settings.lock.as_mut() { l[n.min(1)] = v; } Task::none() }
@@ -232,6 +257,32 @@ fn layout_card<'a>(app: &App, layout: crate::theme::Layout, desc: &'a str) -> El
             border: iced::Border { color: if active { k.accent } else { k.line }, width: if active { 2.0 } else { 1.0 }, radius: 8.0.into() }, shadow: Default::default(), snap: true }
     })
     .into()
+}
+
+/// Two-step verification (an authenticator-app code at sign-in) for the signed-in user.
+fn security_card(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let me = app.session.as_ref().and_then(|s| s["user"]["id"].as_i64()).unwrap_or(1);
+    let on = app.settings.users.iter().find(|u| u["id"].as_i64() == Some(me)).map(|u| u["has_2fa"].as_i64() == Some(1) || u["has_2fa"] == true).unwrap_or(false);
+    let mut col = column![ui::h2("Two-step verification")].spacing(10);
+    if let Some((secret, qr, code)) = &app.settings.tfa {
+        col = col.push(row![
+            container(iced::widget::qr_code(qr).cell_size(4)).padding(10).style(|_: &iced::Theme| container::Style { background: Some(iced::Background::Color(iced::Color::WHITE)), ..Default::default() }),
+            column![
+                ui::muted("1. Scan this with an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy…)."),
+                text(format!("Or enter this key: {secret}")).size(13).font(BOLD),
+                ui::muted("2. Type the 6-digit code it shows:"),
+                row![iced::widget::text_input("123456", code).on_input(|v| Message::Settings(Msg::TfaCode(v))).on_submit(Message::Settings(Msg::TfaConfirm)).padding([7, 10]).size(16).style(theme::input).width(140),
+                    ui::btn_primary("Turn on", Some(Message::Settings(Msg::TfaConfirm))), ui::btn("Cancel", Some(Message::Settings(Msg::Cancel)))].spacing(8).align_y(Alignment::Center),
+            ].spacing(8),
+        ].spacing(18).align_y(Alignment::Start));
+    } else if on {
+        col = col.push(row![text("On — you're asked for a code from your authenticator app when you sign in.").size(14).color(k.ok), ui::hspace(), ui::btn("Turn off", Some(Message::Settings(Msg::TfaDisable)))].align_y(Alignment::Center));
+    } else {
+        col = col.push(row![ui::muted("Off. Add a code from your phone to your password, so a stolen password isn't enough to get into your books."), ui::hspace(),
+            ui::btn_primary("Set up", Some(Message::Settings(Msg::TfaBegin)))].spacing(12).align_y(Alignment::Center));
+    }
+    ui::card(col)
 }
 
 fn users_card(app: &App) -> Element<'_, Message> {
@@ -375,7 +426,7 @@ fn file_section(_app: &App) -> Element<'_, Message> {
     ui::card(column![
         ui::h2("Company file"),
         row![ui::muted("Open a different company or create a new one."), ui::hspace(), ui::btn("Switch company", Some(Message::Nav(Route::Setup)))].align_y(Alignment::Center),
-        ui::muted("Invoice templates, currencies, bank rules, budgets, fixed assets and import/export each have their own screen (see the menus). Two-step sign-in and a few payroll settings are still in the web version (start.bat web) for now."),
+        ui::muted("Invoice templates, currencies, bank rules, budgets, fixed assets and import/export each have their own screen (see the menus). The previous web version (start.bat web) still works on the same books if you need it."),
     ].spacing(10))
 }
 
@@ -396,7 +447,7 @@ fn desk_view(app: &App) -> Element<'_, Message> {
         "Accounting" => column![closing_section(app), company_section(app)].spacing(14).into(),
         "General" => column![company_section(app), file_section(app)].spacing(14).into(),
         "Send Forms" => email_card(app),
-        "Users & Roles" => users_card(app),
+        "Users & Roles" => column![users_card(app), security_card(app)].spacing(14).into(),
         "Sales Tax" => ui::card(column![ui::muted("Sales tax rates and agencies are managed in Manage Sales Tax."), row![ui::btn("Manage Sales Tax…", Some(Message::Nav(Route::Taxes)))]].spacing(10)),
         "Tax: 1099" => ui::card(column![ui::muted("Mark vendors as eligible for 1099 in the Vendor Center or New Vendor window; payments to them are totalled on the 1099 Summary."),
             row![ui::btn("1099 Summary", Some(Message::Nav(Route::Report("contractor-1099".into()))))]].spacing(10)),
@@ -414,7 +465,7 @@ fn desk_view(app: &App) -> Element<'_, Message> {
 
 pub fn view(app: &App) -> Element<'_, Message> {
     if app.desktop() { return desk_view(app); }
-    let body = column![layout_section(app), appearance_section(app), company_section(app), closing_section(app), users_card(app), email_card(app), file_section(app)].spacing(16);
+    let body = column![layout_section(app), appearance_section(app), company_section(app), closing_section(app), users_card(app), security_card(app), email_card(app), file_section(app)].spacing(16);
     let title = app.term("settings");
     ui::page(ui::h1(title), vec![], container(body).max_width(980).into())
 }

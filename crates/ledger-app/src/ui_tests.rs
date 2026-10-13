@@ -3413,3 +3413,30 @@ fn edit_screens_in_online_and_xero_and_search_opens_records() {
     }
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn two_step_verification_on_and_off() {
+    use crate::settings::Msg as S;
+    let (mut app, dir) = desktop_app("twofa");
+    let t = app.update(Message::Nav(Route::Settings)); settle(&mut app, t);
+    let _ = app.update(Message::Settings(S::Cat("Users & Roles")));
+    press(&mut app, "Set up");
+    let secret = app.settings.tfa.as_ref().expect("setup started").0.clone();
+    assert!(!click_fails(&app, "Turn on"), "QR code and code box show");
+    // A wrong code is refused; the right one turns it on.
+    let _ = app.update(Message::Settings(S::TfaCode("000000".into())));
+    let t = app.update(Message::Settings(S::TfaConfirm)); settle(&mut app, t);
+    let counter = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() / 30;
+    let code = ledger_core::users::totp_code(&ledger_core::users::base32_decode(&secret).unwrap(), counter);
+    if code != "000000" { assert!(app.toasts.iter().any(|t| t.2), "wrong code refused"); }
+    app.toasts.clear();
+    let _ = app.update(Message::Settings(S::TfaCode(code)));
+    let t = app.update(Message::Settings(S::TfaConfirm)); settle(&mut app, t);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let me = app.settings.users.iter().find(|u| u["id"] == 1).unwrap().clone();
+    assert!(me["has_2fa"] == 1 || me["has_2fa"] == true, "{me}");
+    press(&mut app, "Turn off");
+    let me = app.settings.users.iter().find(|u| u["id"] == 1).unwrap().clone();
+    assert!(me["has_2fa"] == 0 || me["has_2fa"] == false, "{me}");
+    let _ = std::fs::remove_dir_all(dir);
+}
