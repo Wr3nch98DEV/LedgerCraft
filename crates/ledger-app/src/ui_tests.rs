@@ -3143,3 +3143,33 @@ fn budgets_grid_edit_copy_across_and_new() {
     assert_eq!(app.data.as_ref().unwrap()["budget"]["name"], "Stretch");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn expense_claims_receipt_and_mileage() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = desktop_app("claims");
+    let t = app.update(Message::Nav(Route::ExpenseClaims)); settle(&mut app, t);
+    let bills_before = count(&app, "ACCPAY");
+    // A receipt claim, submitted, then approved → a bill to the claimant.
+    press(&mut app, "New receipt");
+    for (k, v) in [("supplier", "Officeworks"), ("description", "Printer paper"), ("amount", "44.00")] { let _ = app.update(Message::Extras(X::ClField(k, v.into()))); }
+    let acct = app.lk.account_opts(|a| a["class"] == "EXPENSE")[0].clone();
+    let _ = app.update(Message::Extras(X::ClAccount(acct)));
+    press(&mut app, "Submit for approval");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let claim = app.data.as_ref().unwrap().as_array().unwrap().iter().find(|r| r["supplier"] == "Officeworks").cloned().unwrap();
+    assert_eq!(claim["status"], "SUBMITTED");
+    let t = app.update(Message::Extras(X::ClStatus(claim["id"].as_i64().unwrap(), "AUTHORISED"))); settle(&mut app, t);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert_eq!(count(&app, "ACCPAY"), bills_before + 1, "approval creates the reimbursement bill");
+    // Mileage: the Mileage screen shows trips only.
+    let t = app.update(Message::Nav(Route::Mileage)); settle(&mut app, t);
+    press(&mut app, "New trip");
+    for (k, v) in [("purpose", "Client visit"), ("distance", "42")] { let _ = app.update(Message::Extras(X::ClField(k, v.into()))); }
+    press(&mut app, "Save draft");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let trip = app.data.as_ref().unwrap().as_array().unwrap().iter().find(|r| r["reference"] == "Client visit").cloned().expect("trip saved");
+    assert_eq!(trip["kind"], "MILEAGE");
+    assert_eq!(trip["total"], if app.country() == "US" { 2814 } else { 3696 });
+    let _ = std::fs::remove_dir_all(dir);
+}

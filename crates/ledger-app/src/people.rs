@@ -294,21 +294,3 @@ pub fn projects(app: &App) -> Element<'_, Message> {
     ].spacing(14).into())
 }
 
-pub fn mileage(app: &App) -> Element<'_, Message> {
-    if let Some(e) = loading(app, "Mileage") { return e; }
-    let d = app.data.as_ref().unwrap();
-    let k = t();
-    let all = d.as_array().cloned().unwrap_or_default();
-    let trips: Vec<&Value> = all.iter().filter(|r| r["kind"] == "MILEAGE").collect();
-    let unit = if app.country() == "US" { "mi" } else { "km" };
-    let rows = trips.iter().map(|r| (vec![
-        ui::cell(app.d(r["date"].as_str().unwrap_or(""))), ui::cell(r["claimant"].as_str().unwrap_or("").to_string()), ui::cell_muted(r["reference"].as_str().unwrap_or("").to_string()),
-        ui::num(format!("{:.1} {unit}", i(&r["distance_e4"]) as f64 / 10000.0)), ui::cell_money(i(&r["total"])),
-        ui::chip(match r["status"].as_str().unwrap_or("") { "PAID" => "Paid", "APPROVED" | "AUTHORISED" => "Approved", "DECLINED" => "Declined", "SUBMITTED" => "Submitted", _ => "Draft" }, k.info),
-    ], None)).collect();
-    let receipts = all.len() - trips.len();
-    ui::page(ui::h1("Mileage"), vec![], column![
-        ui::table(&[col("Date", 12), col("Driver", 20), col("Purpose", 26), coln("Distance", 12), coln("Amount", 12), col("Status", 12)], rows, "No trips recorded yet."),
-        ui::muted(format!("{receipts} receipt claim(s) also on file. Recording new trips and claims is in the web version for now (Business → Expense claims).")),
-    ].spacing(14).into())
-}

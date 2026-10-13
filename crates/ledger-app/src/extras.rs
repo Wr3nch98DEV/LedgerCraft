@@ -33,6 +33,11 @@ pub struct State {
     pub bud_start: Option<String>,
     pub bud_cells: BTreeMap<(i64, String), String>,
     pub bud_new: Option<String>,
+    /// Expense claims: status tab, and the claim being entered (mileage?, fields, account, tax).
+    pub cl_tab: Option<&'static str>,
+    pub cl_new: Option<(bool, BTreeMap<&'static str, String>)>,
+    pub cl_account: Option<Opt>,
+    pub cl_tax: Option<Opt>,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +47,7 @@ pub enum Msg {
     AuditEntity(&'static str),
     FxEnable(String, bool), FxRateOpen(String), FxRateField(u8, String), FxRateSave, FxRevalDate(String), FxRevalue, FxFetch,
     BudPick(i64), BudYear(i32), BudCell(i64, String, String), BudCopyAcross(i64), BudNew(Option<String>), BudCreate, BudSave, BudCreated(Reply),
+    ClTab(&'static str), ClNew(bool), ClField(&'static str, String), ClAccount(Opt), ClTax(Opt), ClSave(bool), ClStatus(i64, &'static str), ClCancel,
     Done(Reply, &'static str),
 }
 
@@ -63,6 +69,7 @@ pub fn load(app: &mut App) -> Task<Message> {
             call(app, "audit.list", json!({"limit": 500, "entity": entity}))
         }
         Route::Currencies => call(app, "currencies.list", json!({})),
+        Route::ExpenseClaims => call(app, "receipts.list", json!({})),
         Route::Budgets => {
             let be = app.be.clone();
             let sel = app.extras.bud_sel;
@@ -199,12 +206,52 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.extras.busy = true;
             app.be.call("budgets.save", json!({"id": b["id"], "name": b["name"], "tracking_option_id": b["tracking_option_id"], "lines": lines}), |r| Message::Extras(Msg::Done(r, "Budget saved")))
         }
+        // ---- expense claims ----
+        Msg::ClTab(t) => { app.extras.cl_tab = Some(t); Task::none() }
+        Msg::ClNew(mileage) => {
+            let mut f = BTreeMap::new();
+            f.insert("date", app.d(&ui::today_iso()));
+            if mileage { f.insert("rate", if app.country() == "US" { "0.67".into() } else { "0.88".into() }); }
+            app.extras.cl_new = Some((mileage, f));
+            Task::none()
+        }
+        Msg::ClField(k, v) => { if let Some((_, f)) = app.extras.cl_new.as_mut() { let v = if k == "date" { ui::date_keys(&f.get(k).cloned().unwrap_or_default(), &v, style) } else { v }; f.insert(k, v); } Task::none() }
+        Msg::ClAccount(o) => { app.extras.cl_account = Some(o); Task::none() }
+        Msg::ClTax(o) => { app.extras.cl_tax = Some(o); Task::none() }
+        Msg::ClCancel => { app.extras.cl_new = None; Task::none() }
+        Msg::ClSave(submit) => {
+            let Some((mileage, f)) = app.extras.cl_new.clone() else { return Task::none() };
+            let g = |k: &str| f.get(k).cloned().unwrap_or_default().trim().to_string();
+            let Some(date) = ui::to_iso(&g("date"), style) else { return app.toast("Check the date", true) };
+            let receipt = if mileage {
+                if g("distance").parse::<f64>().map_or(true, |x| x <= 0.0) { return app.toast("Enter the distance travelled", true); }
+                json!({"kind": "MILEAGE", "date": date, "reference": g("purpose"), "supplier": "", "distance": g("distance"), "rate": g("rate"), "lines": [{"account_id": app.extras.cl_account.as_ref().map(|a| a.id), "description": g("purpose")}]})
+            } else {
+                if ui::parse_money(&g("amount")).unwrap_or(0) <= 0 { return app.toast("Enter the amount spent", true); }
+                let Some(acct) = app.extras.cl_account.clone() else { return app.toast("Choose what it was for (the account)", true) };
+                json!({"kind": "RECEIPT", "date": date, "supplier": g("supplier"), "reference": g("description"), "line_amount_type": "INCLUSIVE",
+                    "lines": [{"description": g("description"), "quantity": "1", "unit_price": g("amount").replace(',', ""), "account_id": acct.id, "tax_rate_id": app.extras.cl_tax.as_ref().map(|t| t.id)}]})
+            };
+            let be = app.be.clone();
+            app.extras.busy = true;
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                    let id = be.call_now("receipts.save", json!({"receipt": receipt}))?["id"].clone();
+                    if submit { be.call_now("receipts.setStatus", json!({"id": id, "status": "SUBMITTED"}))?; }
+                    Ok(json!({"id": id}))
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, move |r| Message::Extras(Msg::Done(r, if submit { "Claim submitted for approval" } else { "Claim saved as a draft" })))
+        }
+        Msg::ClStatus(id, st) => {
+            let what = match st { "SUBMITTED" => "Claim submitted", "AUTHORISED" => "Claim approved — a bill to repay the claimant was created", "DECLINED" => "Claim declined", _ => "Claim updated" };
+            app.be.call("receipts.setStatus", json!({"id": id, "status": st}), move |r| Message::Extras(Msg::Done(r, what)))
+        }
         // ---- common ----
         Msg::Done(r, what) => {
             app.extras.busy = false;
             match r {
                 Ok(_) => {
-                    app.extras.fa_new = None; app.extras.fa_dispose = None; app.extras.bud_cells.clear();
+                    app.extras.fa_new = None; app.extras.fa_dispose = None; app.extras.bud_cells.clear(); app.extras.cl_new = None;
                     let t1 = if what.is_empty() { Task::none() } else { app.toast(what, false) };
                     Task::batch([t1, app.load(), app.load_lookups()])
                 }
@@ -416,6 +463,60 @@ pub fn budgets(app: &App) -> Element<'_, Message> {
         summary,
         ui::muted("Tip: → copies a row's first month across the year."),
     ].spacing(12).into())
+}
+
+// ---------------- Expense claims ----------------
+
+/// Expense claims (receipts and mileage); `mileage_only` for the Mileage screen.
+pub fn claims(app: &App, mileage_only: bool) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return loading() };
+    let all: Vec<Value> = d.as_array().cloned().unwrap_or_default().into_iter().filter(|r| !mileage_only || r["kind"] == "MILEAGE").collect();
+    let in_tab_of = |tab: &str, r: &Value| match tab { "AUTHORISED" => matches!(r["status"].as_str(), Some("AUTHORISED")) && r["bill_status"] != "PAID", "PAID" => r["status"] == "PAID" || r["bill_status"] == "PAID", s => r["status"] == s };
+    // Open on the first tab with claims in it, unless one was chosen.
+    let tab = app.extras.cl_tab.unwrap_or_else(|| ["SUBMITTED", "DRAFT", "AUTHORISED", "DECLINED", "PAID"].into_iter().find(|t| all.iter().any(|r| in_tab_of(t, r))).unwrap_or("DRAFT"));
+    let in_tab = |r: &Value| match tab { "AUTHORISED" => matches!(r["status"].as_str(), Some("AUTHORISED")) && r["bill_status"] != "PAID", "PAID" => r["status"] == "PAID" || r["bill_status"] == "PAID", s => r["status"] == s };
+    let tab_items: Vec<(&'static str, &'static str)> = vec![("DRAFT", "Draft"), ("SUBMITTED", "Awaiting approval"), ("AUTHORISED", "Awaiting payment"), ("PAID", "Paid"), ("DECLINED", "Declined")];
+    let unit = if app.country() == "US" { "mi" } else { "km" };
+    let mut body = column![tabs(&tab_items, tab, |c| Message::Extras(Msg::ClTab(c)))].spacing(12);
+    if let Some((mileage, f)) = &app.extras.cl_new {
+        let v = |key: &'static str| f.get(key).cloned().unwrap_or_default();
+        let expense_accts = app.lk.account_opts(|a| a["class"] == "EXPENSE");
+        let form: Element<Message> = if *mileage {
+            column![ui::h2("New mileage claim"),
+                row![input("DATE", &v("date"), 140.0, |x| Message::Extras(Msg::ClField("date", x))), input("PURPOSE OF TRIP", &v("purpose"), 320.0, |x| Message::Extras(Msg::ClField("purpose", x))),
+                    input(if unit == "mi" { "MILES" } else { "KILOMETRES" }, &v("distance"), 120.0, |x| Message::Extras(Msg::ClField("distance", x))),
+                    input(if unit == "mi" { "RATE PER MILE" } else { "RATE PER KM" }, &v("rate"), 120.0, |x| Message::Extras(Msg::ClField("rate", x)))].spacing(14)].spacing(12).into()
+        } else {
+            column![ui::h2("New expense claim"),
+                row![input("DATE", &v("date"), 140.0, |x| Message::Extras(Msg::ClField("date", x))), input("SPENT AT", &v("supplier"), 240.0, |x| Message::Extras(Msg::ClField("supplier", x))),
+                    input("DESCRIPTION", &v("description"), 300.0, |x| Message::Extras(Msg::ClField("description", x)))].spacing(14),
+                row![column![lbl("ACCOUNT"), pick_list(expense_accts, app.extras.cl_account.clone(), |o| Message::Extras(Msg::ClAccount(o))).placeholder("What was it for?").padding([5, 7]).text_size(13).style(theme::pick).width(280)].spacing(3),
+                    input("AMOUNT (INCL. TAX)", &v("amount"), 140.0, |x| Message::Extras(Msg::ClField("amount", x))),
+                    column![lbl("TAX"), pick_list(app.lk.tax_opts(), app.extras.cl_tax.clone(), |o| Message::Extras(Msg::ClTax(o))).placeholder("Tax rate").padding([5, 7]).text_size(13).style(theme::pick).width(200)].spacing(3)].spacing(14)].spacing(12).into()
+        };
+        body = body.push(ui::card(column![form, row![ui::hspace(), ui::btn("Save draft", if app.extras.busy { None } else { Some(Message::Extras(Msg::ClSave(false))) }),
+            ui::btn_primary("Submit for approval", if app.extras.busy { None } else { Some(Message::Extras(Msg::ClSave(true))) }), ui::btn("Cancel", Some(Message::Extras(Msg::ClCancel)))].spacing(8)].spacing(12)));
+    }
+    let rows = all.iter().filter(|r| in_tab(r)).map(|r| {
+        let id = r["id"].as_i64().unwrap_or(0);
+        let what = if r["kind"] == "MILEAGE" { format!("{} · {:.1} {unit}", r["reference"].as_str().unwrap_or("Trip"), r["distance_e4"].as_i64().unwrap_or(0) as f64 / 10_000.0) }
+            else { format!("{}{}", r["supplier"].as_str().filter(|s| !s.is_empty()).map(|s| format!("{s} — ")).unwrap_or_default(), r["reference"].as_str().unwrap_or("")) };
+        let actions: Element<Message> = match r["status"].as_str().unwrap_or("") {
+            "DRAFT" => row![ui::link("Submit", Message::Extras(Msg::ClStatus(id, "SUBMITTED"))), ui::link("Approve", Message::Extras(Msg::ClStatus(id, "AUTHORISED")))].spacing(12).into(),
+            "SUBMITTED" => row![ui::link("Approve", Message::Extras(Msg::ClStatus(id, "AUTHORISED"))), ui::link("Decline", Message::Extras(Msg::ClStatus(id, "DECLINED")))].spacing(12).into(),
+            "DECLINED" => ui::link("Resubmit", Message::Extras(Msg::ClStatus(id, "SUBMITTED"))),
+            _ if r["document_id"].as_i64().is_some() => ui::link("View bill", Message::Nav(Route::Doc { kind: "ACCPAY".into(), id: r["document_id"].as_i64() })),
+            _ => ui::cell_muted(""),
+        };
+        (vec![ui::cell_muted(app.d(r["date"].as_str().unwrap_or(""))), ui::cell(r["claimant"].as_str().unwrap_or("").to_string()), ui::cell(if r["kind"] == "MILEAGE" { "Mileage" } else { "Receipt" }),
+            ui::cell(what), ui::cell_money(r["total"].as_i64().unwrap_or(0)), actions], None)
+    }).collect();
+    body = body.push(ui::table(&[ui::col("Date", 11), ui::col("Claimant", 16), ui::col("Type", 9), ui::col("Description", 34), ui::coln("Amount", 12), ui::col("", 18)], rows, "No claims here."));
+    body = body.push(text("Approving a claim creates a bill to repay the person who paid; pay it like any other bill.").size(12).color(k.muted));
+    let mut actions = vec![ui::btn_primary(if mileage_only { "New trip" } else { "New receipt" }, Some(Message::Extras(Msg::ClNew(mileage_only))))];
+    if !mileage_only { actions.push(ui::btn("New mileage claim", Some(Message::Extras(Msg::ClNew(true))))); }
+    ui::page(ui::h1(if mileage_only { "Mileage" } else { "Expense claims" }), actions, iced::widget::scrollable(body.max_width(1150)).style(theme::scroll).into())
 }
 
 // ---------------- Currencies ----------------

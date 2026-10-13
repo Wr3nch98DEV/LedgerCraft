@@ -72,7 +72,8 @@ pub static FEATURES: &[Feature] = &[
     Feature { id: "payroll_forms", go: || nav(Route::PayrollForms), online: ("payroll", "Filings"), xero: ("payroll", "Single Touch Payroll"), desktop: ("Employees", "Process Payroll Forms") },
     Feature { id: "payroll_items", go: || nav(Route::PayrollItems), online: ("payroll", "Pay types"), xero: ("payroll", "Pay items"), desktop: ("Lists", "Payroll Item List") },
     Feature { id: "enter_time", go: || nav(Route::EnterTime), online: ("new:Employees", "Single time activity"), xero: ("payroll", "Timesheets"), desktop: ("Employees", "Enter Time") },
-    Feature { id: "mileage", go: || nav(Route::Mileage), online: ("top", "Mileage"), xero: ("business", "Expense claims"), desktop: ("Company", "Enter Vehicle Mileage…") },
+    Feature { id: "mileage", go: || nav(Route::Mileage), online: ("top", "Mileage"), xero: ("business", "Mileage claims"), desktop: ("Company", "Enter Vehicle Mileage…") },
+    Feature { id: "expense_claims", go: || nav(Route::ExpenseClaims), online: ("expenses", "Expense claims"), xero: ("business", "Expense claims"), desktop: ("Employees", "Expense Claims") },
     Feature { id: "projects", go: || nav(Route::Projects), online: ("top", "Projects"), xero: ("business", "Projects"), desktop: ("Customers", "Job Costing Center") },
     // ---- banking & accounting ----
     Feature { id: "banking", go: || nav(Route::Banking(None)), online: ("top", "Banking"), xero: ("accounting", "Bank accounts"), desktop: ("Banking", "Bank Feeds Center") },
@@ -118,7 +119,7 @@ pub fn online(place: &str) -> Vec<(&'static str, Option<Message>)> {
 
 /// Xero's own order for its Business menu: sales, then purchases, then products and projects.
 const XERO_BUSINESS: &[&str] = &["Sales overview", "Invoices", "Quotes", "Credit notes", "Repeating transactions", "Receive a payment", "Batch invoices", "Print invoices",
-    "Late fees", "Reminders", "Bills to pay", "Pay bills", "Purchase orders", "Receive items", "Spend money", "Expense claims", "Products and services", "Inventory",
+    "Late fees", "Reminders", "Bills to pay", "Pay bills", "Purchase orders", "Receive items", "Spend money", "Expense claims", "Mileage claims", "Products and services", "Inventory",
     "Inventory adjustment", "Build assemblies", "Projects", "Files", "Calendar"];
 
 /// The Xero-style entries for one place (the Business menu in Xero's order, others in registry order).
