@@ -93,6 +93,7 @@ pub static FEATURES: &[Feature] = &[
     Feature { id: "lots", go: || nav(Route::Lots), online: ("gear:Lists", "Lots and serial numbers"), xero: ("business", "Lots and serial numbers"), desktop: ("Inventory", "Lot Numbers & Serial Numbers") },
     Feature { id: "batch_payments", go: || nav(Route::BatchPayments), online: ("expenses", "Batch payments"), xero: ("business", "Batch payments"), desktop: ("Vendors", "Batch Payments & Bank Files…") },
     Feature { id: "payment_reminders", go: || nav(Route::PaymentReminders), online: ("gear:Your company", "Payment reminders"), xero: ("settings", "Invoice reminders"), desktop: ("Customers", "Payment Reminders…") },
+    Feature { id: "revenue_recognition", go: || nav(Route::RevenueRecognition), online: ("accounting", "Revenue recognition"), xero: ("accounting", "Revenue recognition"), desktop: ("Company", "Revenue Recognition…") },
     Feature { id: "recode", go: || nav(Route::Recode), online: ("accounting", "Reclassify transactions"), xero: ("accounting", "Find and recode"), desktop: ("Company", "Batch Reclassify Transactions…") },
     Feature { id: "find", go: || nav(Route::Find), online: ("accounting", "Advanced search"), xero: ("accounting", "Search transactions"), desktop: ("Edit", "Find…") },
     Feature { id: "bank_rules", go: || nav(Route::BankRules), online: ("accounting", "Bank rules"), xero: ("accounting", "Bank rules"), desktop: ("Banking", "Bank Rules") },

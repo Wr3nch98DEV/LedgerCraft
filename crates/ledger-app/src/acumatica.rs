@@ -90,6 +90,7 @@ pub static PLACES: &[(&str, &str, &str, &str)] = &[
     // Finance
     ("journal", "finance", "Transactions", "Journal Transactions"),
     ("recode", "finance", "Processes", "Reclassify Transactions"),
+    ("revenue_recognition", "finance", "Processes", "Deferral Schedules"),
     ("chart", "finance", "Profiles", "Chart of Accounts"),
     ("budgets", "finance", "Transactions", "Budgets"),
     ("currencies", "finance", "Preferences", "Currencies and Rates"),

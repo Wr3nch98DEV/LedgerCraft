@@ -37,6 +37,11 @@ pub struct State {
     /// Locations: the new location (name, address), and the stock transfer being entered
     /// (item, from, to, quantity, date).
     pub loc_new: Option<(String, String)>,
+    /// Revenue recognition: the invoice, months and start date for a new schedule, and the run-to date.
+    pub rr_invoice: Option<Opt>,
+    pub rr_months: String,
+    pub rr_start: String,
+    pub rr_to: String,
     /// Lots: the item whose tracking is being set, and expiry dates being typed (by item|lot).
     pub lot_item: Option<Opt>,
     pub lot_exp: BTreeMap<String, String>,
@@ -110,6 +115,7 @@ pub enum Msg {
     /// Payment reminders: on/off, a new level's days, add, switch a level on/off, delete, send due reminders now.
     PrNew(bool), PrField(usize, String), PrItem(Opt), PrLevel(Opt), PrSave, PrDelete(i64),
     LotItem(Opt), LotMode(&'static str), LotExpiry(i64, String, String), LotExpirySave(i64, String),
+    RrInvoice(Opt), RrMonths(String), RrStart(String), RrTo(String), RrCreate, RrRun,
     LocNew(bool), LocField(u8, String), LocSave, LocDelete(i64), TrItem(Opt), TrFrom(Opt), TrTo(Opt), TrQty(String), TrDate(String), TrMove,
     DunOn(bool), DunDays(String), DunAdd, DunActive(i64, i64, bool), DunDelete(i64), DunRun,
     /// Find & recode.
@@ -155,6 +161,17 @@ pub fn load(app: &mut App) -> Task<Message> {
         Route::BatchPayments => call(app, "batch.list", json!({})),
         Route::Locations => call(app, "locations.stock", json!({})),
         Route::Lots => call(app, "lots.list", json!({})),
+        Route::RevenueRecognition => {
+            let be = app.be.clone();
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                    let schedules = be.call_now("revrec.list", json!({}))?;
+                    let invoices: Vec<Value> = be.call_now("docs.list", json!({"type": "ACCREC", "limit": 500}))?["rows"].as_array().cloned().unwrap_or_default()
+                        .into_iter().filter(|d| d["type"] == "ACCREC" && matches!(d["status"].as_str(), Some("AUTHORISED" | "PAID"))).collect();
+                    Ok(json!({"schedules": schedules, "invoices": invoices}))
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, move |r| Message::Loaded(g, r))
+        }
         Route::PaymentReminders => {
             let be = app.be.clone();
             Task::perform(async move {
@@ -217,6 +234,24 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             let p = json!({"line_ids": x.rc_sel.iter().collect::<Vec<_>>(), "account_id": x.rc_to_account.as_ref().map(|o| o.id), "tax_rate_id": x.rc_to_tax.as_ref().map(|o| o.id)});
             app.extras.busy = true;
             app.be.call("recode.apply", p, |r| Message::Extras(Msg::Done(r.map(|v| { let n = v["transactions"].as_i64().unwrap_or(0); json!({"n": n}) }), "Recoded — the transactions were reposted")))
+        }
+        // ---- revenue recognition ----
+        Msg::RrInvoice(o) => { app.extras.rr_invoice = Some(o); Task::none() }
+        Msg::RrMonths(v) => { app.extras.rr_months = v.chars().filter(|c| c.is_ascii_digit()).collect(); Task::none() }
+        Msg::RrStart(v) => { let old = app.extras.rr_start.clone(); app.extras.rr_start = ui::date_keys(&old, &v, style); Task::none() }
+        Msg::RrTo(v) => { let old = if app.extras.rr_to.is_empty() { app.d(&ui::today_iso()) } else { app.extras.rr_to.clone() }; app.extras.rr_to = ui::date_keys(&old, &v, style); Task::none() }
+        Msg::RrCreate => {
+            let x = &app.extras;
+            let Some(inv) = x.rr_invoice.as_ref().map(|o| o.id) else { return app.toast("Choose the invoice", true) };
+            let Ok(months) = x.rr_months.parse::<i64>() else { return app.toast("Enter how many months to spread it over", true) };
+            let Some(start) = ui::to_iso(&x.rr_start, style) else { return app.toast("Enter the date of the first month", true) };
+            app.extras.rr_invoice = None; app.extras.rr_months.clear(); app.extras.rr_start.clear();
+            app.be.call("revrec.create", json!({"document_id": inv, "months": months, "start": start}), |r| Message::Extras(Msg::Done(r, "Revenue deferred — recognise it month by month below")))
+        }
+        Msg::RrRun => {
+            let shown = if app.extras.rr_to.is_empty() { app.d(&ui::today_iso()) } else { app.extras.rr_to.clone() };
+            let Some(to) = ui::to_iso(&shown, style) else { return app.toast("Check the date", true) };
+            app.be.call("revrec.run", json!({"to": to}), |r| Message::Extras(Msg::Done(r, "Revenue recognised up to that date")))
         }
         // ---- lots ----
         Msg::LotItem(o) => { app.extras.lot_item = Some(o); Task::none() }
@@ -1023,6 +1058,42 @@ pub fn price_rules_section(app: &App) -> Element<'_, Message> {
     }).collect();
     col = col.push(ui::table(&[ui::col("Rule", 16), ui::col("Item", 18), ui::col("Customers", 16), ui::col("Quantity", 10), ui::col("Change", 9), ui::col("Dates", 20), ui::col("", 9)], rows, "No price rules yet."));
     col.push(ui::muted("The lowest matching price wins. Rules apply after the customer's price level, when an item goes on a sale or its quantity changes.")).into()
+}
+
+// ---------------- Revenue recognition ----------------
+
+/// Deferral schedules: spread an invoice's income over the months it's earned in.
+pub fn revenue_recognition(app: &App) -> Element<'_, Message> {
+    let Some(d) = &app.data else { return loading() };
+    let x = &app.extras;
+    let invoices: Vec<Opt> = d["invoices"].as_array().cloned().unwrap_or_default().iter().map(|i| Opt { id: i["id"].as_i64().unwrap_or(0),
+        label: format!("{} — {} — {}", i["number"].as_str().unwrap_or(""), i["contact_name"].as_str().unwrap_or(""), ui::money(i["total"].as_i64().unwrap_or(0))) }).collect();
+    let new = ui::card(column![
+        ui::h2("Defer an invoice"),
+        row![column![lbl("INVOICE"), pick_list(invoices, x.rr_invoice.clone(), |o| Message::Extras(Msg::RrInvoice(o))).placeholder("Choose an approved invoice").padding([5, 7]).text_size(13).style(theme::pick).width(360)].spacing(3),
+            input("MONTHS", &x.rr_months, 90.0, |v| Message::Extras(Msg::RrMonths(v))), input("FIRST MONTH", &x.rr_start, 130.0, |v| Message::Extras(Msg::RrStart(v))),
+            iced::widget::Space::new().width(Length::Fill), ui::btn_primary("Create schedule", Some(Message::Extras(Msg::RrCreate)))].spacing(12).align_y(Alignment::End),
+        ui::muted("The invoice's income moves to Deferred Revenue on its date, then comes back into income in equal monthly parts."),
+    ].spacing(10));
+    let rows = d["schedules"].as_array().cloned().unwrap_or_default().iter().map(|s| {
+        let (total, done) = (s["total"].as_i64().unwrap_or(0), s["recognised"].as_i64().unwrap_or(0));
+        (vec![ui::cell(s["number"].as_str().unwrap_or("").to_string()), ui::cell(s["contact_name"].as_str().unwrap_or("").to_string()),
+            ui::cell_muted(format!("{} months from {}", s["months"].as_i64().unwrap_or(0), app.d(s["start_date"].as_str().unwrap_or("")))),
+            ui::cell_money(total), ui::cell_money(done), ui::cell_money(total - done),
+            ui::cell_muted(s["next_date"].as_str().map(|n| app.d(n)).unwrap_or_else(|| "Done".into()))],
+         s["document_id"].as_i64().map(|id| Message::Nav(Route::Doc { kind: "ACCREC".into(), id: Some(id) })))
+    }).collect();
+    let to_shown = if x.rr_to.is_empty() { app.d(&ui::today_iso()) } else { x.rr_to.clone() };
+    let run = ui::card(row![
+        column![ui::h2("Recognise revenue"), ui::muted("Posts every month due up to the date: Deferred Revenue back into income.")].spacing(4).width(Length::Fill),
+        input("UP TO", &to_shown, 130.0, |v| Message::Extras(Msg::RrTo(v))),
+        ui::btn_primary("Recognise", Some(Message::Extras(Msg::RrRun))),
+    ].spacing(12).align_y(Alignment::End));
+    let body = column![new, run,
+        ui::table(&[ui::col("Invoice", 12), ui::col("Customer", 18), ui::col("Schedule", 20), ui::coln("Deferred", 12), ui::coln("Recognised", 12), ui::coln("Remaining", 12), ui::col("Next", 12)], rows, "No revenue schedules yet."),
+    ].spacing(14);
+    let title = if crate::vocab::acumatica() { "Deferral Schedules" } else if crate::vocab::sage() { "Deferred Income" } else { "Revenue recognition" };
+    ui::page(ui::h1(title), vec![], body.max_width(1200).into())
 }
 
 // ---------------- Lots and serial numbers ----------------

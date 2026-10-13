@@ -970,3 +970,26 @@ fn lot_and_serial_numbers() {
     assert_eq!(lots.iter().find(|x| x["lot"] == "L001").unwrap()["expiry"], "2026-12-31");
     assert_invariants(&l);
 }
+
+#[test]
+fn revenue_recognition_schedule() {
+    let l = org();
+    let sales = acct(&l, "200");
+    let inv = l.save_document(None, &DocInput { kind: "ACCREC".into(), contact_name: Some("Acme".into()), date: "2026-01-15".into(), line_amount_type: Some("NOTAX".into()),
+        lines: vec![line(sales, None, "1", "1200")], status: Some("AUTHORISED".into()), ..Default::default() }).unwrap();
+    assert_eq!(bal(&l, sales), -120_000);
+    l.create_revenue_schedule(inv, "2026-01-31", 12).unwrap();
+    assert!(l.create_revenue_schedule(inv, "2026-01-31", 12).is_err(), "only one schedule per invoice");
+    assert_eq!(bal(&l, sales), 0, "all of it deferred");
+    let deferred: i64 = l.conn.query_row("SELECT id FROM accounts WHERE name = 'Deferred Revenue'", [], |r| r.get(0)).unwrap();
+    assert_eq!(bal(&l, deferred), -120_000);
+    assert_eq!(l.recognise_revenue("2026-03-31").unwrap(), 3);
+    assert_eq!(bal(&l, sales), -30_000);
+    assert_eq!(bal(&l, deferred), -90_000);
+    // Running again posts nothing new; the rest comes over the year.
+    assert_eq!(l.recognise_revenue("2026-03-31").unwrap(), 0);
+    assert_eq!(l.recognise_revenue("2026-12-31").unwrap(), 9);
+    assert_eq!(bal(&l, sales), -120_000);
+    assert_eq!(bal(&l, deferred), 0);
+    assert_invariants(&l);
+}

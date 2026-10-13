@@ -46,7 +46,7 @@ pub static PLACES: &[(&str, &str, &str)] = &[
     ("reports", "reporting", "All Reports"), ("memorized_reports", "reporting", "Saved Reports"), ("custom_reports", "reporting", "Report Designer"),
     ("insights", "reporting", "Business Summary"), ("audit_log", "reporting", "Audit Trail"),
     // Accounting
-    ("journal", "accounting", "Journals"), ("chart", "accounting", "Chart of Accounts"), ("recode", "accounting", "Reallocate Transactions"),
+    ("journal", "accounting", "Journals"), ("chart", "accounting", "Chart of Accounts"), ("recode", "accounting", "Reallocate Transactions"), ("revenue_recognition", "accounting", "Deferred Income"),
     ("budgets", "accounting", "Budgets"), ("currencies", "accounting", "Currencies"), ("fixed_assets", "accounting", "Fixed Assets"),
     ("taxes", "accounting", "Tax Returns"), ("pay_sales_tax", "accounting", "Tax Payments"), ("closing_date", "accounting", "Year End & Lock Date"),
     ("classes", "accounting", "Analysis Types"), ("recurring", "accounting", "Recurring Transactions"), ("find", "accounting", "Search Transactions"),

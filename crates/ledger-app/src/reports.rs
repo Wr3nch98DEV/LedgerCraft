@@ -261,6 +261,7 @@ fn qb_group(key: &str) -> &'static str {
     match key {
         "balance-sheet" | "profit-and-loss" | "cash-flow-statement" | "executive-summary" | "budget-summary" | "budget-variance" | "cash-summary" => "Business overview",
         "aged-receivables" | "receivable-invoice-detail" | "contact-transactions" => "Who owes you",
+        "deferred-revenue" => "For my accountant",
         "sales-by-contact" | "sales-by-item" | "income-by-contact" => "Sales and customers",
         "aged-payables" | "payable-invoice-detail" => "What you owe",
         "purchases-by-contact" | "purchases-by-item" | "expense-claims" | "contractor-1099" => "Expenses and vendors",

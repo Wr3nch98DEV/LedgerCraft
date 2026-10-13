@@ -250,6 +250,9 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
             let delayed: Vec<i64> = if p["close_delayed"].is_array() { de(&p["close_delayed"])? } else { vec![] };
             Ok(json!({"id": l.save_invoice_with_delayed(oi(p, "id"), &input, &delayed)?}))
         }
+        "revrec.list" => { need("accounting:read")?; Ok(json!(l.list_revenue_schedules()?)) }
+        "revrec.create" => { need("accounting:write")?; Ok(json!({"id": l.create_revenue_schedule(i(p, "document_id")?, s(p, "start"), i(p, "months")?)?})) }
+        "revrec.run" => { need("accounting:write")?; Ok(json!({"posted": l.recognise_revenue(s(p, "to"))?})) }
         "lots.list" => Ok(json!(l.list_lots(p["all"].as_bool().unwrap_or(false))?)),
         "lots.setExpiry" => { need("inventory:write")?; l.set_lot_expiry(i(p, "item_id")?, s(p, "lot"), p["expiry"].as_str().filter(|x| !x.is_empty()))?; ok() }
         "items.setLotTracking" => { need("inventory:write")?; l.set_lot_tracking(i(p, "item_id")?, s(p, "mode"))?; ok() }

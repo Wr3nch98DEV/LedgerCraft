@@ -4077,3 +4077,28 @@ fn serial_numbers_in_the_app() {
     assert!(!click_fails(&app, "A100") && !click_fails(&app, "A101"));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn revenue_recognition_in_the_app() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = desktop_app("revrec");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Acumatica)); settle(&mut app, t);
+    let t = app.update(Message::Nav(Route::RevenueRecognition)); settle(&mut app, t);
+    assert!(!click_fails(&app, "Deferral Schedules"));
+    let inv = app.data.as_ref().unwrap()["invoices"][0].clone();
+    let opt = crate::app::Opt { id: inv["id"].as_i64().unwrap(), label: "x".into() };
+    let start = app.d(inv["date"].as_str().unwrap());
+    for m in [X::RrInvoice(opt), X::RrMonths("4".into()), X::RrStart(start)] { let _ = app.update(Message::Extras(m)); }
+    press(&mut app, "Create schedule");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let s = app.data.as_ref().unwrap()["schedules"][0].clone();
+    assert_eq!(s["months"], 4);
+    // Recognise everything due by far in the future: all four months.
+    let _ = app.update(Message::Extras(X::RrTo(app.d("2099-12-31"))));
+    press(&mut app, "Recognise");
+    let s = app.data.as_ref().unwrap()["schedules"][0].clone();
+    assert_eq!(s["recognised"], s["total"]);
+    let tb = app.be.call_now("reports.run", json!({"name": "trial-balance", "params": {"date": "2099-12-31"}})).unwrap();
+    assert_eq!(tb["balanced"], true);
+    let _ = std::fs::remove_dir_all(dir);
+}
