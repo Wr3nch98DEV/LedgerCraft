@@ -3464,3 +3464,30 @@ fn csv_statement_columns_matched_by_hand() {
     assert!(lines_after >= lines_before);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn second_tracking_category() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("tracking2");
+    let t = app.update(Message::Nav(Route::ClassList)); settle(&mut app, t);
+    let cats = app.data.as_ref().unwrap().as_array().unwrap().len();
+    if cats < 2 {
+        let _ = app.update(Message::Desk(W::ClassCatNew(Some("Location".into()))));
+        let t = app.update(Message::Desk(W::ClassCatAdd)); settle(&mut app, t);
+        assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    }
+    let cats = app.be.call_now("tracking.list", json!({})).unwrap();
+    assert_eq!(cats.as_array().unwrap().len(), 2);
+    let second = cats.as_array().unwrap()[1].clone();
+    let _ = app.update(Message::Desk(W::ClassCat(second["id"].as_i64().unwrap())));
+    let _ = app.update(Message::Desk(W::ClassNew("Melbourne".into())));
+    let t = app.update(Message::Desk(W::ClassAdd)); settle(&mut app, t);
+    let after = app.be.call_now("tracking.list", json!({})).unwrap();
+    let opts = after.as_array().unwrap().iter().find(|c| c["id"] == second["id"]).unwrap()["options"].to_string();
+    assert!(opts.contains("Melbourne"), "{opts}");
+    // A third category is refused by the engine.
+    let _ = app.update(Message::Desk(W::ClassCatNew(Some("Region".into()))));
+    let t = app.update(Message::Desk(W::ClassCatAdd)); settle(&mut app, t);
+    assert!(app.toasts.iter().any(|t| t.2));
+    let _ = std::fs::remove_dir_all(dir);
+}

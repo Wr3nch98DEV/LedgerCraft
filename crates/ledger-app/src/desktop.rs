@@ -107,6 +107,9 @@ pub struct State {
     pub liab_pay: Vec<(i64, bool, String)>,
     /// Class List: the name being added.
     pub class_new: String,
+    /// Class List: the category new classes go into, and a second category being created.
+    pub class_cat: Option<i64>,
+    pub class_cat_new: Option<String>,
     /// Payroll Item List: the item being added and its type.
     pub pi_new: String,
     pub pi_kind: Option<&'static str>,
@@ -147,7 +150,7 @@ pub struct RegEntry { pub date: String, pub number: String, pub payee: String, p
 pub enum RegField { Date, Number, Payee, Payment, Deposit, Memo }
 
 #[derive(Debug, Clone)]
-pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), ShowInactive(bool), FindType(&'static str), FindField(u8, String), FindRun, FindDone(crate::backend::Reply), FindReset, EmpNew, EmpEdit(i64), EmpLoaded(crate::backend::Reply), EmpField(&'static str, String), EmpSave, EmpSaved(crate::backend::Reply), EmpCancel, RemToggle(&'static str), JobNew(Option<String>), JobSave(i64), JobSaved(crate::backend::Reply), BiCust(i64, bool), BiAll(bool), BiItem(usize, crate::app::Opt), BiField(usize, u8, String), BiAddLine, BiDate(String), BiCreate, BiDone(crate::backend::Reply), InvSelect(i64), InvDetail(crate::backend::Reply), JobsLoaded(crate::backend::Reply), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
+pub enum Msg { Activate(usize), Close(usize), CloseAll, Pane(Pane), Insights(bool), Exit, Select(i64), Detail(i64, crate::backend::Reply), ReportCat(&'static str), Tracker(&'static str), Employee(i64), CalMonth(i32), StmtOne(Option<crate::app::Opt>), StmtDate(String), StmtPrint, StmtEmail, StmtDone(Result<String, String>), MemDelete(i64), MemRun, MemDone(crate::backend::Reply, &'static str), Reg(RegField, String), RegAccount(crate::app::Opt), RegRecord, RegSaved(crate::backend::Reply), TxType(Option<&'static str>), TxRows(&'static str, crate::backend::Reply), OneWindow(bool), TaxPick(i64, bool), TaxAmt(i64, String), TaxFrom(crate::app::Opt), TaxDate(String), TaxPay, TaxPaid(crate::backend::Reply), AdjQty(i64, String), AdjDate(String), AdjAccount(crate::app::Opt), AdjMemo(String), AdjSave, AdjSaved(crate::backend::Reply), DocAdd, DocAdded(Result<Option<String>, String>), DocToBill(i64), DocBill(crate::backend::Reply), DocRemove(i64), DocOpen(i64), LiabPick(i64, bool), LiabAmt(i64, String), LiabPay, ClassNew(String), ClassAdd, ClassCat(i64), ClassCatNew(Option<String>), ClassCatAdd, PiNew(String), PiKind(&'static str), PiAdd, OnNew(String), OnAdd, FcField(u8, String), FcPick(i64, bool), FcAssess, FcDone(crate::backend::Reply), TplPick(i64), TplField(&'static str, String), TplFlag(&'static str, bool), TplDefault(bool), TplSave, TplNew, TplDelete, TplDone(crate::backend::Reply), PlField(u8, String), PlAdd, PlDelete(i64), PlCust(crate::app::Opt), PlLevel(crate::app::Opt), PlAssign, PlDone(crate::backend::Reply), PfPick(i64, bool), PfAll(bool), PfPrint, PfDone(Result<(String, usize), String>), PrFile(i64), PrSaved(Result<String, String>), FavAdd(String), FavRemove(usize), FavUp(usize), OpenPrefs(&'static str), ShowInactive(bool), FindType(&'static str), FindField(u8, String), FindRun, FindDone(crate::backend::Reply), FindReset, EmpNew, EmpEdit(i64), EmpLoaded(crate::backend::Reply), EmpField(&'static str, String), EmpSave, EmpSaved(crate::backend::Reply), EmpCancel, RemToggle(&'static str), JobNew(Option<String>), JobSave(i64), JobSaved(crate::backend::Reply), BiCust(i64, bool), BiAll(bool), BiItem(usize, crate::app::Opt), BiField(usize, u8, String), BiAddLine, BiDate(String), BiCreate, BiDone(crate::backend::Reply), InvSelect(i64), InvDetail(crate::backend::Reply), JobsLoaded(crate::backend::Reply), BaItem(crate::app::Opt), BaLoaded(crate::backend::Reply), BaField(u8, String), BaBuild, BaBuilt(crate::backend::Reply), BaEdit, BaComp(usize, crate::app::Opt), BaCompQty(usize, String), BaCompAdd, BaCompRemove(usize), BaCompSave, ClassDone(crate::backend::Reply), TimeProject(crate::app::Opt), TimeTask(crate::app::Opt), TimeField(u8, String), TimeSave, TimeSaved(crate::backend::Reply) }
 
 impl App {
     /// Remember the Desktop view choices (One Window, icon bar pane).
@@ -643,14 +646,23 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             let name = app.desk.class_new.trim().to_string();
             if name.is_empty() { return app.toast("Enter the class name", true); }
             let cats = app.data.as_ref().and_then(|d| d.as_array().cloned()).unwrap_or_default();
-            // Classes live in the first tracking category (created as "Class" when there's none).
-            let (id, cat_name, mut opts) = match cats.first() {
+            // Into the chosen category, else the first (created as "Class" when there's none).
+            let chosen = app.desk.class_cat.and_then(|id| cats.iter().find(|c| c["id"].as_i64() == Some(id))).or(cats.first());
+            let (id, cat_name, mut opts) = match chosen {
                 Some(c) => (c["id"].as_i64(), c["name"].as_str().unwrap_or("Class").to_string(), c["options"].as_array().cloned().unwrap_or_default().iter().filter_map(|o| o["name"].as_str().map(String::from)).collect::<Vec<_>>()),
                 None => (None, "Class".to_string(), vec![]),
             };
             if opts.iter().any(|o| o.eq_ignore_ascii_case(&name)) { return app.toast("That class already exists", true); }
             opts.push(name);
             app.be.call("tracking.save", serde_json::json!({"id": id, "name": cat_name, "options": opts}), |r| Message::Desk(Msg::ClassDone(r)))
+        }
+        Msg::ClassCat(id) => { app.desk.class_cat = Some(id); Task::none() }
+        Msg::ClassCatNew(v) => { app.desk.class_cat_new = v; Task::none() }
+        Msg::ClassCatAdd => {
+            let name = app.desk.class_cat_new.clone().unwrap_or_default().trim().to_string();
+            if name.is_empty() { return app.toast("Name the new category (for example Location or Department)", true); }
+            app.desk.class_cat_new = None;
+            app.be.call("tracking.save", serde_json::json!({"name": name, "options": []}), |r| Message::Desk(Msg::ClassDone(r)))
         }
         Msg::ClassDone(r) => match r {
             Ok(_) => { app.desk.class_new.clear(); app.desk.pi_new.clear(); app.desk.on_new.clear(); let t1 = app.toast("Added", false); Task::batch([t1, app.load()]) }
@@ -1285,10 +1297,22 @@ pub fn class_list(app: &App) -> Element<'_, Message> {
     }
     let cols: Vec<(&str, u16, bool)> = vec![("Class", 30, false), ("Category", 24, false), ("Status", 12, false)];
     list_window(&cols, rows, vec![
-        text_input("New class name", &app.desk.class_new).on_input(|v| Message::Desk(Msg::ClassNew(v))).on_submit(Message::Desk(Msg::ClassAdd)).padding([5, 7]).size(13).style(theme::input).width(260).into(),
+        {
+            // Which category a new class goes into (there can be two, e.g. Class and Location).
+            let cats: Vec<crate::app::Opt> = d.as_array().cloned().unwrap_or_default().iter().map(|c| crate::app::Opt { id: c["id"].as_i64().unwrap_or(0), label: c["name"].as_str().unwrap_or("").to_string() }).collect();
+            let cur = app.desk.class_cat.and_then(|id| cats.iter().find(|c| c.id == id).cloned()).or_else(|| cats.first().cloned());
+            pick_list(cats, cur, |o| Message::Desk(Msg::ClassCat(o.id))).padding([5, 7]).text_size(13).style(theme::pick).width(160).into()
+        },
+        text_input("New class name", &app.desk.class_new).on_input(|v| Message::Desk(Msg::ClassNew(v))).on_submit(Message::Desk(Msg::ClassAdd)).padding([5, 7]).size(13).style(theme::input).width(220).into(),
         ui::btn_primary("New Class", Some(Message::Desk(Msg::ClassAdd))),
         ui::hspace(),
-        text("Classes tag transactions for reports by department, location or anything you like.").size(12).color(k.muted).into(),
+        // A second category (Location, Department…) — at most two, as in Xero and QuickBooks.
+        match (&app.desk.class_cat_new, d.as_array().map(|a| a.len()).unwrap_or(0) < 2) {
+            (Some(n), _) => row![text_input("Category name, e.g. Location", n).on_input(|v| Message::Desk(Msg::ClassCatNew(Some(v)))).on_submit(Message::Desk(Msg::ClassCatAdd)).padding([5, 7]).size(13).style(theme::input).width(220),
+                ui::btn("Add category", Some(Message::Desk(Msg::ClassCatAdd))), ui::btn("Cancel", Some(Message::Desk(Msg::ClassCatNew(None))))].spacing(6).into(),
+            (None, true) => ui::btn("New category…", Some(Message::Desk(Msg::ClassCatNew(Some(String::new()))))),
+            (None, false) => text("Classes tag transactions for reports by department, location or anything you like.").size(12).color(k.muted).into(),
+        },
     ])
 }
 
