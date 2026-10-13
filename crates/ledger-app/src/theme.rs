@@ -17,14 +17,15 @@ impl Skin {
 /// The screen layout. Desktop and Online are both QuickBooks (same terms, `Skin::QuickBooks`);
 /// they differ in navigation and screen design.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Layout { Desktop, Online, Xero, Acumatica }
+pub enum Layout { Desktop, Online, Xero, Acumatica, Sage }
 
 impl Layout {
-    pub const ALL: [Layout; 4] = [Layout::Desktop, Layout::Online, Layout::Xero, Layout::Acumatica];
-    pub fn key(self) -> &'static str { match self { Layout::Desktop => "desktop", Layout::Online => "quickbooks", Layout::Xero => "xero", Layout::Acumatica => "acumatica" } }
-    pub fn from_key(s: &str) -> Layout { match s { "xero" => Layout::Xero, "acumatica" | "myob" => Layout::Acumatica, "quickbooks" | "online" | "qbo" => Layout::Online, _ => Layout::Desktop } }
-    pub fn skin(self) -> Skin { if self == Layout::Xero { Skin::Xero } else { Skin::QuickBooks } }
-    pub fn label(self) -> &'static str { match self { Layout::Desktop => "QuickBooks Desktop-style", Layout::Online => "QuickBooks Online-style", Layout::Xero => "Xero-style", Layout::Acumatica => "MYOB Acumatica-style" } }
+    pub const ALL: [Layout; 5] = [Layout::Desktop, Layout::Online, Layout::Xero, Layout::Acumatica, Layout::Sage];
+    pub fn key(self) -> &'static str { match self { Layout::Desktop => "desktop", Layout::Online => "quickbooks", Layout::Xero => "xero", Layout::Acumatica => "acumatica", Layout::Sage => "sage" } }
+    pub fn from_key(s: &str) -> Layout { match s { "xero" => Layout::Xero, "acumatica" | "myob" => Layout::Acumatica, "sage" => Layout::Sage, "quickbooks" | "online" | "qbo" => Layout::Online, _ => Layout::Desktop } }
+    /// Sage shares Xero's words (suppliers, credit notes, quotes); Acumatica shares QuickBooks'.
+    pub fn skin(self) -> Skin { if matches!(self, Layout::Xero | Layout::Sage) { Skin::Xero } else { Skin::QuickBooks } }
+    pub fn label(self) -> &'static str { match self { Layout::Desktop => "QuickBooks Desktop-style", Layout::Online => "QuickBooks Online-style", Layout::Xero => "Xero-style", Layout::Acumatica => "MYOB Acumatica-style", Layout::Sage => "Sage Accounting-style" } }
 }
 impl From<Skin> for Layout { fn from(s: Skin) -> Layout { match s { Skin::QuickBooks => Layout::Online, Skin::Xero => Layout::Xero } } }
 
@@ -59,6 +60,21 @@ pub fn tokens_for(layout: Layout, dark: bool) -> Tokens {
             accent: hex(0x3b5bdb), accent_ink: hex(0xffffff), accent_soft: hexa(0x3b5bdb, 0.10), ok: hex(0x1f8a4c), warn: hex(0xb06d00),
             bad: hex(0xc8281e), info: hex(0x0b6bb5), nav_bg: hex(0x1d2838), nav_text: hex(0xffffff), nav_muted: hex(0xb7c1cf),
             nav_active: hex(0x9fb4ff), nav_hover: hex(0x2a374b),
+        },
+        // Sage Accounting-style: black top bar, bright green accent.
+        (Layout::Sage, true) => Tokens {
+            dark, bg: hex(0x0c0e0d), bg2: hex(0x121513), panel: hex(0x171a18), panel2: hex(0x1d211f), hover: hex(0x232826),
+            line: hex(0x2a302d), line2: hex(0x3a423e), text: hex(0xeaefec), muted: hex(0x9ca8a2), faint: hex(0x6b7671),
+            accent: hex(0x00c837), accent_ink: hex(0x000000), accent_soft: hexa(0x00c837, 0.15), ok: hex(0x2fcf62), warn: hex(0xf2b33d),
+            bad: hex(0xf06a6a), info: hex(0x5aa9f0), nav_bg: hex(0x000000), nav_text: hex(0xffffff), nav_muted: hex(0xa7b0ab),
+            nav_active: hex(0x00e03d), nav_hover: hex(0x1a1d1b),
+        },
+        (Layout::Sage, false) => Tokens {
+            dark, bg: hex(0xf2f5f3), bg2: hex(0xe8ece9), panel: hex(0xffffff), panel2: hex(0xf6f8f7), hover: hex(0xe9f2ec),
+            line: hex(0xd3dad6), line2: hex(0xb7c1bb), text: hex(0x1a1f1c), muted: hex(0x56615b), faint: hex(0x86918b),
+            accent: hex(0x008a26), accent_ink: hex(0xffffff), accent_soft: hexa(0x008a26, 0.10), ok: hex(0x008a26), warn: hex(0xb06d00),
+            bad: hex(0xc8281e), info: hex(0x0b6bb5), nav_bg: hex(0x000000), nav_text: hex(0xffffff), nav_muted: hex(0xb9c2bd),
+            nav_active: hex(0x00e03d), nav_hover: hex(0x1f2421),
         },
         _ => tokens(layout.skin(), dark),
     }

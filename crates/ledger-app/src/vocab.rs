@@ -3,12 +3,27 @@
 use crate::theme::Skin;
 use std::cell::Cell;
 
-thread_local! { static ACUMATICA: Cell<bool> = const { Cell::new(false) }; }
+thread_local! { static LAYOUT: Cell<crate::theme::Layout> = const { Cell::new(crate::theme::Layout::Desktop) }; }
 
-/// MYOB Acumatica-style shares the QuickBooks skin (Customers, Vendors, Bills) but has its own
-/// words for screens, buttons and statuses. The view publishes which layout is showing.
-pub fn set_acumatica(on: bool) { ACUMATICA.with(|c| c.set(on)); }
-pub fn acumatica() -> bool { ACUMATICA.with(|c| c.get()) }
+/// MYOB Acumatica-style shares the QuickBooks skin (Customers, Vendors, Bills) and Sage-style
+/// shares Xero's (Suppliers, Credit notes), but each has its own words for screens, buttons and
+/// statuses. The app publishes which layout is showing.
+pub fn set_layout(l: crate::theme::Layout) { LAYOUT.with(|c| c.set(l)); }
+pub fn acumatica() -> bool { LAYOUT.with(|c| c.get()) == crate::theme::Layout::Acumatica }
+pub fn sage() -> bool { LAYOUT.with(|c| c.get()) == crate::theme::Layout::Sage }
+
+/// Sage Accounting's words, where they differ from Xero's.
+fn sage_term(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "invoices" => "Sales Invoices", "quote" => "Quote", "quotes" => "Quotes & Estimates", "credit_notes" => "Sales Credit Notes",
+        "bill" => "Purchase invoice", "bills" => "Purchase Invoices", "supplier_credit" => "Purchase credit note",
+        "spend" => "Other payment", "receive" => "Other receipt", "journal" => "Journal", "journals" => "Journals",
+        "items" => "Products & Services", "tracking" => "Analysis types", "repeating" => "Recurring",
+        "receive_payment" => "Customer receipt", "pay_bill" => "Supplier payment", "approve" => "Save", "draft" => "Save as draft",
+        "due" => "Outstanding", "aged_ar" => "Aged Debtors", "aged_ap" => "Aged Creditors", "settings" => "Settings",
+        _ => return None,
+    })
+}
 
 /// Acumatica's words, where they differ from QuickBooks'.
 fn acumatica_term(key: &str) -> Option<&'static str> {
@@ -30,6 +45,7 @@ fn acumatica_term(key: &str) -> Option<&'static str> {
 pub fn term(skin: Skin, key: &str) -> &'static str {
     use Skin::*;
     if skin == QuickBooks && acumatica() { if let Some(w) = acumatica_term(key) { return w; } }
+    if skin == Xero && sage() { if let Some(w) = sage_term(key) { return w; } }
     match (key, skin) {
         ("contact", QuickBooks) => "Customer/vendor", ("contact", Xero) => "Contact",
         ("contacts", QuickBooks) => "Customers & vendors", ("contacts", Xero) => "Contacts",
@@ -84,6 +100,25 @@ pub fn status(skin: Skin, kind: &str, status: &str, overdue: bool) -> &'static s
             (_, "VOIDED") => "Voided",
             (_, "DELETED") => "Deleted",
             _ => { let _ = overdue; "—" }
+        };
+    }
+    // Sage: unpaid invoices are Outstanding (Overdue once due); quotes are Pending until accepted.
+    if skin == Skin::Xero && sage() {
+        return match (kind, status) {
+            (_, "DRAFT") => "Draft",
+            (_, "SUBMITTED") => "Pending approval",
+            ("QUOTE", "SENT" | "AUTHORISED") => "Pending",
+            ("QUOTE", "ACCEPTED") => "Accepted",
+            ("QUOTE", "DECLINED") => "Declined",
+            ("QUOTE", "INVOICED") => "Invoiced",
+            ("PO", "AUTHORISED") => "Ordered",
+            ("PO", "BILLED") => "Completed",
+            (_, "AUTHORISED") if overdue => "Overdue",
+            (_, "AUTHORISED" | "SENT") => "Outstanding",
+            (_, "PAID" | "INVOICED") => "Paid",
+            (_, "VOIDED") => "Void",
+            (_, "DELETED") => "Deleted",
+            _ => "—",
         };
     }
     match skin {

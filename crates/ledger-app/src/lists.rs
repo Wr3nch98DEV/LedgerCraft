@@ -13,7 +13,7 @@ fn st<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 
 pub fn status_color(label: &str) -> Color {
     let k = t();
-    match label { "Overdue" => k.bad, "Paid" | "Closed" | "Accepted" | "Billed" | "Invoiced" => k.ok, "Completed" | "Approved" => k.ok, "Draft" | "On Hold" | "Voided" | "Deleted" => k.muted, "Pending approval" | "Pending Approval" | "Awaiting approval" => k.warn, _ => k.info }
+    match label { "Overdue" => k.bad, "Paid" | "Closed" | "Accepted" | "Billed" | "Invoiced" => k.ok, "Completed" | "Approved" => k.ok, "Draft" | "On Hold" | "Voided" | "Void" | "Deleted" => k.muted, "Pending approval" | "Pending Approval" | "Awaiting approval" => k.warn, _ => k.info }
 }
 
 fn loading_or_error<'a>(app: &'a App, title: &str) -> Option<Element<'a, Message>> {

@@ -21,7 +21,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
     }
     let content = container(page(app)).style(theme::page).width(Fill).height(Fill);
     let acu = app.layout == crate::theme::Layout::Acumatica;
-    let base: Element<Message> = if acu { crate::acumatica::frame(app, content.into()) } else { match app.skin {
+    let sage = app.layout == crate::theme::Layout::Sage;
+    let base: Element<Message> = if acu { crate::acumatica::frame(app, content.into()) } else if sage { column![crate::sage::topbar(app), content].into() } else { match app.skin {
         Skin::QuickBooks => row![qb_sidebar(app), column![qb_topbar(app), content]].into(),
         Skin::Xero => column![xero_topbar(app), content].into(),
     } };
@@ -45,6 +46,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if app.new_menu || app.gear_menu || app.menu.is_some() {
         layers = layers.push(mouse_area(container(Space::new()).width(Fill).height(Fill)).on_press(Message::CloseMenus));
         let (menu, pad) = match (app.skin, app.new_menu, app.gear_menu, app.menu) {
+            (_, _, _, Some(m)) if sage => (crate::sage::dropdown(m), Padding { top: 56.0, left: crate::sage::menu_left(m), ..Padding::ZERO }),
             (_, _, _, Some(ws)) if acu => (crate::acumatica::workspace_panel(app, ws), Padding { top: 50.0, left: crate::acumatica::PANEL_LEFT, ..Padding::ZERO }),
             (Skin::QuickBooks, true, _, _) => (new_menu(app), Padding { top: 104.0, left: 14.0, ..Padding::ZERO }),
             (Skin::Xero, true, _, _) => (new_menu(app), Padding { top: 56.0, left: 320.0, ..Padding::ZERO }),
@@ -52,7 +54,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             (_, _, _, Some(m)) => (xero_menu(app, m), Padding { top: 56.0, left: xero_menu_left(m), ..Padding::ZERO }),
             _ => (Space::new().into(), Padding::ZERO),
         };
-        let anchor: Element<Message> = if app.gear_menu {
+        let anchor: Element<Message> = if app.gear_menu || (sage && app.menu == Some("settings")) {
             container(opaque(menu)).padding(Padding { top: 56.0, right: 16.0, ..Padding::ZERO }).width(Fill).align_x(iced::alignment::Horizontal::Right).into()
         } else {
             container(opaque(menu)).padding(pad).into()

@@ -913,6 +913,16 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 else if sales(&e.kind) { actions.push(ui::btn("Save and close", m(Msg::Save(true)))); actions.push(ui::btn_primary("Save and send", m(Msg::SaveAndSend))); }
                 else { actions.push(ui::btn_primary(if e.kind == "PO" { "Save" } else { "Save and close" }, m(Msg::Save(true)))); }
             }
+            Skin::Xero if vocab::sage() => {
+                // Sage: Save as draft, Save, and Save & Email for sales.
+                if e.doc.is_none() || status == "DRAFT" { actions.push(ui::btn("Save as draft", m(Msg::Save(false)))); }
+                if sales(&e.kind) && ledger_doc(&e.kind) {
+                    actions.push(ui::btn("Save", m(Msg::Save(true))));
+                    actions.push(ui::btn_primary("Save & Email", m(Msg::SaveAndSend)));
+                } else {
+                    actions.push(ui::btn_primary("Save", m(Msg::Save(true))));
+                }
+            }
             Skin::Xero => {
                 // Xero: Save (draft / submit for approval) and Approve (or Approve & email for sales).
                 if status != "SUBMITTED" { actions.push(ui::btn("Save draft", m(Msg::Save(false)))); }

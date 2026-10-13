@@ -3044,7 +3044,7 @@ fn render_layout_menu() {
     match std::env::var("LC_OPEN").as_deref() {
         Ok("new") => app.new_menu = true,
         Ok("gear") => app.gear_menu = true,
-        Ok(m) => app.menu = ["business", "accounting", "payroll", "contacts"].into_iter().chain(crate::acumatica::WORKSPACES.iter().map(|w| w.0)).find(|x| *x == m),
+        Ok(m) => app.menu = ["business", "accounting", "payroll", "contacts"].into_iter().chain(crate::acumatica::WORKSPACES.iter().map(|w| w.0)).chain(crate::sage::MENUS.iter().map(|w| w.0)).find(|x| *x == m),
         _ => {}
     }
     let _ = std::fs::remove_file(std::env::temp_dir().join("lc-route-wgpu.png"));
@@ -3739,5 +3739,27 @@ fn acumatica_invoice_hold_release_and_record_navigation() {
     assert_ne!(first, id);
     let t = app.update(Message::Doc(crate::doc::Msg::Step("next"))); settle(&mut app, t);
     assert!(matches!(&app.route, Route::Doc { id: Some(x), .. } if *x != first));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn every_feature_in_the_sage_layout() {
+    let (mut app, dir) = desktop_app("sage-registry");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Sage)); settle(&mut app, t);
+    assert_eq!(app.skin, Skin::Xero);
+    for (id, menu, label) in crate::sage::PLACES {
+        app.route = Route::Dashboard; app.data = None; app.new_menu = false; app.gear_menu = false;
+        app.menu = Some(menu);
+        let msgs = {
+            let _g = sim_lock();
+            let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 1000.0), app.view());
+            ui.click(*label).unwrap_or_else(|e| panic!("Sage: {menu} ▸ {label} not clickable (feature {id}): {e:?}"));
+            ui.into_messages().collect::<Vec<_>>()
+        };
+        assert!(!msgs.is_empty(), "Sage: {menu} ▸ {label} does nothing");
+    }
+    // Sage's words.
+    assert_eq!(app.term("bills"), "Purchase Invoices");
+    assert_eq!(crate::vocab::status(Skin::Xero, "ACCREC", "AUTHORISED", false), "Outstanding");
     let _ = std::fs::remove_dir_all(dir);
 }

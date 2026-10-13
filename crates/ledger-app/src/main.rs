@@ -24,6 +24,7 @@ mod reconcile;
 mod pdf;
 mod people;
 mod reports;
+mod sage;
 mod settings;
 mod setup;
 mod shell;
