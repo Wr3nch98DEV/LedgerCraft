@@ -50,7 +50,13 @@ pub struct State {
     pub ie_file: Option<(String, String)>,
     pub ie_preview: Option<Value>,
     pub ie_date: String,
+    /// Custom reports: the report being built — name, monthly columns, and its rows.
+    pub cr_new: Option<(String, bool, Vec<CrRow>)>,
 }
+
+/// A custom report row: a heading, a total of account types, or a formula over earlier rows.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CrRow { pub kind: &'static str, pub label: String, pub types: Vec<&'static str>, pub expr: String, pub sign: i64 }
 
 #[derive(Debug, Clone)]
 pub enum Msg {
@@ -62,6 +68,7 @@ pub enum Msg {
     ClTab(&'static str), ClNew(bool), ClField(&'static str, String), ClAccount(Opt), ClTax(Opt), ClSave(bool), ClStatus(i64, &'static str), ClCancel,
     BrNew(bool), BrField(&'static str, String), BrBank(Opt), BrAccount(Opt), BrContact(Opt), BrSave, BrDelete(i64),
     IeWhat(&'static str), IePick, IePicked(Result<Option<(String, String)>, String>), IePreview(Reply), IeRun, IeDate(String), IeExport(&'static str), IeExported(Result<String, String>),
+    CrNew(bool), CrName(String), CrMonthly(bool), CrAdd(&'static str), CrLabel(usize, String), CrType(usize, &'static str), CrExpr(usize, String), CrSign(usize, bool), CrRemove(usize), CrSave, CrDelete(i64),
     Done(Reply, &'static str),
 }
 
@@ -85,6 +92,7 @@ pub fn load(app: &mut App) -> Task<Message> {
         Route::Currencies => call(app, "currencies.list", json!({})),
         Route::ExpenseClaims => call(app, "receipts.list", json!({})),
         Route::BankRules => call(app, "bankRules.list", json!({})),
+        Route::CustomReports => call(app, "layouts.list", json!({})),
         Route::ImportExport => { app.data = Some(json!({})); Task::none() }
         Route::Budgets => {
             let be = app.be.clone();
@@ -326,12 +334,41 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, |r| Message::Extras(Msg::IeExported(r)))
         }
         Msg::IeExported(r) => match r { Ok(p) => app.toast(format!("Exported to {p}"), false), Err(e) => app.toast(e, true) },
+        // ---- custom reports ----
+        Msg::CrNew(on) => {
+            // Start from a useful shape: income, expenses and a net line.
+            app.extras.cr_new = on.then(|| ("".to_string(), true, vec![
+                CrRow { kind: "types", label: "Income".into(), types: vec!["REVENUE"], sign: -1, ..Default::default() },
+                CrRow { kind: "types", label: "Expenses".into(), types: vec!["EXPENSE"], sign: 1, ..Default::default() },
+                CrRow { kind: "formula", label: "Net profit".into(), expr: "r1 - r2".into(), sign: 1, ..Default::default() }]));
+            Task::none()
+        }
+        Msg::CrName(v) => { if let Some(c) = app.extras.cr_new.as_mut() { c.0 = v; } Task::none() }
+        Msg::CrMonthly(v) => { if let Some(c) = app.extras.cr_new.as_mut() { c.1 = v; } Task::none() }
+        Msg::CrAdd(kind) => { if let Some(c) = app.extras.cr_new.as_mut() { c.2.push(CrRow { kind, sign: 1, types: if kind == "types" { vec!["EXPENSE"] } else { vec![] }, ..Default::default() }); } Task::none() }
+        Msg::CrLabel(n, v) => { if let Some(r) = app.extras.cr_new.as_mut().and_then(|c| c.2.get_mut(n)) { r.label = v; } Task::none() }
+        Msg::CrType(n, t) => { if let Some(r) = app.extras.cr_new.as_mut().and_then(|c| c.2.get_mut(n)) { r.types = vec![t]; r.sign = if matches!(t, "REVENUE" | "LIABILITY" | "EQUITY") { -1 } else { 1 }; } Task::none() }
+        Msg::CrExpr(n, v) => { if let Some(r) = app.extras.cr_new.as_mut().and_then(|c| c.2.get_mut(n)) { r.expr = v; } Task::none() }
+        Msg::CrSign(n, flip) => { if let Some(r) = app.extras.cr_new.as_mut().and_then(|c| c.2.get_mut(n)) { r.sign = if flip { -1 } else { 1 }; } Task::none() }
+        Msg::CrRemove(n) => { if let Some(c) = app.extras.cr_new.as_mut() { if n < c.2.len() { c.2.remove(n); } } Task::none() }
+        Msg::CrSave => {
+            let Some((name, monthly, rows)) = app.extras.cr_new.clone() else { return Task::none() };
+            if name.trim().is_empty() { return app.toast("Give the report a name", true); }
+            if rows.is_empty() { return app.toast("Add at least one row", true); }
+            let rows: Vec<Value> = rows.iter().map(|r| match r.kind {
+                "heading" => json!({"type": "heading", "label": r.label}),
+                "formula" => json!({"type": "formula", "label": r.label, "expr": r.expr, "bold": true}),
+                _ => json!({"type": "types", "label": r.label, "types": r.types, "sign": r.sign}),
+            }).collect();
+            app.be.call("layouts.save", json!({"name": name.trim(), "kind": "CUSTOM", "definition": {"rows": rows, "monthly": monthly}}), |r| Message::Extras(Msg::Done(r, "Custom report saved")))
+        }
+        Msg::CrDelete(id) => app.be.call("layouts.delete", json!({"id": id}), |r| Message::Extras(Msg::Done(r, "Custom report deleted"))),
         // ---- common ----
         Msg::Done(r, what) => {
             app.extras.busy = false;
             match r {
                 Ok(_) => {
-                    app.extras.fa_new = None; app.extras.fa_dispose = None; app.extras.bud_cells.clear(); app.extras.cl_new = None; app.extras.br_new = None;
+                    app.extras.fa_new = None; app.extras.fa_dispose = None; app.extras.bud_cells.clear(); app.extras.cl_new = None; app.extras.br_new = None; app.extras.cr_new = None;
                     if app.route == Route::ImportExport { app.extras.ie_file = None; app.extras.ie_preview = None; }
                     let t1 = if what.is_empty() { Task::none() } else { app.toast(what, false) };
                     Task::batch([t1, app.load(), app.load_lookups()])
@@ -682,6 +719,49 @@ pub fn import_export(app: &App) -> Element<'_, Message> {
     exp = exp.push(r);
     exp = exp.push(row![ui::btn("Back up the whole company file", Some(Message::BackupCompany))]);
     ui::page(ui::h1("Import and export"), vec![], column![ui::card(imp), ui::card(exp)].spacing(14).max_width(1100).into())
+}
+
+// ---------------- Custom reports ----------------
+
+pub const CR_TYPES: [(&str, &str); 10] = [("REVENUE", "Income"), ("DIRECTCOSTS", "Cost of sales"), ("EXPENSE", "Expenses"), ("OTHERINCOME", "Other income"), ("ASSET", "Assets"), ("BANK", "Bank accounts"),
+    ("CURRENT", "Current assets"), ("LIABILITY", "Liabilities"), ("CURRLIAB", "Current liabilities"), ("EQUITY", "Equity")];
+
+pub fn custom_reports(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return loading() };
+    let mut body = column![].spacing(12);
+    if let Some((name, monthly, rows)) = &app.extras.cr_new {
+        let mut list = column![].spacing(6);
+        for (n, r) in rows.iter().enumerate() {
+            let label = text_input("Row label", &r.label).on_input(move |v| Message::Extras(Msg::CrLabel(n, v))).padding([4, 6]).size(13).style(theme::input).width(220);
+            let what: Element<Message> = match r.kind {
+                "heading" => text("Heading").size(12).color(k.muted).into(),
+                "formula" => row![text(format!("r{} =", n + 1)).size(12).color(k.muted), text_input("e.g. r1 - r2", &r.expr).on_input(move |v| Message::Extras(Msg::CrExpr(n, v))).padding([4, 6]).size(13).style(theme::input).width(260)].spacing(6).align_y(Alignment::Center).into(),
+                _ => row![text(format!("r{} = total of", n + 1)).size(12).color(k.muted),
+                    pick_list(CR_TYPES.iter().map(|x| x.1).collect::<Vec<_>>(), r.types.first().map(|t| label_of(&CR_TYPES, t)), move |l: &'static str| Message::Extras(Msg::CrType(n, code_of(&CR_TYPES, l))))
+                        .padding([4, 6]).text_size(13).style(theme::pick).width(180),
+                    iced::widget::checkbox(r.sign < 0).label("Show credits as positive").on_toggle(move |v| Message::Extras(Msg::CrSign(n, v))).text_size(12)].spacing(8).align_y(Alignment::Center).into(),
+            };
+            list = list.push(row![label, what, ui::hspace(), ui::link("Remove", Message::Extras(Msg::CrRemove(n)))].spacing(12).align_y(Alignment::Center));
+        }
+        body = body.push(ui::card(column![
+            ui::h2("New custom report"),
+            row![input("REPORT NAME", name, 300.0, |x| Message::Extras(Msg::CrName(x))),
+                container(iced::widget::checkbox(*monthly).label("A column for each month").on_toggle(|v| Message::Extras(Msg::CrMonthly(v))).text_size(13)).padding(iced::Padding { top: 18.0, ..Default::default() })].spacing(16),
+            list,
+            row![ui::btn("Add account row", Some(Message::Extras(Msg::CrAdd("types")))), ui::btn("Add formula", Some(Message::Extras(Msg::CrAdd("formula")))), ui::btn("Add heading", Some(Message::Extras(Msg::CrAdd("heading")))),
+                ui::hspace(), ui::btn_primary("Save", Some(Message::Extras(Msg::CrSave))), ui::btn("Cancel", Some(Message::Extras(Msg::CrNew(false))))].spacing(8),
+            text("Formulas use the row numbers: r1 + r2, (r1 - r2) / r1 * 100 …").size(12).color(k.muted),
+        ].spacing(12)));
+    }
+    let rows = d.as_array().cloned().unwrap_or_default().iter().filter(|l| l["kind"] == "CUSTOM").map(|l| {
+        let id = l["id"].as_i64().unwrap_or(0);
+        (vec![ui::cell(l["name"].as_str().unwrap_or("").to_string()), ui::cell_muted(l["updated_at"].as_str().or(l["created_at"].as_str()).map(|x| app.d(x.get(..10).unwrap_or(x))).unwrap_or_default()),
+            row![ui::link("Run", Message::Nav(Route::Report(format!("layout:{id}")))), ui::link("Delete", Message::Extras(Msg::CrDelete(id)))].spacing(14).into()],
+         Some(Message::Nav(Route::Report(format!("layout:{id}")))))
+    }).collect();
+    body = body.push(ui::table(&[ui::col("Report", 50), ui::col("Saved", 20), ui::col("", 20)], rows, "No custom reports yet — New report builds one from account totals and formulas."));
+    ui::page(ui::h1("Custom reports"), vec![ui::btn_primary("New report", Some(Message::Extras(Msg::CrNew(true))))], body.max_width(1100).into())
 }
 
 // ---------------- Currencies ----------------

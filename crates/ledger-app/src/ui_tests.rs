@@ -3212,3 +3212,48 @@ fn bank_rules_and_import_export() {
     let _ = std::fs::remove_file(file);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn custom_report_builder_runs() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = desktop_app("custrep");
+    let t = app.update(Message::Nav(Route::CustomReports)); settle(&mut app, t);
+    press(&mut app, "New report");
+    let _ = app.update(Message::Extras(X::CrName("Owner's summary".into())));
+    let _ = app.update(Message::Extras(X::CrMonthly(false)));
+    press(&mut app, "Save");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let id = app.data.as_ref().unwrap().as_array().unwrap().iter().find(|l| l["name"] == "Owner's summary").unwrap()["id"].as_i64().unwrap();
+    let t = app.update(Message::Nav(Route::Report(format!("layout:{id}")))); settle(&mut app, t);
+    let d = app.data.clone().expect("report ran");
+    let rows = d["sections"][0]["rows"].as_array().unwrap().clone();
+    assert_eq!(rows.len(), 3);
+    let v = |n: usize| rows[n]["values"][0].as_i64().unwrap();
+    assert_eq!(v(2), v(0) - v(1), "net = income - expenses");
+    // It renders in the report window.
+    let _ = click_fails(&app, "nothing");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+#[ignore]
+fn render_custom_report() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = desktop_app("custrep-shot");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Xero)); settle(&mut app, t);
+    let t = app.update(Message::Nav(Route::CustomReports)); settle(&mut app, t);
+    let _ = app.update(Message::Extras(X::CrNew(true)));
+    let shot = |app: &App, name: &str| {
+        let _ = std::fs::remove_file(std::env::temp_dir().join(format!("{name}-wgpu.png")));
+        let _g = sim_lock();
+        let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), iced::Size::new(1360.0, 900.0), app.view());
+        ui.snapshot(&app.theme()).unwrap().matches_image(std::env::temp_dir().join(format!("{name}.png"))).unwrap();
+    };
+    shot(&app, "lc-cr-builder");
+    let _ = app.update(Message::Extras(X::CrName("Owner's summary".into())));
+    let t = app.update(Message::Extras(X::CrSave)); settle(&mut app, t);
+    let id = app.data.as_ref().unwrap().as_array().unwrap()[0]["id"].as_i64().unwrap();
+    let t = app.update(Message::Nav(Route::Report(format!("layout:{id}")))); settle(&mut app, t);
+    shot(&app, "lc-cr-report");
+    let _ = std::fs::remove_dir_all(dir);
+}

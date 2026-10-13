@@ -131,6 +131,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::ExpenseClaims => crate::extras::claims(app, false),
         Route::BankRules => crate::extras::bank_rules(app),
         Route::ImportExport => crate::extras::import_export(app),
+        Route::CustomReports => crate::extras::custom_reports(app),
         Route::EnterTime => crate::desktop::enter_time(app),
         Route::Doc { .. } => doc::view(app),
         Route::ReceivePayment(_) | Route::PayBills | Route::Spend(_) | Route::Check(_) | Route::BankTx(_) | Route::Deposit => payments::view(app),

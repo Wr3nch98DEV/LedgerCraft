@@ -126,6 +126,10 @@ pub fn load(app: &mut App, key: &str) -> Task<Message> {
     }
     let g = app.page_gen;
     let params = params(app);
+    // A custom report built in Custom Reports runs from its saved layout.
+    if let Some(id) = key.strip_prefix("layout:").and_then(|x| x.parse::<i64>().ok()) {
+        return app.be.call("layouts.run", json!({"id": id, "params": {"from": params["from"], "to": params["to"], "basis": if app.report.cash { "CASH" } else { "ACCRUAL" }}}), move |r| Message::Loaded(g, r));
+    }
     app.be.call("reports.run", json!({"name": key, "params": params}), move |r| Message::Loaded(g, r))
 }
 

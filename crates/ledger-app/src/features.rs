@@ -96,7 +96,8 @@ pub static FEATURES: &[Feature] = &[
     Feature { id: "pay_sales_tax", go: || nav(Route::PaySalesTax), online: ("taxes", "Record tax payment"), xero: ("accounting", "Pay tax"), desktop: ("Vendors", "Sales Tax: Pay Sales Tax…") },
     // ---- reports ----
     Feature { id: "reports", go: || nav(Route::Reports), online: ("reports", "Standard reports"), xero: ("accounting", "Reports"), desktop: ("Reports", "Report Center") },
-    Feature { id: "memorized_reports", go: || nav(Route::MemorizedReports), online: ("reports", "Custom reports"), xero: ("accounting", "Custom reports"), desktop: ("Reports", "Memorized Reports") },
+    Feature { id: "memorized_reports", go: || nav(Route::MemorizedReports), online: ("reports", "Custom reports"), xero: ("accounting", "Saved reports"), desktop: ("Reports", "Memorized Reports") },
+    Feature { id: "custom_reports", go: || nav(Route::CustomReports), online: ("reports", "Report builder"), xero: ("accounting", "Custom reports"), desktop: ("Reports", "Custom Reports: Summary") },
     Feature { id: "insights", go: || Message::Desk(Desk::Insights(true)), online: ("top", "Dashboard"), xero: ("top", "Dashboard"), desktop: ("Company", "Company Snapshot") },
     // ---- lists, company and tools ----
     Feature { id: "templates", go: || nav(Route::Templates), online: ("gear:Your company", "Custom form styles"), xero: ("settings", "Invoice settings"), desktop: ("Lists", "Templates") },
