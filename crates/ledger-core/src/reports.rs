@@ -566,8 +566,9 @@ impl Ledger {
         let d = util::parse_date(&to)?;
         let mut cols = Vec::new();
         let names = ["Cash received", "Cash spent", "Closing bank balance", "Income", "Direct costs", "Gross profit", "Other income", "Expenses", "Net profit",
-            "Gross margin %", "Net margin %", "Debtors (receivables)", "Creditors (payables)", "Debtor days", "Creditor days", "Current ratio %", "Number of invoices", "Average invoice"];
-        let formats = ["money", "money", "money", "money", "money", "money", "money", "money", "money", "pct", "pct", "money", "money", "num", "num", "pct", "num", "money"];
+            "Gross margin %", "Net margin %", "Debtors (receivables)", "Creditors (payables)", "Debtor days", "Creditor days", "Current ratio %", "Number of invoices", "Average invoice",
+            "Quick ratio %", "Debt to equity %", "Inventory days", "Return on equity % (annualised)"];
+        let formats = ["money", "money", "money", "money", "money", "money", "money", "money", "money", "pct", "pct", "money", "money", "num", "num", "pct", "num", "money", "pct", "pct", "num", "pct"];
         let mut metrics: Vec<Vec<i64>> = vec![vec![]; names.len()];
         let accts = self.accounts_meta()?;
         let ar_id = self.sys_account("AR")?; let ap_id = self.sys_account("AP")?;
@@ -598,9 +599,16 @@ impl Ledger {
             let (ninv, invtot): (i64, i64) = self.conn.query_row("SELECT COUNT(*), COALESCE(SUM(base_total), 0) FROM documents WHERE type = 'ACCREC' AND status IN ('AUTHORISED','PAID') AND date >= ?1 AND date <= ?2", params![s, e], |r| Ok((r.get(0)?, r.get(1)?)))?;
             let days = (end - start).num_days() + 1;
             let purchases: i64 = cogs + exp;
+            // Balance sheet ratios (Sage / Acumatica KPI sets).
+            let inventory = sum_kind(&["INVENTORY"], &bal);
+            let class_total = |class: &str| -> i64 { accts.iter().filter(|a| a.class == class).map(|a| bal.get(&a.id).copied().unwrap_or(0)).sum() };
+            let liabilities = -class_total("LIABILITY");
+            let equity = class_total("ASSET") - liabilities;
             let vals = [recv, spent, bank, income, cogs, gp, other, exp, np, pct(gp, income), pct(np, income), ar, ap,
                 if income > 0 { ar * days / income } else { 0 }, if purchases > 0 { ap * days / purchases } else { 0 },
-                pct(cur_assets, cur_liab), ninv, if ninv > 0 { invtot / ninv } else { 0 }];
+                pct(cur_assets, cur_liab), ninv, if ninv > 0 { invtot / ninv } else { 0 },
+                pct(cur_assets - inventory, cur_liab), pct(liabilities, equity), if cogs > 0 { inventory * days / cogs } else { 0 },
+                if equity > 0 { pct(np * 12, equity) } else { 0 }];
             for (k, v) in vals.iter().enumerate() { metrics[k].push(*v); }
         }
         let rows: Vec<Value> = names.iter().zip(formats.iter()).zip(metrics).map(|((l, f), v)| json!({"label": l, "values": v, "format": f})).collect();

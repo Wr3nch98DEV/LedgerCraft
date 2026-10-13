@@ -2496,7 +2496,7 @@ pub fn calendar(app: &App) -> Element<'_, Message> {
 
 /// Employees ▸ Employee Center: employee list, Employee Information and the payroll runs.
 /// New Employee / Edit Employee (inside the Employee Center).
-fn employee_form<'a>(app: &'a App, d: &'a Value) -> Element<'a, Message> {
+pub(crate) fn employee_form<'a>(app: &'a App, d: &'a Value) -> Element<'a, Message> {
     let k = t();
     let Some((id, f, _)) = &app.desk.emp_form else { return Space::new().into() };
     let v = |key: &'static str| f.get(key).cloned().unwrap_or_default();
@@ -2528,6 +2528,10 @@ fn employee_form<'a>(app: &'a App, d: &'a Value) -> Element<'a, Message> {
                 text_input("default", &v("super_rate")).on_input(|x| Message::Desk(Msg::EmpField("super_rate", x))).padding([5, 7]).size(13).style(theme::input).width(120)].spacing(3)].spacing(14),
         row![field("TAX ID / SSN", "tax_id", 180.0), field("TAX CODE / FILING STATUS", "tax_code", 200.0), field("BANK ACCOUNT (DIRECT DEPOSIT)", "bank_account", 240.0)].spacing(14),
         row![ui::hspace(), ui::btn_primary("OK", Some(Message::Desk(Msg::EmpSave))), ui::btn("Cancel", Some(Message::Desk(Msg::EmpCancel)))].spacing(8),
+        match (id, app.desk.emp_form.as_ref().and_then(|f| f.2["custom_fields"].as_array())) {
+            (Some(eid), Some(fields)) => crate::extras::custom_values_card(app, "employee", *eid, fields.as_slice()),
+            _ => Space::new().into(),
+        },
     ].spacing(12)).style(theme::scroll)).padding(16).width(Fill).height(Fill).style(theme::card).into()
 }
 

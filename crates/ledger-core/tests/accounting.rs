@@ -1068,3 +1068,18 @@ fn item_receipts_then_bill() {
     assert_eq!(bal(&l, grni), 0);
     assert_invariants(&l);
 }
+
+#[test]
+fn executive_summary_ratios() {
+    let l = org();
+    let today = ledger_core::util::today();
+    let doc = |kind: &str, account: &str, amt: &str| DocInput { kind: kind.into(), contact_name: Some("Acme".into()), date: today.clone(), line_amount_type: Some("NOTAX".into()),
+        lines: vec![line(acct(&l, account), None, "1", amt)], status: Some("AUTHORISED".into()), ..Default::default() };
+    l.save_document(None, &doc("ACCREC", "200", "1000")).unwrap();
+    l.save_document(None, &doc("ACCPAY", "429", "400")).unwrap();
+    let r = l.executive_summary(&ReportParams::default()).unwrap();
+    let get = |label: &str| r["sections"][0]["rows"].as_array().unwrap().iter().find(|x| x["label"] == label).unwrap()["values"][2].as_i64().unwrap();
+    assert_eq!(get("Quick ratio %"), 25_000, "1,000 receivable / 400 payable");
+    assert_eq!(get("Debt to equity %"), 6_667, "400 / 600");
+    assert_eq!(get("Inventory days"), 0);
+}

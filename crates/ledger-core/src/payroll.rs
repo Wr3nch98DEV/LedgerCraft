@@ -223,6 +223,7 @@ impl Ledger {
     pub fn get_employee(&self, id: i64) -> Result<Value> {
         let mut e = util::query_one_json(&self.conn, "SELECT e.*, c.name AS calendar_name FROM employees e LEFT JOIN pay_calendars c ON c.id = e.pay_calendar_id WHERE e.id = ?1", [id])?;
         e["template"] = serde_json::from_str(e["template"].as_str().unwrap_or("[]")).unwrap_or(json!([]));
+        e["custom_fields"] = json!(self.custom_values("employee", id)?);
         e["leave"] = json!(util::query_json(&self.conn, "SELECT t.id AS leave_type_id, t.name, COALESCE(b.hours_e2, 0) AS hours_e2 FROM leave_types t LEFT JOIN leave_balances b ON b.leave_type_id = t.id AND b.employee_id = ?1", [id])?);
         e["payslips"] = json!(util::query_json(&self.conn, "SELECT s.id, s.gross, s.tax, s.net, r.period_end, r.payment_date, r.status, r.id AS pay_run_id FROM payslips s JOIN pay_runs r ON r.id = s.pay_run_id WHERE s.employee_id = ?1 ORDER BY r.payment_date DESC", [id])?);
         e["ytd"] = util::query_one_json(&self.conn, "SELECT COALESCE(SUM(s.gross),0) AS gross, COALESCE(SUM(s.tax),0) AS tax, COALESCE(SUM(s.super),0) AS super, COALESCE(SUM(s.net),0) AS net FROM payslips s JOIN pay_runs r ON r.id = s.pay_run_id WHERE s.employee_id = ?1 AND r.status = 'POSTED' AND r.payment_date >= ?2",

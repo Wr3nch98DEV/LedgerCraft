@@ -517,7 +517,11 @@ impl App {
                 }
             }
         }
-        if self.route != r { self.history.push(self.route.clone()); if self.history.len() > 50 { self.history.remove(0); } }
+        if self.route != r {
+            self.history.push(self.route.clone()); if self.history.len() > 50 { self.history.remove(0); }
+            // An open employee form belongs to the page it was opened on.
+            if !self.desktop() { self.desk.emp_form = None; }
+        }
         self.route = r;
         self.list_q.clear();
         self.list_filter.clear();

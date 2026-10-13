@@ -132,13 +132,15 @@ fn loading<'a>(app: &'a App, title: &str) -> Option<Element<'a, Message>> {
 pub fn payroll(app: &App) -> Element<'_, Message> {
     if let Some(e) = loading(app, "Payroll") { return e; }
     let d = app.data.as_ref().unwrap();
+    // New / Edit employee: the same form the Desktop Employee Center uses.
+    if app.desk.emp_form.is_some() { return ui::page(ui::h1("Employee"), vec![], crate::desktop::employee_form(app, d)); }
     let k = t();
     let rate = |e: &Value| if e["pay_basis"] == "HOURLY" { format!("{}/hr", ui::money(i(&e["hourly_rate_e2"]) / 100)) } else { format!("{}/yr", ui::money(i(&e["annual_salary"]))) };
     let emps = d["employees"].as_array().cloned().unwrap_or_default().iter().map(|e| (vec![
         ui::cell(format!("{} {}", e["first_name"].as_str().unwrap_or(""), e["last_name"].as_str().unwrap_or(""))),
         ui::cell_muted(if e["pay_basis"] == "HOURLY" { "Hourly" } else { "Salary" }), ui::cell(rate(e)), ui::cell_muted(e["calendar_name"].as_str().unwrap_or("").to_string()),
         ui::chip(if e["status"] == "ACTIVE" { "Active" } else { "Inactive" }, if e["status"] == "ACTIVE" { k.ok } else { k.muted }),
-    ], None)).collect();
+    ], e["id"].as_i64().map(|id| Message::Desk(crate::desktop::Msg::EmpEdit(id))))).collect();
     let runs = d["runs"].as_array().cloned().unwrap_or_default().iter().map(|r| (vec![
         ui::cell(r["number"].as_str().unwrap_or("").to_string()), ui::cell(format!("{} – {}", app.d(r["period_start"].as_str().unwrap_or("")), app.d(r["period_end"].as_str().unwrap_or("")))),
         ui::cell_muted(app.d(r["payment_date"].as_str().unwrap_or(""))), ui::cell_money(i(&r["wages"])), ui::cell_money(i(&r["net_pay"])),
@@ -149,7 +151,7 @@ pub fn payroll(app: &App) -> Element<'_, Message> {
         container(text(disclaimer).size(13)).padding([8, 12]).style(theme::accent_soft).width(Fill),
         ui::h2("Pay runs"),
         ui::table(&[col("Pay run", 10), col("Pay period", 24), col("Pay date", 12), coln("Gross pay", 14), coln("Net pay", 14), col("Status", 10)], runs, "No pay runs yet."),
-        ui::h2("Employees"),
+        row![ui::h2("Employees"), ui::hspace(), ui::btn("New employee", Some(Message::Desk(crate::desktop::Msg::EmpNew)))].align_y(iced::Alignment::Center),
         ui::table(&[col("Name", 26), col("Pay type", 12), col("Rate", 16), col("Pay schedule", 16), col("Status", 10)], emps, "No employees yet."),
     ].spacing(14);
     ui::page(ui::h1(if app.skin == crate::theme::Skin::Xero { "Pay runs" } else { "Payroll" }), vec![ui::btn_primary(if app.skin == crate::theme::Skin::Xero { "Add pay run" } else { "Run payroll" }, if app.people.busy { None } else { Some(Message::People(Msg::RunPayroll)) })], body.into())

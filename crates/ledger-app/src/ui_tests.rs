@@ -4208,3 +4208,28 @@ fn item_receipts_in_the_app() {
     assert_eq!(app.data.as_ref().unwrap()[0]["state"], "Billed");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn employees_editable_in_every_layout_with_custom_fields() {
+    use crate::desktop::Msg as W;
+    let (mut app, dir) = desktop_app("emp-online");
+    app.be.call_now("customFields.save", json!({"entity": "employee", "name": "Shirt size", "kind": "TEXT"})).unwrap();
+    for layout in [crate::theme::Layout::Online, crate::theme::Layout::Xero, crate::theme::Layout::Acumatica, crate::theme::Layout::Sage] {
+        let t = app.update(Message::SetLayout(layout)); settle(&mut app, t);
+        let t = app.update(Message::Nav(Route::Payroll)); settle(&mut app, t);
+        assert!(!click_fails(&app, "New employee"), "{layout:?}");
+        let emp = app.data.as_ref().unwrap()["employees"][0]["id"].as_i64().unwrap();
+        let t = app.update(Message::Desk(W::EmpEdit(emp))); settle(&mut app, t);
+        assert!(!click_fails(&app, "Shirt size"), "{layout:?}: custom field on the employee form");
+        let _ = app.update(Message::Desk(W::EmpCancel));
+    }
+    // Fill it in.
+    let emp = app.data.as_ref().unwrap()["employees"][0]["id"].as_i64().unwrap();
+    let t = app.update(Message::Desk(W::EmpEdit(emp))); settle(&mut app, t);
+    let f = app.be.call_now("customFields.list", json!({"entity": "employee"})).unwrap()[0]["id"].as_i64().unwrap();
+    let _ = app.update(Message::Extras(crate::extras::Msg::CfValue(f, "L".into())));
+    press(&mut app, "Save custom fields");
+    assert_eq!(app.be.call_now("payroll.employee", json!({"id": emp})).unwrap()["custom_fields"][0]["value"], "L");
+    assert_eq!(app.desk.emp_form.as_ref().unwrap().2["custom_fields"][0]["value"], "L", "the open form shows the saved value");
+    let _ = std::fs::remove_dir_all(dir);
+}

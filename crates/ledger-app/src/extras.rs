@@ -843,7 +843,9 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                     app.extras.fa_new = None; app.extras.fa_dispose = None; app.extras.bud_cells.clear(); app.extras.cl_new = None; app.extras.br_new = None; app.extras.cr_new = None; app.extras.ps_cal = None; app.extras.ps_leave = None;
                     if app.route == Route::ImportExport { app.extras.ie_file = None; app.extras.ie_preview = None; }
                     let t1 = if what.is_empty() { Task::none() } else { app.toast(what, false) };
-                    Task::batch([t1, app.load(), app.load_lookups()])
+                    // An open employee form shows what was just saved.
+                    let t2 = match app.desk.emp_form.as_ref().and_then(|f| f.0) { Some(id) => Task::done(Message::Desk(crate::desktop::Msg::EmpEdit(id))), None => Task::none() };
+                    Task::batch([t1, app.load(), app.load_lookups(), t2])
                 }
                 Err(e) => app.toast(e, true),
             }

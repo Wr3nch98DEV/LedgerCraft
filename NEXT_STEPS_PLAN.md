@@ -222,9 +222,9 @@ The first task of step 4 is to verify this column feature by feature; the table 
 | Feature | From | Now |
 |---|---|---|
 | 200+ reports, custom reports, report packs | QB, all | Partial: many reports and builder (web) |
-| Dashboards, custom KPIs, ratio analysis, benchmarking | Xero, Sage, Acumatica | Partial: Insights; KPIs and benchmarking missing |
+| Dashboards, custom KPIs, ratio analysis, benchmarking | Xero, Sage, Acumatica | Partial: Insights; Executive Summary ratios (margins, current/quick ratio, debtor/creditor/inventory days, debt to equity, ROE); custom KPIs and benchmarking still to add |
 | SQL/ODBC access for reporting | QB | Missing |
-| Custom fields on customers, vendors, items, employees | QB | Have: text / number / date / yes-no fields, filled in on Edit Customer/Vendor and Edit Item; employees can have fields defined (filling them in on the employee screen is still to add) |
+| Custom fields on customers, vendors, items, employees | QB | Have: text / number / date / yes-no fields, filled in on Edit Customer/Vendor and Edit Item; and on the employee form (every layout) |
 | Roles and 100+ granular permissions, data-level permissions | QB, Xero, Acumatica | Partial: roles |
 | Multi-factor authentication | Sage | Have (TOTP) |
 | Many concurrent users | QB, Acumatica | Partial: multi-user in the server; the native app is single-user |
