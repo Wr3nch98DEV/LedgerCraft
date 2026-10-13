@@ -202,7 +202,7 @@ The first task of step 4 is to verify this column feature by feature; the table 
 | Projects, time and costs, project invoicing, profitability | all | Have |
 | Billing modes: time & materials, fixed, milestone, progress, cost-plus | Acumatica, Sage | Partial: T&M and fixed |
 | Budget vs actual per job, WIP reports | QB, Sage, Acumatica | Partial |
-| Change orders, retainage/holdback, subcontractor certificates | QB (Contractor), Acumatica | Missing |
+| Change orders, retainage/holdback, subcontractor certificates | QB (Contractor), Acumatica | Partial: retainage held back on invoices (Retainage Receivable) and invoiced on release; change orders and subcontractor certificates still to add |
 | Resource/capacity planning, time and expense approvals | Acumatica | Missing |
 
 ### CRM, payroll, field service

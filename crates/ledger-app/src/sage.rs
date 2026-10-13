@@ -53,7 +53,7 @@ pub static PLACES: &[(&str, &str, &str)] = &[
     // Settings (gear)
     ("settings", "settings", "Business Settings"), ("users", "settings", "Manage Users"), ("import_data", "settings", "Import Data"),
     ("export_data", "settings", "Export Data"), ("templates", "settings", "Invoice Templates"), ("custom_fields", "settings", "Custom Fields"), ("approval_rules", "settings", "Approval Rules"), ("backup", "settings", "Back Up"),
-    ("restore", "settings", "Restore"), ("attachments", "settings", "Attachments"), ("calendar", "settings", "Calendar"), ("reminders", "settings", "Reminders List"), ("help", "settings", "Help Centre"),
+    ("restore", "settings", "Restore"), ("attachments", "settings", "Attachments"), ("calendar", "settings", "Calendar"), ("reminders", "settings", "Reminders List"), ("retainage", "sales", "Retentions"), ("help", "settings", "Help Centre"),
 ];
 
 /// A menu's entries in table order.

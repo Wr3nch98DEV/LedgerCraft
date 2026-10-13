@@ -63,6 +63,8 @@ pub struct Editor {
     pub progress: Option<String>,
     /// Acumatica record screen: the tab showing under the summary (details, financial, address).
     pub acu_tab: &'static str,
+    /// Retainage: the percentage to hold back, as typed.
+    pub retain: String,
     /// Where the stock on this document leaves from / arrives at (None = main location).
     pub location: Option<Opt>,
     /// QuickBooks invoices: the customer's open delayed charges/credits, and those added.
@@ -132,6 +134,8 @@ pub enum Msg {
     ProgressOpen, ProgressPct(String), ProgressCreate,
     /// Acumatica record screen tab.
     AcuTab(&'static str),
+    /// Retainage: the percentage, add the hold-back line, the account came back.
+    RetainPct(String), RetainAdd, RetainAccount(crate::backend::Reply),
     /// The inventory location for the document's stock.
     Location(Opt),
     /// A line's lot or serial numbers.
@@ -263,7 +267,7 @@ impl Editor {
             lat: if app.country() == "US" { "EXCLUSIVE".into() } else { "EXCLUSIVE".into() },
             lines: vec![Line { qty: "1".into(), ..Default::default() }, Line { qty: "1".into(), ..Default::default() }],
             terms: String::new(), busy: false, editing: true,
-            pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false, submit: false, allow_over: false, progress: None, acu_tab: "details", location: None,
+            pay_amount: String::new(), pay_date: ui::date(&today, style), pay_account: app.lk.bank_opts().into_iter().next(), error: None, send_after: false, submit: false, allow_over: false, progress: None, acu_tab: "details", location: None, retain: String::new(),
             delayed: vec![], added: vec![], items_tab: false, close_after: false, history: vec![], memo_open: false, memo_freq: "Monthly", memo_next: String::new(), memo_auto: false, apply: None, refund_open: false,
         };
         if let Some(a) = default_account(app, kind) { for l in &mut e.lines { l.account = Some(a.clone()); l.tax = default_tax(app, Some(a.id)); } }
@@ -646,6 +650,28 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
         }
         Msg::Submit => { e.submit = true; save(app, &mut e, false, false) }
         Msg::AcuTab(t) => { e.acu_tab = t; Task::none() }
+        Msg::RetainPct(s) => { e.retain = s.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect(); Task::none() }
+        Msg::RetainAdd => {
+            // Make sure the Retainage Receivable account exists, then add the line.
+            app.doc = Some(e);
+            return app.be.call("retainage.account", json!({}), |r| Message::Doc(Msg::RetainAccount(r)));
+        }
+        Msg::RetainAccount(r) => match r {
+            Ok(v) => {
+                let Some(pct) = e.retain.parse::<f64>().ok().filter(|p| *p > 0.0 && *p < 100.0) else { app.doc = Some(e); return app.toast("Enter the percentage to hold back, e.g. 10", true) };
+                let base: i64 = e.lines.iter().map(|l| line_cents(parse_e4(&l.qty).unwrap_or(0), parse_e4(&l.price).unwrap_or(0))).filter(|a| *a > 0).sum();
+                let held = (base as f64 * pct / 100.0).round() as i64;
+                let acct_id = v["id"].as_i64().unwrap_or(0);
+                let account = Some(Opt { id: acct_id, label: ledger_core::retainage::RETAINAGE.to_string() });
+                let line = Line { description: format!("Retainage held ({pct}%)"), qty: "1".into(), price: format!("-{}", ui::plain(held)), account, tax: None, ..Default::default() };
+                // Replace a blank last line, else add.
+                if e.lines.last().is_some_and(|l| l.item.is_none() && l.description.trim().is_empty() && parse_e4(&l.price).unwrap_or(0) == 0) { let n = e.lines.len() - 1; e.lines[n] = line; } else { e.lines.push(line); }
+                let t = app.load_lookups();
+                app.doc = Some(e);
+                return t;
+            }
+            Err(err) => { app.doc = Some(e); return app.toast(err, true); }
+        },
         Msg::Lot(i, s) => { if let Some(l) = e.lines.get_mut(i) { l.lot = s; } Task::none() }
         Msg::Location(o) => { e.location = (o.id != 0).then_some(o); Task::none() }
         Msg::ProgressOpen => {
@@ -976,6 +1002,13 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 .push(row![ui::muted("Cost of items"), ui::hspace(), ui::muted(ui::money(cost))])
                 .push(row![text("Gross margin").size(14), ui::hspace(), text(format!("{} ({pct:.0}%)", ui::money(margin))).size(14).color(if margin < 0 { k.bad } else { k.ok })]);
         }
+    }
+    // Retainage: hold back a share of a sales invoice until the work's finished.
+    if editable && e.kind == "ACCREC" {
+        let label = if app.skin == Skin::Xero { "Retention %" } else { "Retainage %" };
+        totals = totals.push(ui::hr()).push(row![text(label).size(13).width(Fill),
+            text_input("10", &e.retain).on_input(|s| Message::Doc(Msg::RetainPct(s))).padding([4, 7]).size(13).style(theme::input).width(60),
+            ui::btn("Hold back", if e.retain.is_empty() { None } else { Some(Message::Doc(Msg::RetainAdd)) })].spacing(6).align_y(Alignment::Center));
     }
     let memo: Element<Message> = if editable {
         column![ui::label(if app.skin == Skin::QuickBooks { "Message displayed on invoice" } else { "Notes / terms" }), text_input("", &e.terms).on_input(|s| Message::Doc(Msg::Terms(s))).padding([7, 10]).size(14).style(theme::input)].spacing(5).width(Fill).into()

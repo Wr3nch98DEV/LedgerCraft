@@ -266,6 +266,9 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
             let delayed: Vec<i64> = if p["close_delayed"].is_array() { de(&p["close_delayed"])? } else { vec![] };
             Ok(json!({"id": l.save_invoice_with_delayed(oi(p, "id"), &input, &delayed)?}))
         }
+        "retainage.account" => { need("sales:write")?; Ok(json!({"id": l.retainage_account()?})) }
+        "retainage.list" => { need("sales:read")?; Ok(json!(l.retainage_balances()?)) }
+        "retainage.release" => { need("sales:write")?; Ok(json!({"id": l.retainage_release(i(p, "contact_id")?, oi(p, "amount"), p["date"].as_str())?})) }
         "approvals.list" => Ok(json!(l.list_approval_rules()?)),
         "approvals.save" => { need("settings:write")?; Ok(json!({"id": l.save_approval_rule(s(p, "doc_type"), p["min_total"].as_i64().unwrap_or(0), s(p, "role"))?})) }
         "approvals.delete" => { need("settings:write")?; l.delete_approval_rule(id(p)?)?; ok() }

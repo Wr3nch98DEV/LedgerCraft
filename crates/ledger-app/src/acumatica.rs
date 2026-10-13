@@ -38,6 +38,7 @@ pub static PLACES: &[(&str, &str, &str, &str)] = &[
     ("invoices", "receivables", "Inquiries", "Invoices"),
     ("all_sales", "receivables", "Inquiries", "Customer Details"),
     ("credit_notes", "receivables", "Inquiries", "Credit Memos List"),
+    ("retainage", "receivables", "Inquiries", "Retainage"),
     ("customers", "receivables", "Profiles", "Customers"),
     // Payables
     ("bill", "payables", "Transactions", "Bills and Adjustments"),

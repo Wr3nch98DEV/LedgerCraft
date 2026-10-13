@@ -4252,3 +4252,30 @@ fn approval_rules_screen() {
     assert!(app.data.as_ref().unwrap().as_array().unwrap().is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn retainage_hold_back_and_release() {
+    use crate::doc::Msg as D;
+    let (mut app, dir) = desktop_app("retainage");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Online)); settle(&mut app, t);
+    let cust = app.lk.contact_opts(true)[0].clone();
+    let t = app.update(Message::Nav(Route::Doc { kind: "ACCREC".into(), id: None })); settle(&mut app, t);
+    for m in [D::Contact(cust.clone()), D::Desc(0, "Stage 1 works".into()), D::Price(0, "1000".into())] { let t = app.update(Message::Doc(m)); settle(&mut app, t); }
+    { let e = app.doc.as_mut().unwrap(); e.lat = "NOTAX".into(); e.lines[0].tax = None; }
+    let _ = app.update(Message::Doc(D::RetainPct("10".into())));
+    press(&mut app, "Hold back");
+    assert!(app.doc.as_ref().unwrap().lines.iter().any(|l| l.price == "-100.00"), "{:?}", app.doc.as_ref().unwrap().lines.iter().map(|l| l.price.clone()).collect::<Vec<_>>());
+    press(&mut app, "Save and close");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let held = app.be.call_now("retainage.list", json!({})).unwrap();
+    let mine = held.as_array().unwrap().iter().find(|r| r["contact_id"].as_i64() == Some(cust.id)).cloned().expect("held");
+    assert_eq!(mine["held"], 10_000);
+    // Invoice the retainage when the job's done.
+    let t = app.update(Message::Nav(Route::Retainage)); settle(&mut app, t);
+    let t = app.update(Message::Extras(crate::extras::Msg::RtRelease(cust.id))); settle(&mut app, t);
+    let inv = match &app.route { Route::Doc { id: Some(id), .. } => *id, r => panic!("{r:?}") };
+    app.be.call_now("docs.setStatus", json!({"id": inv, "status": "AUTHORISED"})).unwrap();
+    let held = app.be.call_now("retainage.list", json!({})).unwrap();
+    assert!(held.as_array().unwrap().iter().all(|r| r["contact_id"].as_i64() != Some(cust.id)), "released");
+    let _ = std::fs::remove_dir_all(dir);
+}

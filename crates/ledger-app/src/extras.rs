@@ -138,6 +138,7 @@ pub enum Msg {
     /// Payment reminders: on/off, a new level's days, add, switch a level on/off, delete, send due reminders now.
     PrNew(bool), PrField(usize, String), PrItem(Opt), PrLevel(Opt), PrSave, PrDelete(i64),
     LotItem(Opt), LotMode(&'static str), LotExpiry(i64, String, String), LotExpirySave(i64, String),
+    RtRelease(i64), RtReleased(Reply),
     ApNew(bool), ApType(&'static str), ApMin(String), ApRole(&'static str), ApSave, ApDelete(i64),
     IrVendor(Opt), IrDate(String), IrRef(String), IrLoc(Opt), IrItem(usize, Opt), IrQty(usize, String), IrCost(usize, String), IrLot(usize, String), IrAddLine, IrReceive, IrBill(i64), IrBilled(Reply), IrVoid(i64),
     CoFile(String), CoFrom(String), CoTo(String), CoElim(String), CoRun, CoDone(Reply),
@@ -193,6 +194,7 @@ pub fn load(app: &mut App) -> Task<Message> {
         Route::Consolidation => call(app, "orgs.list", json!({})),
         Route::ItemReceipts => call(app, "itemReceipts.list", json!({})),
         Route::ApprovalRules => call(app, "approvals.list", json!({})),
+        Route::Retainage => call(app, "retainage.list", json!({})),
         Route::LandedCosts => {
             let be = app.be.clone();
             Task::perform(async move {
@@ -284,6 +286,12 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.extras.busy = true;
             app.be.call("recode.apply", p, |r| Message::Extras(Msg::Done(r.map(|v| { let n = v["transactions"].as_i64().unwrap_or(0); json!({"n": n}) }), "Recoded — the transactions were reposted")))
         }
+        // ---- retainage ----
+        Msg::RtRelease(contact) => app.be.call("retainage.release", json!({"contact_id": contact}), |r| Message::Extras(Msg::RtReleased(r))),
+        Msg::RtReleased(r) => match r {
+            Ok(v) => { let t1 = app.toast("Retainage invoice created; check it and approve", false); let t2 = app.go(Route::Doc { kind: "ACCREC".into(), id: v["id"].as_i64() }); Task::batch([t1, t2]) }
+            Err(e) => app.toast(e, true),
+        },
         // ---- approval rules ----
         Msg::ApNew(on) => { app.extras.ap_new = on.then(|| ("ACCPAY", String::new(), "ADVISER")); Task::none() }
         Msg::ApType(v) => { if let Some(n) = app.extras.ap_new.as_mut() { n.0 = v; } Task::none() }
@@ -1200,6 +1208,24 @@ pub fn price_rules_section(app: &App) -> Element<'_, Message> {
     }).collect();
     col = col.push(ui::table(&[ui::col("Rule", 16), ui::col("Item", 18), ui::col("Customers", 16), ui::col("Quantity", 10), ui::col("Change", 9), ui::col("Dates", 20), ui::col("", 9)], rows, "No price rules yet."));
     col.push(ui::muted("The lowest matching price wins. Rules apply after the customer's price level, when an item goes on a sale or its quantity changes.")).into()
+}
+
+// ---------------- Retainage ----------------
+
+/// Retainage held back on customers' invoices, and invoicing it when the work is done.
+pub fn retainage(app: &App) -> Element<'_, Message> {
+    let Some(d) = &app.data else { return loading() };
+    let term = if app.skin == crate::theme::Skin::Xero { "Retentions" } else { "Retainage" };
+    let rows = d.as_array().cloned().unwrap_or_default().iter().map(|r| {
+        let id = r["contact_id"].as_i64().unwrap_or(0);
+        (vec![ui::cell(r["name"].as_str().unwrap_or("").to_string()), ui::cell_money(r["held"].as_i64().unwrap_or(0)),
+            ui::link(if term == "Retentions" { "Invoice the retention" } else { "Invoice retainage" }, Message::Extras(Msg::RtRelease(id)))], Some(Message::Nav(Route::Contact(id))))
+    }).collect();
+    let body = column![
+        ui::table(&[ui::col("Customer", 40), ui::coln("Held", 20), ui::col("", 20)], rows, "Nothing held back yet."),
+        ui::muted("To hold some of an invoice back, use Hold back on the invoice: it adds a line taking that share out of what the customer owes now, kept in Retainage Receivable until you invoice it here."),
+    ].spacing(14);
+    ui::page(ui::h1(term), vec![], body.max_width(1000).into())
 }
 
 // ---------------- Approval rules ----------------
