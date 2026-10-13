@@ -170,7 +170,7 @@ The first task of step 4 is to verify this column feature by feature; the table 
 | Recurring invoices and bills, subscription billing | all | Have (memorized/repeating) |
 | Dunning and automatic payment reminders | Sage, Acumatica | Have: Payment reminders screen with levels (days after/before due), on/off, send now |
 | Pay-now links on invoices (Stripe, PayPal, card, ACH) | Sage, Xero | Partial: plugin interface, no gateway bundled |
-| Approval workflows for bills, POs and expenses | Acumatica, Sage, Xero | Partial: Draft → Awaiting approval; routing rules missing |
+| Approval workflows for bills, POs and expenses | Acumatica, Sage, Xero | Have: approval rules by document type and amount and approver role; others' approvals become Awaiting approval; expense claims have submit/approve |
 | Batch payments and bank payment files (ABA/ACH/EFT) | all | Have: batch supplier payments and pay runs both make bank files (ABA/BACS/NACHA) natively |
 | Customer prepayments/deposits on sales orders (liability) | QB | Partial: prepayments; SO deposits missing |
 | Credit limits and credit holds | Acumatica | Have: limit and hold on the contact page; over-limit asks "Save anyway", hold blocks approval |

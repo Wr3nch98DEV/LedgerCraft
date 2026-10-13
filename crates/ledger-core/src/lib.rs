@@ -24,6 +24,7 @@ pub mod customfields;
 pub mod landed;
 pub mod consolidation;
 pub mod receipts;
+pub mod approvals;
 pub mod deposits;
 pub mod agencies;
 pub mod pricelevels;

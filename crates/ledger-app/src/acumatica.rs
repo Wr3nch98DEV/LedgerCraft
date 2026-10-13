@@ -113,6 +113,7 @@ pub static PLACES: &[(&str, &str, &str, &str)] = &[
     ("export_data", "configuration", "Processes", "Export Scenarios"),
     ("templates", "configuration", "Preferences", "Form Templates"),
     ("custom_fields", "configuration", "Preferences", "User-Defined Fields"),
+    ("approval_rules", "configuration", "Preferences", "Approval Maps"),
     ("backup", "configuration", "Processes", "Back Up Tenant"),
     ("restore", "configuration", "Processes", "Restore Snapshot"),
     ("attachments", "configuration", "Inquiries", "Files"),

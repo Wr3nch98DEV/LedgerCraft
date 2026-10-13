@@ -286,7 +286,14 @@ impl Ledger {
             self.conn.execute("UPDATE documents SET location_id = ?2 WHERE id = ?1", params![doc_id, d.location_id])?;
             self.flag_contact_role(contact_id, sales && kind != "QUOTE" || kind == "QUOTE", !sales)?;
             // Status
-            let want = d.status.clone().unwrap_or_else(|| if prior_status == "AUTHORISED" { "AUTHORISED".into() } else { prior_status.clone() });
+            let mut want = d.status.clone().unwrap_or_else(|| if prior_status == "AUTHORISED" { "AUTHORISED".into() } else { prior_status.clone() });
+            // Approval rules: a user who can't approve this saves it as Awaiting approval instead.
+            if want == "AUTHORISED" && prior_status != "AUTHORISED" {
+                if let Some(why) = self.approval_needed(&kind, total)? {
+                    want = "SUBMITTED".into();
+                    self.add_note("document", doc_id, "HISTORY", &format!("Awaiting approval: {why}"))?;
+                }
+            }
             if want != "DRAFT" || prior_status != "DRAFT" {
                 self.set_document_status_inner(doc_id, &want, prior_status == "AUTHORISED")?;
             }
@@ -310,6 +317,7 @@ impl Ledger {
         // Approving an invoice on its own (e.g. from the list) checks the customer's credit too.
         if status == "AUTHORISED" {
             let (kind, contact, total, from): (String, i64, i64, String) = self.conn.query_row("SELECT type, contact_id, total, status FROM documents WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+            if from != "AUTHORISED" { if let Some(why) = self.approval_needed(&kind, total)? { return invalid(why); } }
             if kind == "ACCREC" && from != "AUTHORISED" { self.check_credit(contact, Some(id), total, false)?; }
         }
         self.atomic(|| self.set_document_status_inner(id, status, false))

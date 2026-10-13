@@ -1083,3 +1083,23 @@ fn executive_summary_ratios() {
     assert_eq!(get("Debt to equity %"), 6_667, "400 / 600");
     assert_eq!(get("Inventory days"), 0);
 }
+
+#[test]
+fn approval_rules_route_big_bills() {
+    let mut l = org();
+    l.save_approval_rule("ACCPAY", 100_000, "ADVISER").unwrap();
+    l.role = "STANDARD".into();
+    let bill = |l: &Ledger, amt: &str| l.save_document(None, &DocInput { kind: "ACCPAY".into(), contact_name: Some("Supplier".into()), date: "2026-04-01".into(), line_amount_type: Some("NOTAX".into()),
+        lines: vec![line(acct(l, "429"), None, "1", amt)], status: Some("AUTHORISED".into()), ..Default::default() }).unwrap();
+    let big = bill(&l, "1500");
+    assert_eq!(l.get_document(big).unwrap()["status"], "SUBMITTED", "awaiting approval");
+    let err = l.set_document_status(big, "AUTHORISED").unwrap_err().to_string();
+    assert!(err.contains("an adviser"), "{err}");
+    let small = bill(&l, "500");
+    assert_eq!(l.get_document(small).unwrap()["status"], "AUTHORISED");
+    // An adviser approves it.
+    l.role = "ADVISER".into();
+    l.set_document_status(big, "AUTHORISED").unwrap();
+    assert_eq!(l.get_document(big).unwrap()["status"], "AUTHORISED");
+    assert_invariants(&l);
+}

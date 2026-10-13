@@ -1015,6 +1015,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::LandedCosts => "Landed Cost".into(),
         Route::Consolidation => "Combine Reports from Multiple Companies".into(),
         Route::ItemReceipts => "Receive Items".into(),
+        Route::ApprovalRules => "Approval Workflows".into(),
         Route::CustomReports => "Custom Reports".into(),
         Route::PayrollSettings => "Payroll Setup".into(),
         Route::BankTx(_) => if app.pay.as_ref().is_some_and(|s| !s.check) { "Enter Credit Card Charges".into() } else { "Write Checks".into() },
@@ -1078,7 +1079,7 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
             v
         }
         "Company" => vec![e("Home Page", "", nav(Route::Dashboard)), e("Company Snapshot", "", Some(Message::Desk(Msg::Insights(true)))), sep(), e("My Company", "", nav(Route::Settings)),
-            e("Company Information…", "", nav(Route::Settings)), e("Set Up Users and Roles…", "", Some(Message::Desk(Msg::OpenPrefs("Users & Roles")))), e("Set Closing Date…", "", Some(Message::Desk(Msg::OpenPrefs("Accounting")))), sep(), e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)),
+            e("Company Information…", "", nav(Route::Settings)), e("Set Up Users and Roles…", "", Some(Message::Desk(Msg::OpenPrefs("Users & Roles")))), e("Approval Workflows…", "", nav(Route::ApprovalRules)), e("Set Closing Date…", "", Some(Message::Desk(Msg::OpenPrefs("Accounting")))), sep(), e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)),
             e("Make General Journal Entries…", "", nav(Route::Journal)), e("Batch Reclassify Transactions…", "", nav(Route::Recode)), e("Revenue Recognition…", "", nav(Route::RevenueRecognition)), e("Planning & Budgeting: Set Up Budgets", "", nav(Route::Budgets)), e("Enter Vehicle Mileage…", "", nav(Route::Mileage)), e("Calendar", "", nav(Route::Calendar)), e("Reminders", "", nav(Route::Reminders)), e("Documents", "", nav(Route::DocCenter))],
         "Inventory" => vec![e("Inventory Center", "", nav(Route::InventoryCenter)), e("Item List", "", nav(Route::Products)), e("Inventory Site List", "", nav(Route::Locations)), e("Lot Numbers & Serial Numbers", "", nav(Route::Lots)), sep(), e("Create Purchase Orders", "", doc_new("PO")),
             e("Purchase Orders List", "", nav(Route::PurchaseOrders)), e("Receive Items", "", Some(Message::ReceiveItems)), e("Enter Bills Against Inventory", "", nav(Route::ItemReceipts)), e("Adjust Quantity/Value on Hand…", "", nav(Route::AdjustInventory)), sep(), e("Build Assemblies…", "", nav(Route::BuildAssemblies))],

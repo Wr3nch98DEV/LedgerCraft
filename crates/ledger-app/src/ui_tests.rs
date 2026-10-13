@@ -4233,3 +4233,22 @@ fn employees_editable_in_every_layout_with_custom_fields() {
     assert_eq!(app.desk.emp_form.as_ref().unwrap().2["custom_fields"][0]["value"], "L", "the open form shows the saved value");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn approval_rules_screen() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = desktop_app("approvals");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Acumatica)); settle(&mut app, t);
+    let t = app.update(Message::Nav(Route::ApprovalRules)); settle(&mut app, t);
+    assert!(!click_fails(&app, "Approval Maps"));
+    press(&mut app, "New rule");
+    let _ = app.update(Message::Extras(X::ApType("PO")));
+    let _ = app.update(Message::Extras(X::ApMin("5000".into())));
+    press(&mut app, "Save rule");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let rules = app.data.as_ref().unwrap().as_array().unwrap().clone();
+    assert_eq!((rules.len(), rules[0]["doc_type"].as_str(), rules[0]["min_total"].as_i64()), (1, Some("PO"), Some(500_000)));
+    press(&mut app, "Remove");
+    assert!(app.data.as_ref().unwrap().as_array().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}

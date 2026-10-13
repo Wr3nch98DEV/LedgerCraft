@@ -53,6 +53,8 @@ pub struct State {
     pub co_result: Option<Value>,
     /// Item receipts: the receipt being entered (vendor, date, reference, location, and lines of
     /// item, quantity, unit cost, lot/serials).
+    /// Approval rules: the rule being added (document type, amount, approver role).
+    pub ap_new: Option<(&'static str, String, &'static str)>,
     pub ir_vendor: Option<Opt>,
     pub ir_date: String,
     pub ir_ref: String,
@@ -136,6 +138,7 @@ pub enum Msg {
     /// Payment reminders: on/off, a new level's days, add, switch a level on/off, delete, send due reminders now.
     PrNew(bool), PrField(usize, String), PrItem(Opt), PrLevel(Opt), PrSave, PrDelete(i64),
     LotItem(Opt), LotMode(&'static str), LotExpiry(i64, String, String), LotExpirySave(i64, String),
+    ApNew(bool), ApType(&'static str), ApMin(String), ApRole(&'static str), ApSave, ApDelete(i64),
     IrVendor(Opt), IrDate(String), IrRef(String), IrLoc(Opt), IrItem(usize, Opt), IrQty(usize, String), IrCost(usize, String), IrLot(usize, String), IrAddLine, IrReceive, IrBill(i64), IrBilled(Reply), IrVoid(i64),
     CoFile(String), CoFrom(String), CoTo(String), CoElim(String), CoRun, CoDone(Reply),
     LcBill(Opt), LcReceipt(i64), LcByQty(bool), LcApply,
@@ -189,6 +192,7 @@ pub fn load(app: &mut App) -> Task<Message> {
         Route::CustomFields => call(app, "customFields.list", json!({})),
         Route::Consolidation => call(app, "orgs.list", json!({})),
         Route::ItemReceipts => call(app, "itemReceipts.list", json!({})),
+        Route::ApprovalRules => call(app, "approvals.list", json!({})),
         Route::LandedCosts => {
             let be = app.be.clone();
             Task::perform(async move {
@@ -280,6 +284,18 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.extras.busy = true;
             app.be.call("recode.apply", p, |r| Message::Extras(Msg::Done(r.map(|v| { let n = v["transactions"].as_i64().unwrap_or(0); json!({"n": n}) }), "Recoded — the transactions were reposted")))
         }
+        // ---- approval rules ----
+        Msg::ApNew(on) => { app.extras.ap_new = on.then(|| ("ACCPAY", String::new(), "ADVISER")); Task::none() }
+        Msg::ApType(v) => { if let Some(n) = app.extras.ap_new.as_mut() { n.0 = v; } Task::none() }
+        Msg::ApMin(v) => { if let Some(n) = app.extras.ap_new.as_mut() { n.1 = v; } Task::none() }
+        Msg::ApRole(v) => { if let Some(n) = app.extras.ap_new.as_mut() { n.2 = v; } Task::none() }
+        Msg::ApSave => {
+            let Some((t, min, role)) = app.extras.ap_new.clone() else { return Task::none() };
+            let Some(min) = (if min.trim().is_empty() { Some(0) } else { ui::parse_money(&min) }) else { return app.toast("Enter the amount, e.g. 1000", true) };
+            app.extras.ap_new = None;
+            app.be.call("approvals.save", json!({"doc_type": t, "min_total": min, "role": role}), |r| Message::Extras(Msg::Done(r, "Approval rule added")))
+        }
+        Msg::ApDelete(id) => app.be.call("approvals.delete", json!({"id": id}), |r| Message::Extras(Msg::Done(r, "Approval rule removed"))),
         // ---- item receipts ----
         Msg::IrVendor(o) => { app.extras.ir_vendor = Some(o); Task::none() }
         Msg::IrDate(v) => { let old = if app.extras.ir_date.is_empty() { app.d(&ui::today_iso()) } else { app.extras.ir_date.clone() }; app.extras.ir_date = ui::date_keys(&old, &v, style); Task::none() }
@@ -1184,6 +1200,35 @@ pub fn price_rules_section(app: &App) -> Element<'_, Message> {
     }).collect();
     col = col.push(ui::table(&[ui::col("Rule", 16), ui::col("Item", 18), ui::col("Customers", 16), ui::col("Quantity", 10), ui::col("Change", 9), ui::col("Dates", 20), ui::col("", 9)], rows, "No price rules yet."));
     col.push(ui::muted("The lowest matching price wins. Rules apply after the customer's price level, when an item goes on a sale or its quantity changes.")).into()
+}
+
+// ---------------- Approval rules ----------------
+
+const AP_TYPES: [(&str, &str); 5] = [("ACCPAY", "Bills"), ("PO", "Purchase orders"), ("ACCREC", "Invoices"), ("ACCPAYCREDIT", "Supplier credits"), ("ACCRECCREDIT", "Credit notes")];
+const AP_ROLES: [(&str, &str); 5] = [("ADVISER", "Adviser"), ("STANDARD", "Standard"), ("CASHBOOK", "Cashbook"), ("PAYROLL_ADMIN", "Payroll admin"), ("INVOICE_ONLY", "Invoice only")];
+
+/// Who has to approve which documents.
+pub fn approval_rules(app: &App) -> Element<'_, Message> {
+    let Some(d) = &app.data else { return loading() };
+    let x = &app.extras;
+    let mut body = column![].spacing(14);
+    if let Some((t, min, role)) = &x.ap_new {
+        body = body.push(ui::card(row![
+            column![lbl("DOCUMENTS"), pick_list(AP_TYPES.iter().map(|k| k.1).collect::<Vec<_>>(), Some(label_of(&AP_TYPES, t)), |l: &'static str| Message::Extras(Msg::ApType(code_of(&AP_TYPES, l)))).padding([5, 7]).text_size(13).style(theme::pick).width(180)].spacing(3),
+            input("OF THIS AMOUNT OR MORE", min, 160.0, |v| Message::Extras(Msg::ApMin(v))),
+            column![lbl("MUST BE APPROVED BY"), pick_list(AP_ROLES.iter().map(|k| k.1).collect::<Vec<_>>(), Some(label_of(&AP_ROLES, role)), |l: &'static str| Message::Extras(Msg::ApRole(code_of(&AP_ROLES, l)))).padding([5, 7]).text_size(13).style(theme::pick).width(180)].spacing(3),
+            iced::widget::Space::new().width(Length::Fill), ui::btn("Cancel", Some(Message::Extras(Msg::ApNew(false)))), ui::btn_primary("Save rule", Some(Message::Extras(Msg::ApSave))),
+        ].spacing(12).align_y(Alignment::End)));
+    }
+    let rows = d.as_array().cloned().unwrap_or_default().iter().map(|r| {
+        let id = r["id"].as_i64().unwrap_or(0);
+        (vec![ui::cell(label_of(&AP_TYPES, r["doc_type"].as_str().unwrap_or(""))), ui::cell_money(r["min_total"].as_i64().unwrap_or(0)),
+            ui::cell(label_of(&AP_ROLES, r["approver_role"].as_str().unwrap_or(""))), ui::link("Remove", Message::Extras(Msg::ApDelete(id)))], None)
+    }).collect();
+    body = body.push(ui::table(&[ui::col("Documents", 24), ui::coln("Of this amount or more", 20), ui::col("Approved by", 24), ui::col("", 10)], rows, "No approval rules: anyone who can create a document can approve it."));
+    body = body.push(ui::muted("Advisers can approve anything. When someone else approves a document a rule covers, it's saved as Awaiting approval for the right person."));
+    let title = if crate::vocab::acumatica() { "Approval Maps" } else if app.desktop() { "Approval Workflows" } else { "Approval rules" };
+    ui::page(ui::h1(title), vec![ui::btn_primary("New rule", Some(Message::Extras(Msg::ApNew(true))))], body.max_width(1000).into())
 }
 
 // ---------------- Item receipts ----------------
