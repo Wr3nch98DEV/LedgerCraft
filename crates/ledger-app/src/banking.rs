@@ -17,6 +17,21 @@ pub struct State {
     pub cat_tax: Option<Opt>,
     pub payee: String,
     pub busy: bool,
+    /// A CSV whose columns are being matched by hand.
+    pub map: Option<CsvMap>,
+}
+
+/// Column choices for a CSV statement: the file, its first rows, and which column is which.
+#[derive(Debug, Clone, Default)]
+pub struct CsvMap {
+    pub name: String,
+    pub text: String,
+    pub rows: Vec<Vec<String>>,
+    pub has_header: bool,
+    /// Column numbers by field: date, amount, debit, credit, payee, description, reference.
+    pub cols: std::collections::BTreeMap<&'static str, usize>,
+    pub date_format: &'static str,
+    pub split: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -46,6 +61,14 @@ pub enum Msg {
     /// Pick a statement file (CSV, OFX/QFX, QIF, CAMT.053, MT940) and import it.
     Upload,
     Uploaded(Result<Option<String>, String>),
+    /// The file couldn't be read automatically: match its columns.
+    MapStart(Result<Option<(String, String, Vec<Vec<String>>)>, String>),
+    MapHeader(bool),
+    MapCol(&'static str, Option<usize>),
+    MapDate(&'static str),
+    MapSplit(bool),
+    MapImport,
+    MapCancel,
 }
 
 fn i(v: &Value) -> i64 { v.as_i64().unwrap_or(0) }
@@ -136,8 +159,50 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
                 let name = file.file_name();
                 let bytes = file.read().await;
                 let text = String::from_utf8_lossy(&bytes).to_string();
-                tokio::task::spawn_blocking(move || crate::import::import_file(&be, acc, &name, &text, us).map(Some)).await.unwrap_or_else(|e| Err(e.to_string()))
+                tokio::task::spawn_blocking(move || match crate::import::import_file(&be, acc, &name, &text, us) {
+                    Ok(s) => Ok(Some(s)),
+                    // Columns not recognised: hand the file over for matching by hand.
+                    Err(e) if e == crate::import::NEEDS_MAPPING => Err(format!("MAP\u{1f}{name}\u{1f}{text}")),
+                    Err(e) => Err(e),
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
             }, |r| Message::Bank(Msg::Uploaded(r)))
+        }
+        Msg::MapStart(r) => match r {
+            Ok(Some((name, text, rows))) => {
+                let has_header = rows.first().is_some_and(|r| r.iter().any(|c| c.chars().any(|ch| ch.is_alphabetic())));
+                app.bank.map = Some(CsvMap { name, text, rows, has_header, date_format: if app.country() == "US" { "MDY" } else { "DMY" }, ..Default::default() });
+                Task::none()
+            }
+            Ok(None) => Task::none(),
+            Err(e) => app.toast(e, true),
+        },
+        Msg::MapHeader(v) => { if let Some(m) = app.bank.map.as_mut() { m.has_header = v; } Task::none() }
+        Msg::MapCol(f, c) => { if let Some(m) = app.bank.map.as_mut() { match c { Some(c) => { m.cols.insert(f, c); } None => { m.cols.remove(f); } } } Task::none() }
+        Msg::MapDate(f) => { if let Some(m) = app.bank.map.as_mut() { m.date_format = f; } Task::none() }
+        Msg::MapSplit(v) => { if let Some(m) = app.bank.map.as_mut() { m.split = v; } Task::none() }
+        Msg::MapCancel => { app.bank.map = None; Task::none() }
+        Msg::MapImport => {
+            let (Some(acc), Some(m)) = (acc, app.bank.map.clone()) else { return Task::none() };
+            let c = |f: &str| m.cols.get(f).copied();
+            if c("date").is_none() { return app.toast("Choose the date column", true); }
+            if !m.split && c("amount").is_none() { return app.toast("Choose the amount column", true); }
+            if m.split && (c("debit").is_none() || c("credit").is_none()) { return app.toast("Choose both the money-out and money-in columns", true); }
+            let mapping = json!({"has_header": m.has_header, "date_col": c("date"), "date_format": m.date_format, "amount_col": if m.split { None } else { c("amount") },
+                "debit_col": if m.split { c("debit") } else { None }, "credit_col": if m.split { c("credit") } else { None }, "payee_col": c("payee"),
+                "description_col": c("description"), "reference_col": c("reference"), "balance_col": null, "negate": false});
+            let be = app.be.clone();
+            app.bank.map = None;
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || crate::import::import_mapped(&be, acc, &m.name, &m.text, mapping).map(Some)).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Bank(Msg::Uploaded(r)))
+        }
+        Msg::Uploaded(Err(e)) if e.starts_with("MAP\u{1f}") => {
+            let mut parts = e.splitn(3, '\u{1f}').skip(1);
+            let (name, text) = (parts.next().unwrap_or("").to_string(), parts.next().unwrap_or("").to_string());
+            let be = app.be.clone();
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || crate::import::preview_rows(&be, &name, &text).map(|rows| Some((name, text, rows)))).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Bank(Msg::MapStart(r)))
         }
         Msg::Uploaded(r) => match r {
             Ok(None) => Task::none(),
@@ -219,7 +284,45 @@ fn suggestion_text(app: &App, l: &Value) -> (String, bool) {
     ("Uncategorized".to_string(), false)
 }
 
+/// Match a CSV statement's columns by hand.
+fn map_view<'a>(app: &'a App, m: &'a CsvMap) -> Element<'a, Message> {
+    let k = t();
+    let width = m.rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    let names: Vec<String> = (0..width).map(|n| if m.has_header { m.rows.first().and_then(|r| r.get(n)).cloned().filter(|s| !s.trim().is_empty()).unwrap_or(format!("Column {}", n + 1)) } else { format!("Column {}", n + 1) }).collect();
+    let mut opts = vec!["(none)".to_string()];
+    opts.extend(names.iter().cloned());
+    let pick = |label: &'static str, field: &'static str| -> Element<'a, Message> {
+        let cur = m.cols.get(field).and_then(|c| names.get(*c)).cloned().or(Some("(none)".to_string()));
+        let names2 = names.clone();
+        column![ui::label(label), pick_list(opts.clone(), cur, move |s: String| Message::Bank(Msg::MapCol(field, names2.iter().position(|x| *x == s))))
+            .padding([6, 8]).text_size(13).style(theme::pick).width(Length::Fixed(190.0))].spacing(4).into()
+    };
+    // The first rows, so it's clear which column is which.
+    let mut preview = column![].spacing(2);
+    for (i, r) in m.rows.iter().take(6).enumerate() {
+        let mut line = row![].spacing(8);
+        for n in 0..width { line = line.push(text(r.get(n).cloned().unwrap_or_default()).size(12).width(Length::Fixed(150.0)).color(if i == 0 && m.has_header { k.muted } else { k.text })); }
+        preview = preview.push(line);
+    }
+    let formats = vec!["DMY", "MDY", "YMD"];
+    let amounts: Element<Message> = if m.split { row![pick("Money out column", "debit"), pick("Money in column", "credit")].spacing(12).into() } else { pick("Amount column", "amount") };
+    ui::page(ui::h1("Match the columns"), vec![], column![
+        ui::muted(format!("LedgerCraft couldn't tell which column is which in {} (importing into {}). Choose them below — the first rows of the file are shown to help.", m.name,
+            app.bank.account.and_then(|id| app.lk.bank_opts().into_iter().find(|o| o.id == id)).map(|o| o.label).unwrap_or_else(|| "this bank account".into()))),
+        ui::card(iced::widget::scrollable(preview).direction(iced::widget::scrollable::Direction::Horizontal(Default::default())).style(theme::scroll)),
+        ui::card(column![
+            iced::widget::checkbox(m.has_header).label("The first row is column names").on_toggle(|v| Message::Bank(Msg::MapHeader(v))).text_size(14),
+            row![pick("Date column", "date"), column![ui::label("Date order"), pick_list(formats, Some(m.date_format), |f| Message::Bank(Msg::MapDate(f))).padding([6, 8]).text_size(13).style(theme::pick).width(120)].spacing(4)].spacing(12),
+            iced::widget::checkbox(m.split).label("Money in and money out are separate columns").on_toggle(|v| Message::Bank(Msg::MapSplit(v))).text_size(14),
+            amounts,
+            row![pick("Payee column", "payee"), pick("Description column", "description"), pick("Reference column", "reference")].spacing(12),
+            row![ui::hspace(), ui::btn("Cancel", Some(Message::Bank(Msg::MapCancel))), ui::btn_primary("Import", Some(Message::Bank(Msg::MapImport)))].spacing(8),
+        ].spacing(14)),
+    ].spacing(14).into())
+}
+
 pub fn view(app: &App) -> Element<'_, Message> {
+    if let Some(m) = &app.bank.map { return map_view(app, m); }
     let qb = app.skin == Skin::QuickBooks;
     let title = if qb { "Bank transactions" } else { "Bank accounts" };
     let Some(d) = &app.data else {

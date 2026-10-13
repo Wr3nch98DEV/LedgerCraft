@@ -44,6 +44,25 @@ pub fn guess_mapping(rows: &[Vec<String>], us_dates: bool) -> Option<Value> {
         "description_col": description_col, "reference_col": reference_col, "balance_col": balance_col, "negate": false}))
 }
 
+/// Error from `import_file` when a CSV's columns need matching by hand.
+pub const NEEDS_MAPPING: &str = "Choose which column is which in this CSV";
+
+/// The first rows of a statement file, as the engine reads them.
+pub fn preview_rows(be: &crate::backend::Backend, name: &str, text: &str) -> Result<Vec<Vec<String>>, String> {
+    let preview = be.call_now("statements.preview", json!({"filename": name, "text": text}))?;
+    Ok(preview["rows"].as_array().cloned().unwrap_or_default().iter()
+        .map(|r| r.as_array().cloned().unwrap_or_default().iter().map(|c| c.as_str().unwrap_or("").to_string()).collect()).collect())
+}
+
+/// Import a CSV statement with columns matched by hand.
+pub fn import_mapped(be: &crate::backend::Backend, account: i64, name: &str, text: &str, mapping: Value) -> Result<String, String> {
+    let params = json!({"account_id": account, "filename": name, "text": text, "format": "CSV", "date_order": mapping["date_format"], "mapping": mapping});
+    let r = be.call_now("statements.import", params)?;
+    let added = r["added"].as_i64().unwrap_or(0);
+    let dupes = r["duplicates"].as_i64().or(r["skipped"].as_i64()).unwrap_or(0);
+    Ok(if dupes > 0 { format!("{added} transaction(s) imported, {dupes} already there and skipped (CSV)") } else { format!("{added} transaction(s) imported (CSV)") })
+}
+
 /// Import a statement file into a bank account. Returns a summary for the user.
 pub fn import_file(be: &crate::backend::Backend, account: i64, name: &str, text: &str, us_dates: bool) -> Result<String, String> {
     let preview = be.call_now("statements.preview", json!({"filename": name, "text": text}))?;
@@ -52,7 +71,8 @@ pub fn import_file(be: &crate::backend::Backend, account: i64, name: &str, text:
     if format == "CSV" {
         let rows: Vec<Vec<String>> = preview["rows"].as_array().cloned().unwrap_or_default().iter()
             .map(|r| r.as_array().cloned().unwrap_or_default().iter().map(|c| c.as_str().unwrap_or("").to_string()).collect()).collect();
-        let mapping = guess_mapping(&rows, us_dates).ok_or("Couldn't work out this CSV's columns (date and amount). Use the web version's import, which lets you map columns by hand.")?;
+        // Columns that can't be worked out are matched by hand (see `NEEDS_MAPPING`).
+        let mapping = guess_mapping(&rows, us_dates).ok_or(NEEDS_MAPPING)?;
         params["date_order"] = mapping["date_format"].clone();
         params["mapping"] = mapping;
     }

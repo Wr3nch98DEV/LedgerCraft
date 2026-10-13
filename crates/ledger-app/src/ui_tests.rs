@@ -3440,3 +3440,27 @@ fn two_step_verification_on_and_off() {
     assert!(me["has_2fa"] == 0 || me["has_2fa"] == false, "{me}");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn csv_statement_columns_matched_by_hand() {
+    use crate::banking::Msg as B;
+    let (mut app, dir) = desktop_app("csvmap");
+    let acc = app.lk.bank_opts()[0].id;
+    let t = app.update(Message::Nav(Route::Banking(Some(acc)))); settle(&mut app, t);
+    // A file whose columns can't be guessed goes to matching by hand rather than failing.
+    let odd = "Posted,Details,Value\nOct 1,COFFEE HUT,-4.50\n";
+    assert_eq!(crate::import::import_file(&app.be, acc, "odd.csv", odd, false).unwrap_err(), crate::import::NEEDS_MAPPING);
+    let csv2 = "Posted,Details,Value\n01/10/2026,COFFEE HUT,-4.50\n02/10/2026,REFUND,12.00\n";
+    let rows = crate::import::preview_rows(&app.be, "odd.csv", csv2).unwrap();
+    let t = app.update(Message::Bank(B::MapStart(Ok(Some(("odd.csv".into(), csv2.into(), rows)))))); settle(&mut app, t);
+    assert!(app.bank.map.as_ref().unwrap().has_header);
+    assert!(!click_fails(&app, "Match the columns"));
+    for m in [B::MapCol("date", Some(0)), B::MapCol("description", Some(1)), B::MapCol("amount", Some(2)), B::MapDate("DMY")] { let _ = app.update(Message::Bank(m)); }
+    let lines_before = app.be.call_now("statements.lines", json!({"account_id": acc, "status": "ALL"})).map(|v| v.as_array().map(|a| a.len()).unwrap_or(0)).unwrap_or(0);
+    let t = app.update(Message::Bank(B::MapImport)); settle(&mut app, t);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert!(app.toasts.iter().any(|t| t.1.contains("2 transaction(s) imported")), "{:?}", app.toasts);
+    let lines_after = app.be.call_now("statements.lines", json!({"account_id": acc, "status": "ALL"})).map(|v| v.as_array().map(|a| a.len()).unwrap_or(0)).unwrap_or(0);
+    assert!(lines_after >= lines_before);
+    let _ = std::fs::remove_dir_all(dir);
+}
