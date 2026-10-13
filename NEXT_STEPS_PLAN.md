@@ -151,16 +151,16 @@ The first task of step 4 is to verify this column feature by feature; the table 
 ### Ledger, banking and compliance
 | Feature | From | Now |
 |---|---|---|
-| Multi-currency, live rates, revaluation, realised/unrealised gains | Xero, Sage, Acumatica | Partial: engine yes; native Currencies screen missing |
+| Multi-currency, live rates, revaluation, realised/unrealised gains | Xero, Sage, Acumatica | Have (native Currencies screen: rates, fetch, revalue) |
 | Multi-entity consolidation, intercompany eliminations, combined reports | Xero, Sage, Acumatica, QB | Missing |
 | Segmented chart of accounts / dimensions (department, location, project) | Sage, Acumatica | Partial: 2 tracking categories (Class List) |
-| Fixed assets: depreciation, disposal, leases | Acumatica, QB | Partial: engine assets; native screen and leases missing |
+| Fixed assets: depreciation, disposal, leases | Acumatica, QB | Partial: native register, depreciation and disposal; leases missing |
 | Deferred revenue / revenue recognition schedules (IFRS 15 / ASC 606) | Acumatica | Missing |
 | Budgets, long-range forecasts, scenario (what-if) modelling | Xero, Sage, Acumatica | Partial: budgets and cash-flow forecast; scenarios missing |
 | Bank feeds (live) with rules and auto-matching | all | Partial: file import, rules, suggestions; live feed needs an aggregator |
 | AI categorisation, anomaly detection, predictive insights | Xero, Acumatica | Missing (step 5's AI assistant builds on this) |
 | GST/BAS, PAYG; US multi-jurisdiction sales tax; VAT | all | Have; direct lodgement needs government registration |
-| Audit trail, closing date, segregation of duties | all | Partial: audit log in engine; closing date done; fine-grained duties missing |
+| Audit trail, closing date, segregation of duties | all | Partial: native audit log and closing date; fine-grained duties missing |
 | Targeted restore of a bad import/sync (not a whole rollback) | Xero | Partial: backups/restore; targeted undo missing |
 | 256-bit encryption of the company file | QB, Sage | Missing (SQLCipher) |
 
@@ -171,13 +171,13 @@ The first task of step 4 is to verify this column feature by feature; the table 
 | Dunning and automatic payment reminders | Sage, Acumatica | Partial: email reminders; dunning levels missing |
 | Pay-now links on invoices (Stripe, PayPal, card, ACH) | Sage, Xero | Partial: plugin interface, no gateway bundled |
 | Approval workflows for bills, POs and expenses | Acumatica, Sage, Xero | Partial: Draft → Awaiting approval; routing rules missing |
-| Batch payments and bank payment files (ABA/ACH/EFT) | all | Partial: batch payments; payment files to check |
+| Batch payments and bank payment files (ABA/ACH/EFT) | all | Partial: batch payments; pay-run bank files (ABA/BACS/NACHA); supplier payment files missing |
 | Customer prepayments/deposits on sales orders (liability) | QB | Partial: prepayments; SO deposits missing |
 | Credit limits and credit holds | Acumatica | Partial: field only |
 | Invoice profitability (margin per line) | QB | Missing |
 | Estimates → sales orders → invoices, estimate inactivation, progress invoicing | QB, Sage, Acumatica | Partial: no progress invoicing |
 | Receipt capture with OCR and auto-matching | Sage, Xero, Acumatica | Partial: PDF reading; photo OCR needs Tesseract |
-| Expense claims, mileage, reimbursements | Sage, Xero | Partial: engine/web; native Mileage only |
+| Expense claims, mileage, reimbursements | Sage, Xero | Have (native receipts, mileage, submit/approve) |
 | 1099 / W-2 | Sage, QB | Partial: 1099 summary; W-2 missing |
 | Advanced price rules (customer type, category, quantity breaks, dates) | QB, Acumatica | Partial: fixed-% price levels |
 
