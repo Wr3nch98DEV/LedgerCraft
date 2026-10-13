@@ -89,6 +89,9 @@ pub static FEATURES: &[Feature] = &[
     Feature { id: "budgets", go: || nav(Route::Budgets), online: ("gear:Tools", "Budgeting"), xero: ("accounting", "Budget manager"), desktop: ("Company", "Planning & Budgeting: Set Up Budgets") },
     Feature { id: "currencies", go: || nav(Route::Currencies), online: ("gear:Lists", "Currencies"), xero: ("settings", "Currencies"), desktop: ("Lists", "Currency List") },
     Feature { id: "find", go: || nav(Route::Find), online: ("accounting", "Advanced search"), xero: ("accounting", "Find and recode"), desktop: ("Edit", "Find…") },
+    Feature { id: "bank_rules", go: || nav(Route::BankRules), online: ("accounting", "Bank rules"), xero: ("accounting", "Bank rules"), desktop: ("Banking", "Bank Rules") },
+    Feature { id: "import_data", go: || nav(Route::ImportExport), online: ("gear:Tools", "Import data"), xero: ("settings", "Import data"), desktop: ("File", "Utilities: Import") },
+    Feature { id: "export_data", go: || nav(Route::ImportExport), online: ("gear:Tools", "Export data"), xero: ("accounting", "Export accounting data"), desktop: ("File", "Utilities: Export") },
     Feature { id: "taxes", go: || nav(Route::Taxes), online: ("taxes", "Sales tax"), xero: ("accounting", "Tax returns"), desktop: ("Vendors", "Sales Tax: Manage Sales Tax…") },
     Feature { id: "pay_sales_tax", go: || nav(Route::PaySalesTax), online: ("taxes", "Record tax payment"), xero: ("accounting", "Pay tax"), desktop: ("Vendors", "Sales Tax: Pay Sales Tax…") },
     // ---- reports ----

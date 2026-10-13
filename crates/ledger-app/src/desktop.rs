@@ -991,6 +991,8 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::Currencies => "Currency List".into(),
         Route::Budgets => "Set Up Budgets".into(),
         Route::ExpenseClaims => "Expense Claims".into(),
+        Route::BankRules => "Bank Rules".into(),
+        Route::ImportExport => "Import / Export".into(),
         Route::BankTx(_) => if app.pay.as_ref().is_some_and(|s| !s.check) { "Enter Credit Card Charges".into() } else { "Write Checks".into() },
         Route::EditContact(id) => if app.lk.contacts.iter().find(|c| c["id"].as_i64() == Some(*id)).is_some_and(|c| c["is_supplier"].as_i64() == Some(1) && c["is_customer"].as_i64() != Some(1)) { "Edit Vendor".into() } else { "Edit Customer".into() },
         Route::EnterTime => "Time/Enter Single Activity".into(),
@@ -1036,7 +1038,7 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
     let sep = || ("-".to_string(), "", None);
     match name {
         "File" => vec![e("New Company…", "", nav(Route::Setup)), e("Open or Restore Company…", "", nav(Route::Setup)), e("Restore a Backup Copy…", "", Some(Message::Setup(crate::setup::Msg::Restore))), e("Open Previous Company", "", nav(Route::Setup)), sep(),
-            e("Back Up Company…", "", Some(Message::BackupCompany)), e("Print Forms", "", nav(Route::PrintForms)), sep(), e("Exit", "Alt+F4", Some(Message::Desk(Msg::Exit)))],
+            e("Back Up Company…", "", Some(Message::BackupCompany)), e("Utilities: Import", "", nav(Route::ImportExport)), e("Utilities: Export", "", nav(Route::ImportExport)), e("Print Forms", "", nav(Route::PrintForms)), sep(), e("Exit", "Alt+F4", Some(Message::Desk(Msg::Exit)))],
         "Edit" => vec![e("Undo", "Ctrl+Z", None), sep(), e("Find…", "Ctrl+F", nav(Route::Find)), e("Search…", "F3", Some(Message::FocusSearch)), sep(), e("Preferences…", "", nav(Route::Settings))],
         "View" => vec![e(if app.desk.one_window { "✓ One Window" } else { "   One Window" }, "", Some(Message::Desk(Msg::OneWindow(true)))),
             e(if app.desk.one_window { "   Multiple Windows" } else { "✓ Multiple Windows" }, "", Some(Message::Desk(Msg::OneWindow(false)))), sep(),
@@ -1067,7 +1069,7 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
             e("Pay Liabilities", "", nav(Route::PayLiabilities)), e("Process Payroll Forms", "", nav(Route::PayrollForms)), sep(), e("Enter Time", "", nav(Route::EnterTime)), e("Expense Claims", "", nav(Route::ExpenseClaims))],
         "Banking" => vec![e("Write Checks", "Ctrl+W", nav(Route::Check(None))), e("Order Checks & Envelopes", "", None), e("Enter Credit Card Charges", "", nav(Route::Spend(None))), sep(),
             e("Use Register", "Ctrl+R", nav(Route::Register(None))), e("Make Deposits", "", nav(Route::Deposit)), e("Transfer Funds", "", nav(Route::Transfer)), e("Reconcile", "", nav(Route::Reconcile)),
-            sep(), e("Bank Feeds Center", "", nav(Route::Banking(None)))],
+            sep(), e("Bank Feeds Center", "", nav(Route::Banking(None))), e("Bank Rules", "", nav(Route::BankRules))],
         "Reports" => vec![e("Report Center", "", nav(Route::Reports)), e("Memorized Reports", "", nav(Route::MemorizedReports)), e("Company Snapshot", "", Some(Message::Desk(Msg::Insights(true)))), sep(),
             e("#Company & Financial", "", None), e("Profit & Loss Standard", "", rep("profit-and-loss")), e("Balance Sheet Standard", "", rep("balance-sheet")), e("Statement of Cash Flows", "", rep("cash-flow-statement")),
             e("#Customers & Receivables", "", None), e("A/R Aging Summary", "", rep("aged-receivables")), e("Customer Balance Summary", "", rep("contact-transactions")),

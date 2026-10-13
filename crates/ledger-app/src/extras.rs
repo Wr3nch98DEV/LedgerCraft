@@ -38,6 +38,18 @@ pub struct State {
     pub cl_new: Option<(bool, BTreeMap<&'static str, String>)>,
     pub cl_account: Option<Opt>,
     pub cl_tax: Option<Opt>,
+    /// Bank rules: the rule being added — name, type, bank account, condition (field, op, value),
+    /// allocation account, transfer account, contact.
+    pub br_new: Option<BTreeMap<&'static str, String>>,
+    pub br_bank: Option<Opt>,
+    pub br_account: Option<Opt>,
+    pub br_contact: Option<Opt>,
+    /// Import: what's being imported, the chosen file (name, text), the dry-run preview, and the
+    /// opening-balance date.
+    pub ie_what: Option<&'static str>,
+    pub ie_file: Option<(String, String)>,
+    pub ie_preview: Option<Value>,
+    pub ie_date: String,
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +60,8 @@ pub enum Msg {
     FxEnable(String, bool), FxRateOpen(String), FxRateField(u8, String), FxRateSave, FxRevalDate(String), FxRevalue, FxFetch,
     BudPick(i64), BudYear(i32), BudCell(i64, String, String), BudCopyAcross(i64), BudNew(Option<String>), BudCreate, BudSave, BudCreated(Reply),
     ClTab(&'static str), ClNew(bool), ClField(&'static str, String), ClAccount(Opt), ClTax(Opt), ClSave(bool), ClStatus(i64, &'static str), ClCancel,
+    BrNew(bool), BrField(&'static str, String), BrBank(Opt), BrAccount(Opt), BrContact(Opt), BrSave, BrDelete(i64),
+    IeWhat(&'static str), IePick, IePicked(Result<Option<(String, String)>, String>), IePreview(Reply), IeRun, IeDate(String), IeExport(&'static str), IeExported(Result<String, String>),
     Done(Reply, &'static str),
 }
 
@@ -70,6 +84,8 @@ pub fn load(app: &mut App) -> Task<Message> {
         }
         Route::Currencies => call(app, "currencies.list", json!({})),
         Route::ExpenseClaims => call(app, "receipts.list", json!({})),
+        Route::BankRules => call(app, "bankRules.list", json!({})),
+        Route::ImportExport => { app.data = Some(json!({})); Task::none() }
         Route::Budgets => {
             let be = app.be.clone();
             let sel = app.extras.bud_sel;
@@ -246,12 +262,77 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             let what = match st { "SUBMITTED" => "Claim submitted", "AUTHORISED" => "Claim approved — a bill to repay the claimant was created", "DECLINED" => "Claim declined", _ => "Claim updated" };
             app.be.call("receipts.setStatus", json!({"id": id, "status": st}), move |r| Message::Extras(Msg::Done(r, what)))
         }
+        // ---- bank rules ----
+        Msg::BrNew(on) => {
+            app.extras.br_new = on.then(|| { let mut f = BTreeMap::new(); f.insert("type", "SPEND".to_string()); f.insert("field", "any".to_string()); f.insert("op", "contains".to_string()); f });
+            app.extras.br_bank = None; app.extras.br_account = None; app.extras.br_contact = None;
+            Task::none()
+        }
+        Msg::BrField(k, v) => { if let Some(f) = app.extras.br_new.as_mut() { f.insert(k, v); } Task::none() }
+        Msg::BrBank(o) => { app.extras.br_bank = Some(o); Task::none() }
+        Msg::BrAccount(o) => { app.extras.br_account = Some(o); Task::none() }
+        Msg::BrContact(o) => { app.extras.br_contact = Some(o); Task::none() }
+        Msg::BrSave => {
+            let Some(f) = app.extras.br_new.clone() else { return Task::none() };
+            let g = |k: &str| f.get(k).cloned().unwrap_or_default().trim().to_string();
+            if g("value").is_empty() { return app.toast("Enter what to look for", true); }
+            let transfer = g("type") == "TRANSFER";
+            let Some(acct) = app.extras.br_account.clone() else { return app.toast(if transfer { "Choose the account to transfer to" } else { "Choose the account to code it to" }, true) };
+            let name = if g("name").is_empty() { format!("{} {}", if transfer { "Transfer" } else { "Code" }, g("value")) } else { g("name") };
+            let rule = json!({"name": name, "type": g("type"), "account_id": app.extras.br_bank.as_ref().map(|b| b.id), "match_mode": "ALL",
+                "conditions": [{"field": g("field"), "op": g("op"), "value": g("value")}], "contact_id": app.extras.br_contact.as_ref().map(|c| c.id), "reference_field": "",
+                "fixed_lines": [], "percent_lines": if transfer { json!([]) } else { json!([{"account_id": acct.id, "percent": "100", "description": ""}]) },
+                "transfer_account_id": if transfer { Some(acct.id) } else { None }, "priority": 0, "active": true});
+            app.be.call("bankRules.save", json!({"rule": rule}), |r| Message::Extras(Msg::Done(r, "Bank rule saved")))
+        }
+        Msg::BrDelete(id) => app.be.call("bankRules.delete", json!({"id": id}), |r| Message::Extras(Msg::Done(r, "Bank rule deleted"))),
+        // ---- import / export ----
+        Msg::IeWhat(w) => { app.extras.ie_what = Some(w); app.extras.ie_file = None; app.extras.ie_preview = None; Task::none() }
+        Msg::IeDate(v) => { let old = if app.extras.ie_date.is_empty() { app.d(&ui::today_iso()) } else { app.extras.ie_date.clone() }; app.extras.ie_date = ui::date_keys(&old, &v, style); Task::none() }
+        Msg::IePick => Task::perform(async move {
+            let Some(file) = rfd::AsyncFileDialog::new().set_title("Choose a CSV file").add_filter("CSV", &["csv", "txt"]).pick_file().await else { return Ok(None) };
+            let name = file.file_name();
+            let bytes = file.read().await;
+            Ok(Some((name, String::from_utf8_lossy(&bytes).into_owned())))
+        }, |r| Message::Extras(Msg::IePicked(r))),
+        Msg::IePicked(r) => match r {
+            Ok(Some((name, text))) => {
+                app.extras.ie_file = Some((name, text.clone()));
+                app.extras.ie_preview = None;
+                let (what, date) = ie_params(app);
+                app.be.call("import.run", json!({"what": what, "text": text, "dry_run": true, "date": date}), |r| Message::Extras(Msg::IePreview(r)))
+            }
+            Ok(None) => Task::none(),
+            Err(e) => app.toast(e, true),
+        },
+        Msg::IePreview(r) => match r { Ok(v) => { app.extras.ie_preview = Some(v); Task::none() } Err(e) => { app.extras.ie_file = None; app.toast(e, true) } },
+        Msg::IeRun => {
+            let Some((_, text)) = app.extras.ie_file.clone() else { return app.toast("Choose a file first", true) };
+            let (what, date) = ie_params(app);
+            app.extras.busy = true;
+            app.be.call("import.run", json!({"what": what, "text": text, "dry_run": false, "date": date}), |r| Message::Extras(Msg::Done(r, "Imported")))
+        }
+        Msg::IeExport(what) => {
+            let st = app.be.st.clone();
+            let open = !cfg!(test);
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<String, String> {
+                    let csv = { let g = st.org.lock().unwrap(); g.as_ref().ok_or("no company open")?.ledger.export_csv(what).map_err(|e| e.to_string())? };
+                    let path = crate::pdf::output_dir().join([what, ".csv"].concat());
+                    std::fs::write(&path, csv).map_err(|e| e.to_string())?;
+                    if open { crate::pdf::open_file(&path); }
+                    Ok(path.display().to_string())
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Extras(Msg::IeExported(r)))
+        }
+        Msg::IeExported(r) => match r { Ok(p) => app.toast(format!("Exported to {p}"), false), Err(e) => app.toast(e, true) },
         // ---- common ----
         Msg::Done(r, what) => {
             app.extras.busy = false;
             match r {
                 Ok(_) => {
-                    app.extras.fa_new = None; app.extras.fa_dispose = None; app.extras.bud_cells.clear(); app.extras.cl_new = None;
+                    app.extras.fa_new = None; app.extras.fa_dispose = None; app.extras.bud_cells.clear(); app.extras.cl_new = None; app.extras.br_new = None;
+                    if app.route == Route::ImportExport { app.extras.ie_file = None; app.extras.ie_preview = None; }
                     let t1 = if what.is_empty() { Task::none() } else { app.toast(what, false) };
                     Task::batch([t1, app.load(), app.load_lookups()])
                 }
@@ -517,6 +598,90 @@ pub fn claims(app: &App, mileage_only: bool) -> Element<'_, Message> {
     let mut actions = vec![ui::btn_primary(if mileage_only { "New trip" } else { "New receipt" }, Some(Message::Extras(Msg::ClNew(mileage_only))))];
     if !mileage_only { actions.push(ui::btn("New mileage claim", Some(Message::Extras(Msg::ClNew(true))))); }
     ui::page(ui::h1(if mileage_only { "Mileage" } else { "Expense claims" }), actions, iced::widget::scrollable(body.max_width(1150)).style(theme::scroll).into())
+}
+
+// ---------------- Bank rules ----------------
+
+pub const RULE_TYPES: [(&str, &str); 3] = [("SPEND", "Money out (spend)"), ("RECEIVE", "Money in (receive)"), ("TRANSFER", "Transfer")];
+pub const RULE_FIELDS: [(&str, &str); 5] = [("any", "Any text field"), ("payee", "Payee"), ("description", "Description"), ("reference", "Reference"), ("amount", "Amount")];
+pub const RULE_OPS: [(&str, &str); 7] = [("contains", "contains"), ("not_contains", "doesn't contain"), ("equals", "is"), ("starts_with", "starts with"), ("gt", "is more than"), ("lt", "is less than"), ("gte", "is at least")];
+
+fn label_of(list: &[(&'static str, &'static str)], code: &str) -> &'static str { list.iter().find(|x| x.0 == code).map(|x| x.1).unwrap_or("") }
+fn code_of(list: &'static [(&'static str, &'static str)], label: &str) -> &'static str { list.iter().find(|x| x.1 == label).map(|x| x.0).unwrap_or("") }
+
+pub fn bank_rules(app: &App) -> Element<'_, Message> {
+    let Some(d) = &app.data else { return loading() };
+    let mut body = column![].spacing(12);
+    if let Some(f) = &app.extras.br_new {
+        let v = |key: &'static str| f.get(key).cloned().unwrap_or_default();
+        let ty = v("type");
+        let pick_str = |label: &'static str, list: &'static [(&'static str, &'static str)], cur: String, key: &'static str, w: f32| -> Element<'_, Message> {
+            column![lbl(label), pick_list(list.iter().map(|x| x.1).collect::<Vec<_>>(), Some(label_of(list, &cur)).filter(|s| !s.is_empty()),
+                move |l: &'static str| Message::Extras(Msg::BrField(key, code_of(list, l).to_string()))).padding([5, 7]).text_size(13).style(theme::pick).width(Length::Fixed(w))].spacing(3).into()
+        };
+        let accounts = if ty == "TRANSFER" { app.lk.bank_opts() } else { app.lk.account_opts(|a| a["type"] != "BANK") };
+        body = body.push(ui::card(column![
+            ui::h2("New bank rule"),
+            row![input("RULE NAME", &v("name"), 260.0, |x| Message::Extras(Msg::BrField("name", x))), pick_str("WHEN THERE'S", &RULE_TYPES, ty.clone(), "type", 200.0),
+                column![lbl("IN BANK ACCOUNT"), pick_list(app.lk.bank_opts(), app.extras.br_bank.clone(), |o| Message::Extras(Msg::BrBank(o))).placeholder("Any bank account").padding([5, 7]).text_size(13).style(theme::pick).width(220)].spacing(3)].spacing(14),
+            row![pick_str("AND THE", &RULE_FIELDS, v("field"), "field", 170.0), pick_str("", &RULE_OPS, v("op"), "op", 160.0), input("VALUE", &v("value"), 240.0, |x| Message::Extras(Msg::BrField("value", x)))].spacing(10).align_y(Alignment::End),
+            row![column![lbl(if ty == "TRANSFER" { "TRANSFER TO" } else { "CODE IT TO" }), pick_list(accounts, app.extras.br_account.clone(), |o| Message::Extras(Msg::BrAccount(o))).placeholder("Account").padding([5, 7]).text_size(13).style(theme::pick).width(280)].spacing(3),
+                column![lbl("CONTACT (OPTIONAL)"), pick_list(app.lk.contact_opts(ty != "SPEND"), app.extras.br_contact.clone(), |o| Message::Extras(Msg::BrContact(o))).placeholder("Contact").padding([5, 7]).text_size(13).style(theme::pick).width(240)].spacing(3)].spacing(14),
+            row![ui::hspace(), ui::btn_primary("Save rule", Some(Message::Extras(Msg::BrSave))), ui::btn("Cancel", Some(Message::Extras(Msg::BrNew(false))))].spacing(8),
+        ].spacing(12)));
+    }
+    let rows = d.as_array().cloned().unwrap_or_default().iter().map(|r| {
+        let id = r["id"].as_i64().unwrap_or(0);
+        let conds = r["conditions"].as_array().cloned().unwrap_or_default().iter().map(|c| format!("{} {} \"{}\"", label_of(&RULE_FIELDS, c["field"].as_str().unwrap_or("")).to_lowercase(),
+            label_of(&RULE_OPS, c["op"].as_str().unwrap_or("contains")), c["value"].as_str().unwrap_or(""))).collect::<Vec<_>>().join(if r["match_mode"] == "ANY" { " or " } else { " and " });
+        let to = if r["type"] == "TRANSFER" { app.lk.accounts.iter().find(|a| a["id"] == r["transfer_account_id"]).and_then(|a| a["name"].as_str()).map(|n| format!("Transfer to {n}")).unwrap_or_default() }
+            else { r["percent_lines"].as_array().into_iter().chain(r["fixed_lines"].as_array()).flatten().filter_map(|l| app.lk.accounts.iter().find(|a| a["id"] == l["account_id"]).and_then(|a| a["name"].as_str())).collect::<Vec<_>>().join(", ") };
+        (vec![ui::cell(r["name"].as_str().unwrap_or("").to_string()), ui::cell_muted(label_of(&RULE_TYPES, r["type"].as_str().unwrap_or(""))), ui::cell(conds), ui::cell(to),
+            ui::link("Delete", Message::Extras(Msg::BrDelete(id)))], None)
+    }).collect();
+    body = body.push(ui::table(&[ui::col("Rule", 20), ui::col("Applies to", 14), ui::col("When", 34), ui::col("Then", 22), ui::col("", 8)], rows, "No bank rules yet."));
+    body = body.push(ui::muted("Rules fill in matching bank statement lines for you when you review them in Banking."));
+    ui::page(ui::h1("Bank rules"), vec![ui::btn_primary("New rule", Some(Message::Extras(Msg::BrNew(true))))], body.max_width(1150).into())
+}
+
+// ---------------- Import / export ----------------
+
+/// What can be imported: (code, label, needs a date).
+pub const IMPORTS: [(&str, &str); 6] = [("contacts", "Customers and suppliers"), ("accounts", "Chart of accounts"), ("items", "Products and services"), ("invoices", "Invoices"), ("bills", "Bills"), ("journals", "Opening balances")];
+pub const EXPORTS: [(&str, &str); 6] = [("contacts", "Contacts"), ("accounts", "Chart of accounts"), ("items", "Products and services"), ("invoices", "Invoices"), ("bills", "Bills"), ("journals", "General ledger (journals)")];
+
+fn ie_params(app: &App) -> (&'static str, Option<String>) {
+    let what = app.extras.ie_what.unwrap_or("contacts");
+    let date = (what == "journals").then(|| ui::to_iso(&if app.extras.ie_date.is_empty() { app.d(&ui::today_iso()) } else { app.extras.ie_date.clone() }, app.date_style())).flatten();
+    (what, date)
+}
+
+pub fn import_export(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let what = app.extras.ie_what.unwrap_or("contacts");
+    let mut imp = column![ui::h2("Import"),
+        ui::muted("CSV files from Xero, QuickBooks, MYOB or a spreadsheet — the first row names the columns (Name, Email, *Code, InvoiceNumber…). You'll see what will happen before anything is changed."),
+        row![column![lbl("WHAT ARE YOU IMPORTING?"), pick_list(IMPORTS.iter().map(|x| x.1).collect::<Vec<_>>(), Some(label_of(&IMPORTS, what)), |l: &'static str| Message::Extras(Msg::IeWhat(code_of(&IMPORTS, l))))
+            .padding([5, 7]).text_size(13).style(theme::pick).width(260)].spacing(3)].spacing(14).align_y(Alignment::End)].spacing(10);
+    if what == "journals" {
+        let d = if app.extras.ie_date.is_empty() { app.d(&ui::today_iso()) } else { app.extras.ie_date.clone() };
+        imp = imp.push(input("CONVERSION DATE (BALANCES AS AT)", &d, 200.0, |x| Message::Extras(Msg::IeDate(x))));
+    }
+    imp = imp.push(row![ui::btn_primary("Choose CSV file…", Some(Message::Extras(Msg::IePick))), text(app.extras.ie_file.as_ref().map(|f| f.0.clone()).unwrap_or_default()).size(13).color(k.muted)].spacing(12).align_y(Alignment::Center));
+    if let Some(p) = &app.extras.ie_preview {
+        let errors = p["errors"].as_array().cloned().unwrap_or_default();
+        let mut c = column![text(format!("Ready to import: {} new, {} skipped.", p["created"].as_i64().unwrap_or(0), p["skipped"].as_i64().unwrap_or(0))).size(14).font(BOLD)].spacing(4);
+        for m in p["messages"].as_array().cloned().unwrap_or_default().iter().take(8) { c = c.push(text(m.as_str().unwrap_or("").to_string()).size(12).color(k.muted)); }
+        for e in errors.iter().take(8) { c = c.push(text(e.as_str().unwrap_or("").to_string()).size(12).color(k.bad)); }
+        imp = imp.push(container(c).padding(12).style(theme::soft).width(iced::Fill));
+        imp = imp.push(row![ui::hspace(), ui::btn_primary("Import", if app.extras.busy || p["created"].as_i64().unwrap_or(0) == 0 { None } else { Some(Message::Extras(Msg::IeRun)) })]);
+    }
+    let mut exp = column![ui::h2("Export"), ui::muted("Each export is a CSV file in Documents\\LedgerCraft, in the same columns the import reads.")].spacing(10);
+    let mut r = row![].spacing(8);
+    for (code, label) in EXPORTS { r = r.push(ui::btn(label, Some(Message::Extras(Msg::IeExport(code))))); }
+    exp = exp.push(r);
+    exp = exp.push(row![ui::btn("Back up the whole company file", Some(Message::BackupCompany))]);
+    ui::page(ui::h1("Import and export"), vec![], column![ui::card(imp), ui::card(exp)].spacing(14).max_width(1100).into())
 }
 
 // ---------------- Currencies ----------------

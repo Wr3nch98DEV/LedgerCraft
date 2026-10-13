@@ -129,6 +129,8 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::Currencies => crate::extras::currencies(app),
         Route::Budgets => crate::extras::budgets(app),
         Route::ExpenseClaims => crate::extras::claims(app, false),
+        Route::BankRules => crate::extras::bank_rules(app),
+        Route::ImportExport => crate::extras::import_export(app),
         Route::EnterTime => crate::desktop::enter_time(app),
         Route::Doc { .. } => doc::view(app),
         Route::ReceivePayment(_) | Route::PayBills | Route::Spend(_) | Route::Check(_) | Route::BankTx(_) | Route::Deposit => payments::view(app),
@@ -157,7 +159,7 @@ fn apps(app: &App) -> Element<'_, Message> {
         card("Email", "Send invoices, statements and reminders from your own mail server or a Gmail app password.", Some(("Email settings", Message::Nav(Route::Settings)))),
         card("Online payments", "Pay-now buttons on invoices come from a payment-gateway plugin (Stripe, PayPal…) — see PLUGINS.md in the LedgerCraft folder.", None),
         card("REST API", "Other software can read and write your books through LedgerCraft's API with a token — see API.md.", None),
-        card("Import your books", "Bring customers, suppliers, items, the chart of accounts and history across from your previous software (CSV import today; direct imports are on the plan).", Some(("Import", Message::Nav(Route::Settings)))),
+        card("Import your books", "Bring customers, suppliers, items, the chart of accounts and history across from your previous software (CSV today; direct imports from each product are on the plan).", Some(("Import", Message::Nav(Route::ImportExport)))),
     ].spacing(14).max_width(900).into())
 }
 

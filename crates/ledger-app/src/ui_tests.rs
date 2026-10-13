@@ -3173,3 +3173,42 @@ fn expense_claims_receipt_and_mileage() {
     assert_eq!(trip["total"], if app.country() == "US" { 2814 } else { 3696 });
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn bank_rules_and_import_export() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = desktop_app("rules-ie");
+    // Bank rule: money out whose payee contains "BP" → Motor Vehicle Expenses.
+    let t = app.update(Message::Nav(Route::BankRules)); settle(&mut app, t);
+    let before = app.data.as_ref().unwrap().as_array().unwrap().len();
+    press(&mut app, "New rule");
+    let _ = app.update(Message::Extras(X::BrField("field", "payee".into())));
+    let _ = app.update(Message::Extras(X::BrField("value", "BP".into())));
+    let motor = app.lk.account_opts(|a| a["type"] == "EXPENSE")[0].clone();
+    let _ = app.update(Message::Extras(X::BrAccount(motor)));
+    press(&mut app, "Save rule");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let rules = app.data.as_ref().unwrap().as_array().unwrap().clone();
+    assert_eq!(rules.len(), before + 1);
+    let r = rules.iter().find(|r| r["name"] == "Code BP").expect("named from the condition");
+    let t = app.update(Message::Extras(X::BrDelete(r["id"].as_i64().unwrap()))); settle(&mut app, t);
+    assert_eq!(app.data.as_ref().unwrap().as_array().unwrap().len(), before);
+    // Import contacts: preview first, then import.
+    let t = app.update(Message::Nav(Route::ImportExport)); settle(&mut app, t);
+    let _ = app.update(Message::Extras(X::IeWhat("contacts")));
+    let csv = "ContactName,EmailAddress\nHarbour Lights Pty Ltd,accounts@harbourlights.test\nSeaside Dental,admin@seaside.test\n";
+    let t = app.update(Message::Extras(X::IePicked(Ok(Some(("contacts.csv".into(), csv.into())))))); settle(&mut app, t);
+    let p = app.extras.ie_preview.clone().expect("preview");
+    assert_eq!(p["created"], 2, "{p}");
+    assert!(!app.be.call_now("contacts.list", json!({"filter": "all"})).unwrap().to_string().contains("Seaside Dental"), "nothing changed by the preview");
+    let t = app.update(Message::Extras(X::IeRun)); settle(&mut app, t);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert!(app.be.call_now("contacts.list", json!({"filter": "all"})).unwrap().to_string().contains("Seaside Dental"));
+    // Export.
+    let file = std::env::temp_dir().join("lc-test-output").join("contacts.csv");
+    let _ = std::fs::remove_file(&file);
+    let t = app.update(Message::Extras(X::IeExport("contacts"))); settle(&mut app, t);
+    assert!(std::fs::read_to_string(&file).unwrap().contains("Seaside Dental"));
+    let _ = std::fs::remove_file(file);
+    let _ = std::fs::remove_dir_all(dir);
+}
