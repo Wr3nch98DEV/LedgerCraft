@@ -505,6 +505,10 @@ fn settings_users_and_email() {
     let _ = app.update(Message::Nav(Route::Settings));
     let users = app.be.call_now("users.list", json!({}));
     let _ = app.update(Message::Settings(S::Users(users)));
+    // Account and settings ▸ Users.
+    let msgs = click(&app, "Users");
+    assert!(matches!(msgs.as_slice(), [Message::Settings(S::Cat("Users"))]), "{msgs:?}");
+    let _ = app.update(Message::Settings(S::Cat("Users")));
     // Add a user.
     let msgs = click(&app, "Add user");
     assert!(matches!(msgs.as_slice(), [Message::Settings(S::AddUser)]), "{msgs:?}");
@@ -3652,5 +3656,24 @@ fn online_customer_page_tabs() {
     assert!(app.data.as_ref().unwrap()["history"].as_array().unwrap().iter().any(|h| h["text"] == "Call before delivery"));
     press(&mut app, "Statements");
     assert_eq!(app.route, Route::Statements);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn xero_organisation_settings_tiles() {
+    let (mut app, dir) = desktop_app("xero-tiles");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Xero)); settle(&mut app, t);
+    let t = app.update(Message::Nav(Route::Settings)); settle(&mut app, t);
+    press(&mut app, "Financial settings");
+    assert_eq!(app.settings.cat, Some("Financial settings"));
+    assert!(!click_fails(&app, "Organisation settings"));
+    press(&mut app, "Organisation settings");
+    assert_eq!(app.settings.cat, None);
+    press(&mut app, "Tracking categories");
+    assert_eq!(app.route, Route::ClassList);
+    // Coming back opens on the tiles again.
+    let _ = app.update(Message::Settings(crate::settings::Msg::Cat("Users")));
+    let t = app.update(Message::Nav(Route::Settings)); settle(&mut app, t);
+    assert_eq!(app.settings.cat, None);
     let _ = std::fs::remove_dir_all(dir);
 }

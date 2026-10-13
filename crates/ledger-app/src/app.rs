@@ -455,6 +455,8 @@ impl App {
 
     /// Navigate, remembering where we came from.
     pub fn go(&mut self, r: Route) -> Task<Message> {
+        // Xero's Organisation settings opens on its tiles.
+        if r == Route::Settings && self.route != Route::Settings && self.skin == Skin::Xero && !self.desktop() { self.settings.cat = None; }
         // Desktop shows a customer/vendor inside its Center.
         let r = match r {
             Route::Contact(id) if self.desktop() => {

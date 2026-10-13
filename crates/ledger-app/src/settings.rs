@@ -5,7 +5,7 @@ use crate::backend::Reply;
 use crate::icons::icon;
 use crate::theme::{self, Skin, t};
 use crate::ui::{self, BOLD};
-use iced::widget::{button, column, container, pick_list, row, scrollable, text};
+use iced::widget::{Space, button, column, container, pick_list, row, scrollable, text};
 use iced::{Alignment, Element, Fill, Length, Task};
 use serde_json::{Value, json};
 
@@ -76,7 +76,10 @@ pub struct State {
 
 #[derive(Debug, Clone)]
 pub enum Msg {
-    Cat(&'static str), Edit, Field(usize, String), Save, Saved(Result<Value, String>), Cancel,
+    Cat(&'static str),
+    /// Xero: back to the Organisation settings tiles.
+    Tiles,
+    Edit, Field(usize, String), Save, Saved(Result<Value, String>), Cancel,
     Users(Reply), AddUser, UName(String), UEmail(String), UPassword(String), URole(RoleOpt), SaveUser, UserSaved(Reply), SetActive(i64, bool),
     TfaBegin, TfaBegun(Reply), TfaCode(String), TfaConfirm, TfaDisable, TfaDone(Reply, &'static str), LockEdit, LockField(usize, String), LockSave, LockSaved(Reply), EditSmtp, Smtp(usize, String), SmtpTls(Security), SaveSmtp, SmtpSaved(Reply), TestTo(String), SendTest, TestSent(Reply),
 }
@@ -90,6 +93,7 @@ pub fn load(app: &mut App) -> Task<Message> {
 pub fn update(app: &mut App, m: Msg) -> Task<Message> {
     match m {
         Msg::Cat(c) => { app.settings.cat = Some(c); Task::none() }
+        Msg::Tiles => { app.settings.cat = None; Task::none() }
         Msg::Edit => { app.settings.values = FIELDS.iter().map(|(k, _)| app.setting(k)).collect(); app.settings.editing = true; Task::none() }
         Msg::Field(n, v) => { if let Some(x) = app.settings.values.get_mut(n) { *x = v; } Task::none() }
         Msg::Cancel => { app.settings.tfa = None; app.settings.lock = None; app.settings.editing = false; app.settings.adding = false; app.settings.smtp_editing = false; Task::none() }
@@ -463,9 +467,80 @@ fn desk_view(app: &App) -> Element<'_, Message> {
     ].spacing(10).padding(14).height(Fill).into()
 }
 
+/// QuickBooks Online's Account and settings tabs.
+const QBO_TABS: [&str; 5] = ["Company", "Sales", "Users", "Advanced", "Layout"];
+
+/// Xero's Organisation settings tiles: (title, description, a section here or a screen elsewhere).
+fn xero_tiles() -> Vec<(&'static str, &'static str, Result<&'static str, Route>)> {
+    vec![
+        ("Organisation details", "Name, address, tax number and financial year", Ok("Organisation details")),
+        ("Users", "Who can use these books, their roles and two-step verification", Ok("Users")),
+        ("Email settings", "How invoices, quotes and statements are emailed", Ok("Email settings")),
+        ("Financial settings", "Lock dates and the closing date", Ok("Financial settings")),
+        ("Layout and appearance", "Xero, QuickBooks Online or QuickBooks Desktop style; dark or light", Ok("Layout and appearance")),
+        ("Data and backups", "Back up, restore and where your books are stored", Ok("Data and backups")),
+        ("Chart of accounts", "The accounts you code transactions to", Err(Route::Chart)),
+        ("Tracking categories", "Departments, locations or anything you track", Err(Route::ClassList)),
+        ("Currencies", "Foreign currencies and exchange rates", Err(Route::Currencies)),
+        ("Invoice settings", "Branding themes for invoices, quotes and statements", Err(Route::Templates)),
+        ("Bank rules", "Fill in bank statement lines automatically", Err(Route::BankRules)),
+        ("Payroll settings", "Pay calendars, leave and pay items", Err(Route::PayrollSettings)),
+        ("Repeating transactions", "Invoices and bills that repeat", Err(Route::Memorized)),
+        ("History and notes", "The audit trail of changes", Err(Route::AuditLog)),
+    ]
+}
+
 pub fn view(app: &App) -> Element<'_, Message> {
     if app.desktop() { return desk_view(app); }
-    let body = column![layout_section(app), appearance_section(app), company_section(app), closing_section(app), users_card(app), security_card(app), email_card(app), file_section(app)].spacing(16);
     let title = app.term("settings");
-    ui::page(ui::h1(title), vec![], container(body).max_width(980).into())
+    let body: Element<Message> = match app.skin {
+        Skin::QuickBooks => {
+            let cur = app.settings.cat.filter(|c| QBO_TABS.contains(c)).unwrap_or("Company");
+            let mut tabs = column![].spacing(2).width(180);
+            for c in QBO_TABS {
+                let on = c == cur;
+                tabs = tabs.push(button(text(c).size(14).font(if on { BOLD } else { iced::Font::DEFAULT })).style(theme::list_item(on)).padding([8, 12]).width(Fill).on_press(Message::Settings(Msg::Cat(c))));
+            }
+            let content: Element<Message> = match cur {
+                "Sales" => column![email_card(app)].spacing(16).into(),
+                "Users" => column![users_card(app), security_card(app)].spacing(16).into(),
+                "Advanced" => column![closing_section(app), file_section(app)].spacing(16).into(),
+                "Layout" => column![layout_section(app), appearance_section(app)].spacing(16).into(),
+                _ => column![company_section(app)].spacing(16).into(),
+            };
+            row![tabs, container(content).max_width(900).width(Fill)].spacing(20).into()
+        }
+        Skin::Xero => {
+            match app.settings.cat.filter(|c| xero_tiles().iter().any(|t| t.2 == Ok(*c))) {
+                Some(cur) => {
+                    let content: Element<Message> = match cur {
+                        "Users" => column![users_card(app), security_card(app)].spacing(16).into(),
+                        "Email settings" => email_card(app),
+                        "Financial settings" => closing_section(app),
+                        "Layout and appearance" => column![layout_section(app), appearance_section(app)].spacing(16).into(),
+                        "Data and backups" => file_section(app),
+                        _ => company_section(app),
+                    };
+                    let back = row![ui::link("Organisation settings", Message::Settings(Msg::Tiles)), text("›").size(14).color(t().faint), text(cur).size(14)].spacing(6).align_y(Alignment::Center);
+                    return ui::page(column![back, ui::h1(cur.to_string())].spacing(4).into(), vec![], container(content).max_width(980).into());
+                }
+                None => {
+                    let k = t();
+                    let tiles: Vec<Element<Message>> = xero_tiles().into_iter().map(|(title, desc, go)| {
+                        let msg = match go { Ok(c) => Message::Settings(Msg::Cat(c)), Err(r) => Message::Nav(r) };
+                        button(column![text(title).size(15).font(BOLD).color(k.accent), text(desc).size(13).color(k.muted)].spacing(4))
+                            .style(theme::row_btn).padding(14).width(Fill).on_press(msg).into()
+                    }).collect();
+                    let mut grid = column![].spacing(10);
+                    let mut it = tiles.into_iter();
+                    loop {
+                        let (Some(a), b, c) = (it.next(), it.next(), it.next()) else { break };
+                        grid = grid.push(row![ui::card(a), b.map(ui::card).unwrap_or_else(|| Space::new().width(Fill).into()), c.map(ui::card).unwrap_or_else(|| Space::new().width(Fill).into())].spacing(10));
+                    }
+                    return ui::page(ui::h1("Organisation settings"), vec![], grid.into());
+                }
+            }
+        }
+    };
+    ui::page(ui::h1(title), vec![], body)
 }
