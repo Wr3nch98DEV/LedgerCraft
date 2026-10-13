@@ -61,7 +61,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
     match m {
         Msg::RunPayroll => {
             let cal = app.data.as_ref().and_then(|d| d["settings"]["calendars"][0]["id"].as_i64());
-            let Some(cal) = cal else { return app.toast("Set up a pay calendar first (web version → Payroll settings)", true) };
+            let Some(cal) = cal else { return app.toast("Set up a pay schedule first (Payroll settings)", true) };
             app.people.busy = true;
             app.be.call("payroll.createPayRun", json!({"calendar_id": cal}), |r| Message::People(Msg::Created(r, "run")))
         }
@@ -178,7 +178,12 @@ pub fn pay_run(app: &App) -> Element<'_, Message> {
             column![ui::label("Pay employees from"), pick_list(app.lk.bank_opts(), app.people.bank.clone(), |b| Message::People(Msg::Bank(b))).padding([7, 10]).text_size(14).style(theme::pick).width(240)].spacing(5),
             column![Space::new().height(18), ui::btn_primary("Submit payroll", if app.people.busy { None } else { Some(Message::People(Msg::Submit(id))) })],
         ].spacing(12).align_y(Alignment::End)).padding([12, 16]).style(theme::topbar).width(Fill).into()
-    } else { ui::muted("Posted to the books. Payslips, emailing and bank files are in the web version for now.") };
+    } else {
+        let bank = match app.country().as_str() { "GB" | "UK" => "BACS bank file", "US" => "NACHA (ACH) file", _ => "ABA bank file" };
+        row![ui::muted("Posted to the books."), ui::hspace(),
+            ui::btn("Print payslips", Some(Message::Extras(crate::extras::Msg::PayslipsPdf(id)))),
+            ui::btn(bank, Some(Message::Extras(crate::extras::Msg::PayrunBankFile(id))))].spacing(8).align_y(Alignment::Center).into()
+    };
     let title = format!("{} · {} – {}", r["number"].as_str().unwrap_or(""), app.d(r["period_start"].as_str().unwrap_or("")), app.d(r["period_end"].as_str().unwrap_or("")));
     ui::page(column![ui::link("Payroll", Message::Nav(Route::Payroll)), ui::h1(title)].spacing(4).into(), vec![ui::chip(if draft { "Draft" } else { "Paid" }, if draft { k.warn } else { k.ok })], column![
         ui::card(column![totals, ui::muted(format!("Pay date {}", app.d(r["payment_date"].as_str().unwrap_or(""))))].spacing(10)),

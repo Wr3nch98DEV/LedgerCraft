@@ -70,6 +70,7 @@ pub static FEATURES: &[Feature] = &[
     Feature { id: "payroll", go: || nav(Route::Payroll), online: ("payroll", "Employees"), xero: ("payroll", "Employees"), desktop: ("Employees", "Employee Center") },
     Feature { id: "pay_liabilities", go: || nav(Route::PayLiabilities), online: ("payroll", "Payroll tax"), xero: ("payroll", "Pay liabilities"), desktop: ("Employees", "Pay Liabilities") },
     Feature { id: "payroll_forms", go: || nav(Route::PayrollForms), online: ("payroll", "Filings"), xero: ("payroll", "Single Touch Payroll"), desktop: ("Employees", "Process Payroll Forms") },
+    Feature { id: "payroll_settings", go: || nav(Route::PayrollSettings), online: ("payroll", "Payroll settings"), xero: ("payroll", "Payroll settings"), desktop: ("Employees", "Payroll Setup") },
     Feature { id: "payroll_items", go: || nav(Route::PayrollItems), online: ("payroll", "Pay types"), xero: ("payroll", "Pay items"), desktop: ("Lists", "Payroll Item List") },
     Feature { id: "enter_time", go: || nav(Route::EnterTime), online: ("new:Employees", "Single time activity"), xero: ("payroll", "Timesheets"), desktop: ("Employees", "Enter Time") },
     Feature { id: "mileage", go: || nav(Route::Mileage), online: ("top", "Mileage"), xero: ("business", "Mileage claims"), desktop: ("Company", "Enter Vehicle Mileage…") },

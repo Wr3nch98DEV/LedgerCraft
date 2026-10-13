@@ -320,6 +320,53 @@ pub fn check(c: &Value, settings: &Value, fmt_date: &dyn Fn(&str) -> String) -> 
     p.finish()
 }
 
+/// Payslips for a pay run: one page per employee — earnings, tax, deductions, retirement, net pay, leave.
+pub fn payslips(run: &Value, settings: &Value, fmt_date: &dyn Fn(&str) -> String, retirement: &str) -> Vec<u8> {
+    let mut p = Pdf::new(settings["country"] == "US" || settings["country"] == "CA");
+    let (l, r) = (48.0, p.w - 48.0);
+    for s in run["payslips"].as_array().cloned().unwrap_or_default() {
+        p.new_page();
+        p.text(l, 64.0, 16.0, true, INK, st(settings, "org_name"));
+        p.text_right(r, 64.0, 18.0, true, INK, "Payslip");
+        p.text(l, 92.0, 12.0, true, INK, st(&s, "employee"));
+        p.text(l, 108.0, 9.5, false, MUTED, &format!("Pay period {} to {}", fmt_date(st(run, "period_start")), fmt_date(st(run, "period_end"))));
+        p.text(l, 121.0, 9.5, false, MUTED, &format!("Paid on {}", fmt_date(st(run, "payment_date"))));
+        p.text_right(r, 108.0, 9.5, false, MUTED, &format!("Pay run {}", st(run, "number")));
+        let mut y = 156.0;
+        p.rect(l, y - 12.0, r - l, 18.0, BAND);
+        p.text(l + 6.0, y, 9.0, true, MUTED, "DESCRIPTION");
+        p.text_right(r - 150.0, y, 9.0, true, MUTED, "HOURS / UNITS");
+        p.text_right(r - 6.0, y, 9.0, true, MUTED, "AMOUNT");
+        y += 20.0;
+        // Earnings, deductions and reimbursements; tax and employer amounts are in the totals below.
+        for ln in s["lines"].as_array().cloned().unwrap_or_default().into_iter().filter(|ln| matches!(ln["kind"].as_str(), Some("EARNINGS" | "DEDUCTION" | "REIMBURSEMENT"))) {
+            let kind = st(&ln, "kind");
+            let label = match kind { "DEDUCTION" => format!("{} (deduction)", st(&ln, "name")), "REIMBURSEMENT" => format!("{} (reimbursement)", st(&ln, "name")), _ => st(&ln, "name").to_string() };
+            p.text(l + 6.0, y, 10.0, false, INK, &label);
+            if let Some(u) = ln["units_e2"].as_i64().filter(|u| *u != 0) { p.text_right(r - 150.0, y, 10.0, false, INK, &format!("{:.2}", u as f64 / 100.0)); }
+            let amt = i(&ln["amount"]);
+            p.text_right(r - 6.0, y, 10.0, false, INK, &money(if kind == "DEDUCTION" { -amt } else { amt }));
+            y += 15.0;
+        }
+        y += 8.0;
+        p.line(r - 220.0, y - 10.0, r, 0.6, RULE);
+        for (label, v, bold) in [("Gross pay", i(&s["gross"]), false), ("Tax withheld", -i(&s["tax"]), false), ("Deductions", -i(&s["deductions"]), false), ("Reimbursements", i(&s["reimbursements"]), false), ("Net pay", i(&s["net"]), true)] {
+            if v == 0 && !bold { continue; }
+            p.text(r - 220.0, y, if bold { 11.0 } else { 10.0 }, bold, INK, label);
+            p.text_right(r - 6.0, y, if bold { 11.0 } else { 10.0 }, bold, INK, &money(v));
+            y += 15.0;
+        }
+        if i(&s["super"]) != 0 { p.text(l, y + 10.0, 9.5, false, MUTED, &format!("{retirement} paid by the employer: {}", money(i(&s["super"])))); y += 14.0; }
+        let leave = s["leave"].as_array().cloned().unwrap_or_default();
+        if !leave.is_empty() {
+            y += 22.0;
+            p.text(l, y, 10.0, true, INK, "Leave this pay period");
+            for lv in leave { y += 14.0; p.text(l + 6.0, y, 9.5, false, INK, st(&lv, "name")); p.text_right(r - 6.0, y, 9.5, false, INK, &format!("accrued {:.2} h · taken {:.2} h", i(&lv["accrued_e2"]) as f64 / 100.0, i(&lv["taken_e2"]) as f64 / 100.0)); }
+        }
+    }
+    p.finish()
+}
+
 /// A report as a PDF table (landscape when there are many columns).
 pub fn report(rep: &Value, title: &str, letter: bool, relabel: &dyn Fn(&str) -> String) -> Vec<u8> {
     let cols: Vec<String> = rep["columns"].as_array().cloned().unwrap_or_default().iter().map(|c| c.as_str().unwrap_or("").to_string()).collect();

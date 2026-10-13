@@ -3280,3 +3280,63 @@ fn new_user_with_password_and_tracked_item_online() {
     assert_eq!(it["is_tracked"], 1);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn payroll_settings_schedules_and_leave() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = desktop_app("paysettings");
+    let t = app.update(Message::Nav(Route::PayrollSettings)); settle(&mut app, t);
+    let cals = app.data.as_ref().unwrap()["calendars"].as_array().unwrap().len();
+    let leaves = app.data.as_ref().unwrap()["leave_types"].as_array().unwrap().len();
+    let _ = app.update(Message::Extras(X::PsCalNew(true)));
+    let _ = app.update(Message::Extras(X::PsCalField(0, "Weekly casuals".into())));
+    let _ = app.update(Message::Extras(X::PsCalFreq("WEEKLY")));
+    let t = app.update(Message::Extras(X::PsCalSave)); settle(&mut app, t);
+    let _ = app.update(Message::Extras(X::PsLeaveNew(true)));
+    let _ = app.update(Message::Extras(X::PsLeaveField(0, "Long service leave".into())));
+    let _ = app.update(Message::Extras(X::PsLeaveField(1, "32.5".into())));
+    let t = app.update(Message::Extras(X::PsLeaveSave)); settle(&mut app, t);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let d = app.data.as_ref().unwrap();
+    assert_eq!(d["calendars"].as_array().unwrap().len(), cals + 1);
+    assert!(d["calendars"].as_array().unwrap().iter().any(|c| c["name"] == "Weekly casuals" && c["frequency"] == "WEEKLY"));
+    assert_eq!(d["leave_types"].as_array().unwrap().len(), leaves + 1);
+    assert!(d["leave_types"].as_array().unwrap().iter().any(|l| l["name"] == "Long service leave" && l["accrual_hours_per_year_e2"] == 3250));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn payslips_and_bank_file() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = desktop_app("payslips");
+    let cal = app.be.call_now("payroll.settings", json!({})).unwrap()["calendars"][0]["id"].as_i64().unwrap();
+    let run = app.be.call_now("payroll.createPayRun", json!({"calendar_id": cal})).unwrap()["id"].as_i64().unwrap();
+    app.be.call_now("payroll.post", json!({"id": run, "bank_account_id": app.lk.bank_opts()[0].id})).unwrap();
+    let number = app.be.call_now("payroll.payRun", json!({"id": run})).unwrap()["number"].as_str().unwrap().to_string();
+    let employees = app.be.call_now("payroll.payRun", json!({"id": run})).unwrap()["payslips"].as_array().unwrap().len();
+    let t = app.update(Message::Nav(Route::PayRun(run))); settle(&mut app, t);
+    press(&mut app, "Print payslips");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let file = std::env::temp_dir().join("lc-test-output").join(format!("Payslips {number}.pdf"));
+    let pdf = std::fs::read(&file).expect("payslips written");
+    assert_eq!(String::from_utf8_lossy(&pdf).matches("/Type /Page /").count(), employees, "a page per employee");
+    let _ = std::fs::remove_file(file);
+    // Bank file: written, or a clear message about missing bank details.
+    app.toasts.clear();
+    let t = app.update(Message::Extras(X::PayrunBankFile(run))); settle(&mut app, t);
+    let toast = app.toasts.last().cloned().expect("a result");
+    assert!(!toast.2 || toast.1.contains("bank account details"), "{toast:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+#[ignore]
+fn sample_payslip_pdf() {
+    let (app, dir) = desktop_app("payslip-sample");
+    let cal = app.be.call_now("payroll.settings", json!({})).unwrap()["calendars"][0]["id"].as_i64().unwrap();
+    let run = app.be.call_now("payroll.createPayRun", json!({"calendar_id": cal})).unwrap()["id"].as_i64().unwrap();
+    let r = app.be.call_now("payroll.payRun", json!({"id": run})).unwrap();
+    let st = app.be.call_now("settings.get", json!({})).unwrap();
+    std::fs::write(std::env::temp_dir().join("lc-payslip-sample.pdf"), crate::pdf::payslips(&r, &st, &|x| crate::ui::date(x, crate::ui::DateStyle::Us), "401(k)")).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -52,6 +52,9 @@ pub struct State {
     pub ie_date: String,
     /// Custom reports: the report being built — name, monthly columns, and its rows.
     pub cr_new: Option<(String, bool, Vec<CrRow>)>,
+    /// Payroll settings: new pay schedule (name, frequency, first period start) and leave type (name, hours a year).
+    pub ps_cal: Option<(String, &'static str, String)>,
+    pub ps_leave: Option<(String, String)>,
 }
 
 /// A custom report row: a heading, a total of account types, or a formula over earlier rows.
@@ -69,6 +72,8 @@ pub enum Msg {
     BrNew(bool), BrField(&'static str, String), BrBank(Opt), BrAccount(Opt), BrContact(Opt), BrSave, BrDelete(i64),
     IeWhat(&'static str), IePick, IePicked(Result<Option<(String, String)>, String>), IePreview(Reply), IeRun, IeDate(String), IeExport(&'static str), IeExported(Result<String, String>),
     CrNew(bool), CrName(String), CrMonthly(bool), CrAdd(&'static str), CrLabel(usize, String), CrType(usize, &'static str), CrExpr(usize, String), CrSign(usize, bool), CrRemove(usize), CrSave, CrDelete(i64),
+    PsCalNew(bool), PsCalField(u8, String), PsCalFreq(&'static str), PsCalSave, PsLeaveNew(bool), PsLeaveField(u8, String), PsLeaveSave,
+    PayslipsPdf(i64), PayrunBankFile(i64), Saved(Result<String, String>, &'static str),
     Done(Reply, &'static str),
 }
 
@@ -93,6 +98,7 @@ pub fn load(app: &mut App) -> Task<Message> {
         Route::ExpenseClaims => call(app, "receipts.list", json!({})),
         Route::BankRules => call(app, "bankRules.list", json!({})),
         Route::CustomReports => call(app, "layouts.list", json!({})),
+        Route::PayrollSettings => call(app, "payroll.settings", json!({})),
         Route::ImportExport => { app.data = Some(json!({})); Task::none() }
         Route::Budgets => {
             let be = app.be.clone();
@@ -363,12 +369,61 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.be.call("layouts.save", json!({"name": name.trim(), "kind": "CUSTOM", "definition": {"rows": rows, "monthly": monthly}}), |r| Message::Extras(Msg::Done(r, "Custom report saved")))
         }
         Msg::CrDelete(id) => app.be.call("layouts.delete", json!({"id": id}), |r| Message::Extras(Msg::Done(r, "Custom report deleted"))),
+        // ---- payroll settings ----
+        Msg::PsCalNew(on) => { app.extras.ps_cal = on.then(|| (String::new(), "FORTNIGHTLY", app.d(&ui::today_iso()))); Task::none() }
+        Msg::PsCalField(f, v) => { if let Some(c) = app.extras.ps_cal.as_mut() { if f == 0 { c.0 = v } else { c.2 = ui::date_keys(&c.2, &v, style) } } Task::none() }
+        Msg::PsCalFreq(fq) => { if let Some(c) = app.extras.ps_cal.as_mut() { c.1 = fq; } Task::none() }
+        Msg::PsCalSave => {
+            let Some((name, freq, start)) = app.extras.ps_cal.clone() else { return Task::none() };
+            if name.trim().is_empty() { return app.toast("Name the pay schedule", true); }
+            let Some(start) = ui::to_iso(&start, style) else { return app.toast("Check the first pay period's start date", true) };
+            app.be.call("payroll.saveCalendar", json!({"name": name.trim(), "frequency": freq, "start_date": start}), |r| Message::Extras(Msg::Done(r, "Pay schedule added")))
+        }
+        Msg::PsLeaveNew(on) => { app.extras.ps_leave = on.then(|| (String::new(), String::new())); Task::none() }
+        Msg::PsLeaveField(f, v) => { if let Some(l) = app.extras.ps_leave.as_mut() { if f == 0 { l.0 = v } else { l.1 = v } } Task::none() }
+        Msg::PsLeaveSave => {
+            let Some((name, hours)) = app.extras.ps_leave.clone() else { return Task::none() };
+            if name.trim().is_empty() { return app.toast("Name the leave type", true); }
+            if !hours.trim().is_empty() && hours.trim().parse::<f64>().is_err() { return app.toast("Hours a year should be a number", true); }
+            app.be.call("payroll.saveLeaveType", json!({"name": name.trim(), "hours": hours.trim()}), |r| Message::Extras(Msg::Done(r, "Leave type added")))
+        }
+        // ---- pay run files ----
+        Msg::PayslipsPdf(id) => {
+            let be = app.be.clone();
+            let style = app.date_style();
+            let open = !cfg!(test);
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<String, String> {
+                    let run = be.call_now("payroll.payRun", json!({"id": id}))?;
+                    let st = be.call_now("settings.get", json!({}))?;
+                    let ret = be.call_now("payroll.settings", json!({}))?["retirement_label"].as_str().unwrap_or("Retirement").to_string();
+                    let bytes = crate::pdf::payslips(&run, &st, &|x| ui::date(x, style), &ret);
+                    let path = crate::pdf::output_dir().join(["Payslips ", run["number"].as_str().unwrap_or("pay run"), ".pdf"].concat());
+                    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+                    if open { crate::pdf::open_file(&path); }
+                    Ok(path.display().to_string())
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Extras(Msg::Saved(r, "Payslips saved to")))
+        }
+        Msg::PayrunBankFile(id) => {
+            let st = app.be.st.clone();
+            let format = match app.country().as_str() { "GB" | "UK" => "BACS", "US" => "NACHA", _ => "ABA" };
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<String, String> {
+                    let (name, text) = { let g = st.org.lock().unwrap(); g.as_ref().ok_or("no company open")?.ledger.payrun_file(id, format).map_err(|e| e.to_string())? };
+                    let path = crate::pdf::output_dir().join(name);
+                    std::fs::write(&path, text).map_err(|e| e.to_string())?;
+                    Ok(path.display().to_string())
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, |r| Message::Extras(Msg::Saved(r, "Bank file saved to — upload it to your bank:")))
+        }
+        Msg::Saved(r, what) => match r { Ok(p) => app.toast(format!("{what} {p}"), false), Err(e) => app.toast(e, true) },
         // ---- common ----
         Msg::Done(r, what) => {
             app.extras.busy = false;
             match r {
                 Ok(_) => {
-                    app.extras.fa_new = None; app.extras.fa_dispose = None; app.extras.bud_cells.clear(); app.extras.cl_new = None; app.extras.br_new = None; app.extras.cr_new = None;
+                    app.extras.fa_new = None; app.extras.fa_dispose = None; app.extras.bud_cells.clear(); app.extras.cl_new = None; app.extras.br_new = None; app.extras.cr_new = None; app.extras.ps_cal = None; app.extras.ps_leave = None;
                     if app.route == Route::ImportExport { app.extras.ie_file = None; app.extras.ie_preview = None; }
                     let t1 = if what.is_empty() { Task::none() } else { app.toast(what, false) };
                     Task::batch([t1, app.load(), app.load_lookups()])
@@ -762,6 +817,39 @@ pub fn custom_reports(app: &App) -> Element<'_, Message> {
     }).collect();
     body = body.push(ui::table(&[ui::col("Report", 50), ui::col("Saved", 20), ui::col("", 20)], rows, "No custom reports yet — New report builds one from account totals and formulas."));
     ui::page(ui::h1("Custom reports"), vec![ui::btn_primary("New report", Some(Message::Extras(Msg::CrNew(true))))], body.max_width(1100).into())
+}
+
+// ---------------- Payroll settings ----------------
+
+pub const FREQUENCIES: [(&str, &str); 5] = [("WEEKLY", "Weekly"), ("FORTNIGHTLY", "Fortnightly"), ("FOURWEEKLY", "Every four weeks"), ("MONTHLY", "Monthly"), ("QUARTERLY", "Quarterly")];
+
+pub fn payroll_settings(app: &App) -> Element<'_, Message> {
+    let Some(d) = app.data.as_ref().filter(|d| d["calendars"].is_array()) else { return loading() };
+    let freq_word = |f: &str| if app.country() == "US" && f == "FORTNIGHTLY" { "Every other week" } else { label_of(&FREQUENCIES, f) };
+    let cal_rows = d["calendars"].as_array().cloned().unwrap_or_default().iter().map(|c| (vec![ui::cell(c["name"].as_str().unwrap_or("").to_string()),
+        ui::cell_muted(freq_word(c["frequency"].as_str().unwrap_or(""))), ui::cell_muted(app.d(c["start_date"].as_str().unwrap_or("")))], None)).collect();
+    let mut cals = column![row![ui::h2(if app.skin == crate::theme::Skin::Xero { "Calendars" } else { "Pay schedules" }), ui::hspace(), ui::btn("Add", Some(Message::Extras(Msg::PsCalNew(true))))].align_y(Alignment::Center),
+        ui::table(&[ui::col("Name", 30), ui::col("How often", 20), ui::col("First period starts", 20)], cal_rows, "No pay schedules yet.")].spacing(10);
+    if let Some((name, freq, start)) = &app.extras.ps_cal {
+        cals = cals.push(container(row![input("NAME", name, 220.0, |x| Message::Extras(Msg::PsCalField(0, x))),
+            column![lbl("HOW OFTEN"), pick_list(FREQUENCIES.iter().map(|f| f.1).collect::<Vec<_>>(), Some(label_of(&FREQUENCIES, freq)), |l: &'static str| Message::Extras(Msg::PsCalFreq(code_of(&FREQUENCIES, l))))
+                .padding([5, 7]).text_size(13).style(theme::pick).width(200)].spacing(3),
+            input("FIRST PERIOD STARTS", start, 160.0, |x| Message::Extras(Msg::PsCalField(1, x))), ui::hspace(),
+            ui::btn_primary("Save", Some(Message::Extras(Msg::PsCalSave))), ui::btn("Cancel", Some(Message::Extras(Msg::PsCalNew(false))))].spacing(12).align_y(Alignment::End)).padding(12).style(theme::soft));
+    }
+    let leave_rows = d["leave_types"].as_array().cloned().unwrap_or_default().iter().map(|l| (vec![ui::cell(l["name"].as_str().unwrap_or("").to_string()),
+        ui::num(format!("{:.2}", l["accrual_hours_per_year_e2"].as_i64().unwrap_or(0) as f64 / 100.0))], None)).collect();
+    let mut leave = column![row![ui::h2(if app.country() == "US" { "Paid time off" } else { "Leave types" }), ui::hspace(), ui::btn("Add", Some(Message::Extras(Msg::PsLeaveNew(true))))].align_y(Alignment::Center),
+        ui::table(&[ui::col("Name", 40), ui::coln("Hours accrued a year (full-time)", 30)], leave_rows, "No leave types yet.")].spacing(10);
+    if let Some((name, hours)) = &app.extras.ps_leave {
+        leave = leave.push(container(row![input("NAME", name, 260.0, |x| Message::Extras(Msg::PsLeaveField(0, x))), input("HOURS A YEAR", hours, 140.0, |x| Message::Extras(Msg::PsLeaveField(1, x))), ui::hspace(),
+            ui::btn_primary("Save", Some(Message::Extras(Msg::PsLeaveSave))), ui::btn("Cancel", Some(Message::Extras(Msg::PsLeaveNew(false))))].spacing(12).align_y(Alignment::End)).padding(12).style(theme::soft));
+    }
+    let juris = d["jurisdiction_name"].as_str().unwrap_or("").to_string();
+    ui::page(ui::h1("Payroll settings"), vec![ui::btn("Pay items", Some(Message::Nav(Route::PayrollItems)))], column![
+        ui::card(cals), ui::card(leave),
+        ui::card(column![ui::h2("Tax"), ui::muted(format!("Payroll tax rules: {juris}. {}", d["disclaimer"].as_str().unwrap_or("")))].spacing(6)),
+    ].spacing(14).max_width(1000).into())
 }
 
 // ---------------- Currencies ----------------
