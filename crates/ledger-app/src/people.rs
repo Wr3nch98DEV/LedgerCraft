@@ -291,11 +291,12 @@ pub fn projects(app: &App) -> Element<'_, Message> {
             ui::num(format!("{:.1} h", i(&s["minutes"]) as f64 / 60.0)), ui::cell_money(i(&s["costs"])), ui::cell_money(to_invoice),
             ui::num(ui::money(i(&s["profit"]))),
             if to_invoice > 0 { ui::link("Invoice", Message::People(Msg::InvoiceProject(id))) } else { ui::cell("") },
-        ], None)
+        ], Some(Message::Extras(crate::extras::Msg::PjSelect(id))))
     }).collect();
-    ui::page(ui::h1("Projects"), vec![], column![
+    ui::page(ui::h1("Projects"), vec![ui::btn_primary("New project", Some(Message::Extras(crate::extras::Msg::PjNew(true))))], column![
+        crate::extras::project_new(app),
         ui::table(&[col("Project", 22), col("Customer", 18), col("Status", 12), coln("Time", 9), coln("Costs", 11), coln("Unbilled", 11), coln("Profit", 11), col("", 8)], rows, "No projects yet."),
-        ui::muted("Time tracking, tasks and expenses for projects are entered in the web version for now; invoicing unbilled work works here."),
+        crate::extras::project_panel(app),
     ].spacing(14).into())
 }
 

@@ -55,6 +55,13 @@ pub struct State {
     /// Payroll settings: new pay schedule (name, frequency, first period start) and leave type (name, hours a year).
     pub ps_cal: Option<(String, &'static str, String)>,
     pub ps_leave: Option<(String, String)>,
+    /// Projects: the project open below the list (its projects.get), and the forms on it.
+    pub pj_sel: Option<i64>,
+    pub pj_detail: Option<Value>,
+    pub pj_new: Option<(String, Option<Opt>)>,
+    pub pj_task: Option<(String, &'static str, String)>,
+    pub pj_time: Option<(Option<Opt>, String, String, String)>,
+    pub pj_cost: Option<(String, String, String, bool)>,
 }
 
 /// A custom report row: a heading, a total of account types, or a formula over earlier rows.
@@ -74,6 +81,10 @@ pub enum Msg {
     CrNew(bool), CrName(String), CrMonthly(bool), CrAdd(&'static str), CrLabel(usize, String), CrType(usize, &'static str), CrExpr(usize, String), CrSign(usize, bool), CrRemove(usize), CrSave, CrDelete(i64),
     PsCalNew(bool), PsCalField(u8, String), PsCalFreq(&'static str), PsCalSave, PsLeaveNew(bool), PsLeaveField(u8, String), PsLeaveSave,
     PayslipsPdf(i64), PayrunBankFile(i64), Saved(Result<String, String>, &'static str),
+    PjSelect(i64), PjLoaded(Reply), PjNew(bool), PjNewName(String), PjNewCustomer(Opt), PjCreate,
+    PjTaskOpen(bool), PjTaskField(u8, String), PjTaskKind(&'static str), PjTaskSave,
+    PjTimeOpen(bool), PjTimeTask(Opt), PjTimeField(u8, String), PjTimeSave,
+    PjCostOpen(bool), PjCostField(u8, String), PjCostCharge(bool), PjCostSave, PjStatus(&'static str), PjDone(Reply, &'static str),
     Done(Reply, &'static str),
 }
 
@@ -418,6 +429,62 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             }, |r| Message::Extras(Msg::Saved(r, "Bank file saved to — upload it to your bank:")))
         }
         Msg::Saved(r, what) => match r { Ok(p) => app.toast(format!("{what} {p}"), false), Err(e) => app.toast(e, true) },
+        // ---- projects ----
+        Msg::PjSelect(id) => { app.extras.pj_sel = Some(id); app.be.call("projects.get", json!({"id": id}), |r| Message::Extras(Msg::PjLoaded(r))) }
+        Msg::PjLoaded(r) => match r { Ok(v) => { app.extras.pj_detail = Some(v); Task::none() } Err(e) => app.toast(e, true) },
+        Msg::PjNew(on) => { app.extras.pj_new = on.then(|| (String::new(), None)); Task::none() }
+        Msg::PjNewName(v) => { if let Some(n) = app.extras.pj_new.as_mut() { n.0 = v; } Task::none() }
+        Msg::PjNewCustomer(o) => { if let Some(n) = app.extras.pj_new.as_mut() { n.1 = Some(o); } Task::none() }
+        Msg::PjCreate => {
+            let Some((name, cust)) = app.extras.pj_new.clone() else { return Task::none() };
+            if name.trim().is_empty() { return app.toast("Name the project", true); }
+            app.extras.pj_new = None;
+            app.be.call("projects.save", json!({"project": {"name": name.trim(), "contact_id": cust.map(|c| c.id)}}), |r| Message::Extras(Msg::Done(r, "Project created")))
+        }
+        Msg::PjTaskOpen(on) => { app.extras.pj_task = on.then(|| (String::new(), "TIME", String::new())); Task::none() }
+        Msg::PjTaskField(f, v) => { if let Some(t) = app.extras.pj_task.as_mut() { if f == 0 { t.0 = v } else { t.2 = v } } Task::none() }
+        Msg::PjTaskKind(k) => { if let Some(t) = app.extras.pj_task.as_mut() { t.1 = k; } Task::none() }
+        Msg::PjTaskSave => {
+            let (Some(pid), Some((name, kind, rate))) = (app.extras.pj_sel, app.extras.pj_task.clone()) else { return Task::none() };
+            if name.trim().is_empty() { return app.toast("Name the task", true); }
+            if ui::parse_money(&rate).is_none() { return app.toast(if kind == "FIXED" { "Enter the fixed price" } else { "Enter the hourly rate" }, true); }
+            app.extras.pj_task = None;
+            app.be.call("projects.saveTask", json!({"project_id": pid, "task": {"name": name.trim(), "charge_type": kind, "rate": rate.replace(',', "")}}), |r| Message::Extras(Msg::PjDone(r, "Task added")))
+        }
+        Msg::PjTimeOpen(on) => { app.extras.pj_time = on.then(|| (None, app.d(&ui::today_iso()), String::new(), String::new())); Task::none() }
+        Msg::PjTimeTask(o) => { if let Some(t) = app.extras.pj_time.as_mut() { t.0 = Some(o); } Task::none() }
+        Msg::PjTimeField(f, v) => { if let Some(t) = app.extras.pj_time.as_mut() { match f { 0 => t.1 = ui::date_keys(&t.1, &v, style), 1 => t.2 = v, _ => t.3 = v } } Task::none() }
+        Msg::PjTimeSave => {
+            let (Some(pid), Some((task, date, dur, notes))) = (app.extras.pj_sel, app.extras.pj_time.clone()) else { return Task::none() };
+            let Some(task) = task else { return app.toast("Choose the task", true) };
+            let Some(minutes) = crate::desktop::parse_duration(&dur) else { return app.toast("Enter the time as h:mm (1:30) or hours (1.5)", true) };
+            let Some(date) = ui::to_iso(&date, style) else { return app.toast("Check the date", true) };
+            app.extras.pj_time = None;
+            app.be.call("projects.addTime", json!({"project_id": pid, "task_id": task.id, "date": date, "minutes": minutes, "description": notes.trim()}), |r| Message::Extras(Msg::PjDone(r, "Time added")))
+        }
+        Msg::PjCostOpen(on) => { app.extras.pj_cost = on.then(|| (app.d(&ui::today_iso()), String::new(), String::new(), true)); Task::none() }
+        Msg::PjCostField(f, v) => { if let Some(c) = app.extras.pj_cost.as_mut() { match f { 0 => c.0 = ui::date_keys(&c.0, &v, style), 1 => c.1 = v, _ => c.2 = v } } Task::none() }
+        Msg::PjCostCharge(on) => { if let Some(c) = app.extras.pj_cost.as_mut() { c.3 = on; } Task::none() }
+        Msg::PjCostSave => {
+            let (Some(pid), Some((date, desc, amount, charge))) = (app.extras.pj_sel, app.extras.pj_cost.clone()) else { return Task::none() };
+            if ui::parse_money(&amount).unwrap_or(0) <= 0 { return app.toast("Enter the amount", true); }
+            let Some(date) = ui::to_iso(&date, style) else { return app.toast("Check the date", true) };
+            app.extras.pj_cost = None;
+            app.be.call("projects.addCost", json!({"project_id": pid, "cost": {"date": date, "description": desc.trim(), "amount": amount.replace(',', ""), "chargeable": charge}}), |r| Message::Extras(Msg::PjDone(r, "Expense added")))
+        }
+        Msg::PjStatus(st) => {
+            let Some(p) = app.extras.pj_detail.clone() else { return Task::none() };
+            app.be.call("projects.save", json!({"id": p["id"], "project": {"name": p["name"], "contact_id": p["contact_id"], "deadline": p["deadline"], "status": st}}),
+                |r| Message::Extras(Msg::PjDone(r, "Project updated")))
+        }
+        Msg::PjDone(r, what) => match r {
+            Ok(_) => {
+                let t1 = app.toast(what, false);
+                let t2 = match app.extras.pj_sel { Some(id) => app.be.call("projects.get", json!({"id": id}), |r| Message::Extras(Msg::PjLoaded(r))), None => Task::none() };
+                Task::batch([t1, t2, app.load()])
+            }
+            Err(e) => app.toast(e, true),
+        },
         // ---- common ----
         Msg::Done(r, what) => {
             app.extras.busy = false;
@@ -850,6 +917,66 @@ pub fn payroll_settings(app: &App) -> Element<'_, Message> {
         ui::card(cals), ui::card(leave),
         ui::card(column![ui::h2("Tax"), ui::muted(format!("Payroll tax rules: {juris}. {}", d["disclaimer"].as_str().unwrap_or("")))].spacing(6)),
     ].spacing(14).max_width(1000).into())
+}
+
+// ---------------- Projects ----------------
+
+/// The New project form above the projects list.
+pub fn project_new(app: &App) -> Element<'_, Message> {
+    let Some((name, cust)) = &app.extras.pj_new else { return iced::widget::Space::new().into() };
+    ui::card(row![input("PROJECT NAME", name, 300.0, |x| Message::Extras(Msg::PjNewName(x))),
+        column![lbl("CUSTOMER"), pick_list(app.lk.contact_opts(true), cust.clone(), |o| Message::Extras(Msg::PjNewCustomer(o))).placeholder("Choose a customer").padding([5, 7]).text_size(13).style(theme::pick).width(260)].spacing(3),
+        iced::widget::Space::new().width(iced::Fill), ui::btn_primary("Create", Some(Message::Extras(Msg::PjCreate))), ui::btn("Cancel", Some(Message::Extras(Msg::PjNew(false))))].spacing(14).align_y(Alignment::End))
+}
+
+/// The selected project: tasks, time and expenses, with forms to add each.
+pub fn project_panel(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(p) = app.extras.pj_detail.as_ref().filter(|p| p["id"].as_i64() == app.extras.pj_sel) else {
+        return ui::muted("Select a project to see and add its tasks, time and expenses.");
+    };
+    let tasks = p["tasks"].as_array().cloned().unwrap_or_default();
+    let task_rows = tasks.iter().map(|t| (vec![ui::cell(t["name"].as_str().unwrap_or("").to_string()),
+        ui::cell_muted(if t["charge_type"] == "FIXED" { "Fixed price" } else { "Hourly" }), ui::cell_money(t["rate_e2"].as_i64().unwrap_or(0) / 100)], None)).collect();
+    let mut tcol = column![row![ui::h2("Tasks"), ui::hspace(), ui::btn("Add task", Some(Message::Extras(Msg::PjTaskOpen(true))))].align_y(Alignment::Center),
+        ui::table(&[ui::col("Task", 40), ui::col("Charged", 20), ui::coln("Rate / price", 20)], task_rows, "No tasks yet — add one to record time against it.")].spacing(8);
+    if let Some((name, kind, rate)) = &app.extras.pj_task {
+        tcol = tcol.push(container(row![input("TASK", name, 240.0, |x| Message::Extras(Msg::PjTaskField(0, x))),
+            column![lbl("CHARGED"), pick_list(vec!["Hourly", "Fixed price"], Some(if *kind == "FIXED" { "Fixed price" } else { "Hourly" }), |l: &'static str| Message::Extras(Msg::PjTaskKind(if l == "Hourly" { "TIME" } else { "FIXED" })))
+                .padding([5, 7]).text_size(13).style(theme::pick).width(140)].spacing(3),
+            input(if *kind == "FIXED" { "PRICE" } else { "RATE PER HOUR" }, rate, 130.0, |x| Message::Extras(Msg::PjTaskField(1, x))), ui::hspace(),
+            ui::btn_primary("Save", Some(Message::Extras(Msg::PjTaskSave))), ui::btn("Cancel", Some(Message::Extras(Msg::PjTaskOpen(false))))].spacing(12).align_y(Alignment::End)).padding(12).style(theme::soft));
+    }
+    let time_rows = p["time"].as_array().cloned().unwrap_or_default().iter().map(|e| (vec![ui::cell_muted(app.d(e["date"].as_str().unwrap_or(""))),
+        ui::cell(e["task"].as_str().unwrap_or("").to_string()), ui::cell_muted(e["description"].as_str().unwrap_or("").to_string()),
+        ui::num(format!("{}:{:02}", e["minutes"].as_i64().unwrap_or(0) / 60, e["minutes"].as_i64().unwrap_or(0) % 60)),
+        ui::cell_muted(if e["invoiced_document_id"].is_null() { "Unbilled" } else { "Invoiced" })], None)).collect();
+    let mut time = column![row![ui::h2("Time"), ui::hspace(), ui::btn("Add time", if tasks.is_empty() { None } else { Some(Message::Extras(Msg::PjTimeOpen(true))) })].align_y(Alignment::Center),
+        ui::table(&[ui::col("Date", 14), ui::col("Task", 22), ui::col("Notes", 34), ui::coln("Time", 10), ui::col("", 12)], time_rows, "No time recorded.")].spacing(8);
+    if let Some((task, date, dur, notes)) = &app.extras.pj_time {
+        let topts: Vec<Opt> = tasks.iter().map(|t| Opt { id: t["id"].as_i64().unwrap_or(0), label: t["name"].as_str().unwrap_or("").to_string() }).collect();
+        time = time.push(container(row![column![lbl("TASK"), pick_list(topts, task.clone(), |o| Message::Extras(Msg::PjTimeTask(o))).placeholder("Task").padding([5, 7]).text_size(13).style(theme::pick).width(200)].spacing(3),
+            input("DATE", date, 130.0, |x| Message::Extras(Msg::PjTimeField(0, x))), input("TIME (H:MM)", dur, 110.0, |x| Message::Extras(Msg::PjTimeField(1, x))),
+            input("NOTES", notes, 260.0, |x| Message::Extras(Msg::PjTimeField(2, x))), ui::hspace(),
+            ui::btn_primary("Save", Some(Message::Extras(Msg::PjTimeSave))), ui::btn("Cancel", Some(Message::Extras(Msg::PjTimeOpen(false))))].spacing(12).align_y(Alignment::End)).padding(12).style(theme::soft));
+    }
+    let cost_rows = p["costs"].as_array().cloned().unwrap_or_default().iter().map(|c| (vec![ui::cell_muted(app.d(c["date"].as_str().unwrap_or(""))),
+        ui::cell(c["description"].as_str().unwrap_or("").to_string()), ui::cell_money(c["amount"].as_i64().unwrap_or(0)),
+        ui::cell_muted(if c["chargeable"].as_i64() == Some(1) { "Chargeable" } else { "Not chargeable" })], None)).collect();
+    let mut costs = column![row![ui::h2("Expenses"), ui::hspace(), ui::btn("Add expense", Some(Message::Extras(Msg::PjCostOpen(true))))].align_y(Alignment::Center),
+        ui::table(&[ui::col("Date", 14), ui::col("Description", 44), ui::coln("Amount", 14), ui::col("", 16)], cost_rows, "No expenses on this project.")].spacing(8);
+    if let Some((date, desc, amount, charge)) = &app.extras.pj_cost {
+        costs = costs.push(container(row![input("DATE", date, 130.0, |x| Message::Extras(Msg::PjCostField(0, x))), input("DESCRIPTION", desc, 280.0, |x| Message::Extras(Msg::PjCostField(1, x))),
+            input("AMOUNT", amount, 120.0, |x| Message::Extras(Msg::PjCostField(2, x))),
+            container(iced::widget::checkbox(*charge).label("Charge to customer").on_toggle(|v| Message::Extras(Msg::PjCostCharge(v))).text_size(13)).padding(iced::Padding { top: 16.0, ..Default::default() }), ui::hspace(),
+            ui::btn_primary("Save", Some(Message::Extras(Msg::PjCostSave))), ui::btn("Cancel", Some(Message::Extras(Msg::PjCostOpen(false))))].spacing(12).align_y(Alignment::End)).padding(12).style(theme::soft));
+    }
+    let closed = p["status"] == "CLOSED";
+    ui::card(column![
+        row![column![text(p["name"].as_str().unwrap_or("").to_string()).size(18).font(BOLD), text(p["contact_name"].as_str().unwrap_or("").to_string()).size(13).color(k.muted)].spacing(2), ui::hspace(),
+            ui::btn(if closed { "Reopen" } else { "Mark complete" }, Some(Message::Extras(Msg::PjStatus(if closed { "INPROGRESS" } else { "CLOSED" }))))].align_y(Alignment::Center),
+        tcol, time, costs,
+    ].spacing(16))
 }
 
 // ---------------- Currencies ----------------

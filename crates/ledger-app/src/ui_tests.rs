@@ -3340,3 +3340,41 @@ fn sample_payslip_pdf() {
     std::fs::write(std::env::temp_dir().join("lc-payslip-sample.pdf"), crate::pdf::payslips(&r, &st, &|x| crate::ui::date(x, crate::ui::DateStyle::Us), "401(k)")).unwrap();
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn projects_tasks_time_and_costs() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = desktop_app("projects");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Xero)); settle(&mut app, t);
+    let t = app.update(Message::Nav(Route::Projects)); settle(&mut app, t);
+    press(&mut app, "New project");
+    let _ = app.update(Message::Extras(X::PjNewName("Website rebuild".into())));
+    let _ = app.update(Message::Extras(X::PjNewCustomer(app.lk.contact_opts(true)[0].clone())));
+    let t = app.update(Message::Extras(X::PjCreate)); settle(&mut app, t);
+    let pid = app.data.as_ref().unwrap()["projects"].as_array().unwrap().iter().find(|p| p["name"] == "Website rebuild").unwrap()["id"].as_i64().unwrap();
+    let msgs = click(&app, "Website rebuild");
+    assert!(msgs.iter().any(|m| matches!(m, Message::Extras(X::PjSelect(x)) if *x == pid)), "{msgs:?}");
+    let t = app.update(Message::Extras(X::PjSelect(pid))); settle(&mut app, t);
+    // Task, time, expense.
+    let _ = app.update(Message::Extras(X::PjTaskOpen(true)));
+    let _ = app.update(Message::Extras(X::PjTaskField(0, "Design".into())));
+    let _ = app.update(Message::Extras(X::PjTaskField(1, "150".into())));
+    let t = app.update(Message::Extras(X::PjTaskSave)); settle(&mut app, t);
+    let task = app.extras.pj_detail.as_ref().unwrap()["tasks"][0].clone();
+    assert_eq!(task["name"], "Design");
+    let _ = app.update(Message::Extras(X::PjTimeOpen(true)));
+    let _ = app.update(Message::Extras(X::PjTimeTask(crate::app::Opt { id: task["id"].as_i64().unwrap(), label: "Design".into() })));
+    let _ = app.update(Message::Extras(X::PjTimeField(1, "2:30".into())));
+    let t = app.update(Message::Extras(X::PjTimeSave)); settle(&mut app, t);
+    let _ = app.update(Message::Extras(X::PjCostOpen(true)));
+    let _ = app.update(Message::Extras(X::PjCostField(1, "Stock photos".into())));
+    let _ = app.update(Message::Extras(X::PjCostField(2, "80".into())));
+    let t = app.update(Message::Extras(X::PjCostSave)); settle(&mut app, t);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let p = app.extras.pj_detail.clone().unwrap();
+    assert_eq!(p["time"][0]["minutes"], 150);
+    assert_eq!(p["costs"][0]["amount"], 8000);
+    // 2.5 h × 150 + 80 chargeable = 455.00 to invoice.
+    assert_eq!(p["summary"]["to_invoice"], 45500, "{}", p["summary"]);
+    let _ = std::fs::remove_dir_all(dir);
+}
