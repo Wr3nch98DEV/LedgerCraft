@@ -250,6 +250,15 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
             let delayed: Vec<i64> = if p["close_delayed"].is_array() { de(&p["close_delayed"])? } else { vec![] };
             Ok(json!({"id": l.save_invoice_with_delayed(oi(p, "id"), &input, &delayed)?}))
         }
+        "customFields.list" => Ok(json!(l.list_custom_fields(p["entity"].as_str())?)),
+        "customFields.save" => { need("settings:write")?; Ok(json!({"id": l.save_custom_field(oi(p, "id"), s(p, "entity"), s(p, "name"), p["kind"].as_str().unwrap_or("TEXT"))?})) }
+        "customFields.delete" => { need("settings:write")?; l.delete_custom_field(id(p)?)?; ok() }
+        "customFields.values" => Ok(json!(l.custom_values(s(p, "entity"), i(p, "entity_id")?)?)),
+        "customFields.setValues" => {
+            let entity = s(p, "entity");
+            need(match entity { "item" => "inventory:write", "employee" => "payroll:write", _ => "contacts:write" })?;
+            l.set_custom_values(entity, i(p, "entity_id")?, p["values"].as_object().ok_or_else(|| ledger_core::Error::Validation("values must be an object".into()))?)?; ok()
+        }
         "revrec.list" => { need("accounting:read")?; Ok(json!(l.list_revenue_schedules()?)) }
         "revrec.create" => { need("accounting:write")?; Ok(json!({"id": l.create_revenue_schedule(i(p, "document_id")?, s(p, "start"), i(p, "months")?)?})) }
         "revrec.run" => { need("accounting:write")?; Ok(json!({"posted": l.recognise_revenue(s(p, "to"))?})) }

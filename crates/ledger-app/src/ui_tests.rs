@@ -4102,3 +4102,37 @@ fn revenue_recognition_in_the_app() {
     assert_eq!(tb["balanced"], true);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn custom_fields_on_contacts_and_items() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = desktop_app("customfields");
+    let t = app.update(Message::Nav(Route::CustomFields)); settle(&mut app, t);
+    for (entity, name, kind) in [("contact", "Region", "TEXT"), ("item", "Warranty months", "NUMBER")] {
+        let _ = app.update(Message::Extras(X::CfNew(Some(entity))));
+        let _ = app.update(Message::Extras(X::CfName(name.into())));
+        let _ = app.update(Message::Extras(X::CfKind(kind)));
+        press(&mut app, "Save field");
+        assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    }
+    assert_eq!(app.data.as_ref().unwrap().as_array().unwrap().len(), 2);
+    // Fill in Region on a customer.
+    let cust = app.lk.contact_opts(true)[0].id;
+    let t = app.update(Message::Nav(Route::EditContact(cust))); settle(&mut app, t);
+    let region = app.be.call_now("customFields.list", json!({"entity": "contact"})).unwrap()[0]["id"].as_i64().unwrap();
+    let _ = app.update(Message::Extras(X::CfValue(region, "North".into())));
+    press(&mut app, "Save custom fields");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert_eq!(app.be.call_now("contacts.get", json!({"id": cust})).unwrap()["custom_fields"][0]["value"], "North");
+    // A number field refuses text.
+    let item = app.lk.items[0]["id"].as_i64().unwrap();
+    let t = app.update(Message::Nav(Route::EditItem(item))); settle(&mut app, t);
+    let warranty = app.be.call_now("customFields.list", json!({"entity": "item"})).unwrap()[0]["id"].as_i64().unwrap();
+    let _ = app.update(Message::Extras(X::CfValue(warranty, "lots".into())));
+    press(&mut app, "Save custom fields");
+    assert!(app.toasts.iter().any(|t| t.2 && t.1.contains("number")), "{:?}", app.toasts);
+    let _ = app.update(Message::Extras(X::CfValue(warranty, "24".into())));
+    press(&mut app, "Save custom fields");
+    assert_eq!(app.be.call_now("items.get", json!({"id": item})).unwrap()["custom_fields"][0]["value"], "24");
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -40,6 +40,7 @@ impl Ledger {
         it["movements"] = json!(util::query_json(&self.conn,
             "SELECT m.date, m.qty_e4, m.cost, m.source_type, m.source_id, m.journal_id FROM inventory_movements m WHERE m.item_id = ?1 ORDER BY m.date DESC, m.id DESC LIMIT 200", [id])
             .unwrap_or_default());
+        if !it.is_null() { it["custom_fields"] = json!(self.custom_values("item", id)?); }
         Ok(it)
     }
 

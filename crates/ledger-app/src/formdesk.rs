@@ -31,8 +31,15 @@ fn balance(app: &App, acc: &Option<Opt>) -> i64 {
 pub fn view<'a>(app: &'a App, s: &'a State) -> Element<'a, Message> {
     let body: Element<Message> = match &app.route {
         Route::NewContact(customer) => contact(app, s, *customer),
-        Route::EditContact(_) => contact(app, s, s.customer),
-        Route::NewProduct | Route::EditItem(_) => item(app, s),
+        Route::EditContact(id) => {
+            let fields = s.orig.as_ref().and_then(|o| o["custom_fields"].as_array()).map(|a| a.as_slice()).unwrap_or(&[]);
+            column![contact(app, s, s.customer), crate::extras::custom_values_card(app, "contact", *id, fields)].spacing(14).into()
+        }
+        Route::NewProduct => item(app, s),
+        Route::EditItem(id) => {
+            let fields = s.orig.as_ref().and_then(|o| o["custom_fields"].as_array()).map(|a| a.as_slice()).unwrap_or(&[]);
+            column![item(app, s), crate::extras::custom_values_card(app, "item", *id, fields)].spacing(14).into()
+        }
         Route::EditAccount(_) => account(app, s),
         Route::Transfer => transfer(app, s),
         _ => journal(app, s),

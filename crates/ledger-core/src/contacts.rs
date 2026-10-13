@@ -62,6 +62,7 @@ impl Ledger {
         let mut c = util::query_one_json(&self.conn, "SELECT * FROM contacts WHERE id = ?1", [id])?;
         c["people"] = json!(util::query_json(&self.conn, "SELECT * FROM contact_people WHERE contact_id = ?1 ORDER BY id", [id])?);
         c["groups"] = json!(util::query_json(&self.conn, "SELECT g.id, g.name FROM contact_groups g JOIN contact_group_members m ON m.group_id = g.id WHERE m.contact_id = ?1", [id])?);
+        c["custom_fields"] = json!(self.custom_values("contact", id)?);
         c["summary"] = util::query_one_json(&self.conn,
             "SELECT
                COALESCE(SUM(CASE WHEN type='ACCREC' AND status='AUTHORISED' THEN total-amount_paid-amount_credited END),0) AS receivable,

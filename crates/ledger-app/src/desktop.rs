@@ -1011,6 +1011,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::Locations => "Inventory Site List".into(),
         Route::Lots => "Lot Numbers & Serial Numbers".into(),
         Route::RevenueRecognition => "Revenue Recognition".into(),
+        Route::CustomFields => "Custom Fields".into(),
         Route::CustomReports => "Custom Reports".into(),
         Route::PayrollSettings => "Payroll Setup".into(),
         Route::BankTx(_) => if app.pay.as_ref().is_some_and(|s| !s.check) { "Enter Credit Card Charges".into() } else { "Write Checks".into() },
@@ -1066,7 +1067,7 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
             e("My Shortcuts", "", Some(Message::Desk(Msg::Pane(Pane::Shortcuts)))), sep(), e(if app.dark { "Light Mode" } else { "Dark Mode" }, "Alt+T", Some(Message::ToggleTheme)), sep(),
             e("Switch to QuickBooks Online-style layout", "", Some(Message::SetLayout(theme::Layout::Online))), e("Switch to Xero-style layout", "", Some(Message::SetLayout(theme::Layout::Xero)))],
         "Lists" => vec![e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)), e("Item List", "", nav(Route::Products)), e("Fixed Asset Item List", "", nav(Route::FixedAssets)), e("Currency List", "", nav(Route::Currencies)), e("Price Level List", "", nav(Route::PriceLevels)),
-            e("Sales Tax Code List", "", nav(Route::Taxes)), e("Payroll Item List", "", nav(Route::PayrollItems)), e("Class List", "", nav(Route::ClassList)), e("Other Names List", "", nav(Route::OtherNames)), e("Templates", "", nav(Route::Templates)), e("Memorized Transaction List", "Ctrl+T", nav(Route::Memorized))],
+            e("Sales Tax Code List", "", nav(Route::Taxes)), e("Payroll Item List", "", nav(Route::PayrollItems)), e("Class List", "", nav(Route::ClassList)), e("Other Names List", "", nav(Route::OtherNames)), e("Templates", "", nav(Route::Templates)), e("Custom Fields…", "", nav(Route::CustomFields)), e("Memorized Transaction List", "Ctrl+T", nav(Route::Memorized))],
         "Favorites" => {
             let mut v: Vec<(String, &'static str, Option<Message>)> = app.desk.favorites.iter().filter_map(|f| favorite_action(app, f).map(|m| (f.split(" ▸ ").last().unwrap_or(f).to_string(), "", Some(m)))).collect();
             if !v.is_empty() { v.push(sep()); }

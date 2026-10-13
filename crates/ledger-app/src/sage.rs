@@ -52,7 +52,7 @@ pub static PLACES: &[(&str, &str, &str)] = &[
     ("classes", "accounting", "Analysis Types"), ("recurring", "accounting", "Recurring Transactions"), ("find", "accounting", "Search Transactions"),
     // Settings (gear)
     ("settings", "settings", "Business Settings"), ("users", "settings", "Manage Users"), ("import_data", "settings", "Import Data"),
-    ("export_data", "settings", "Export Data"), ("templates", "settings", "Invoice Templates"), ("backup", "settings", "Back Up"),
+    ("export_data", "settings", "Export Data"), ("templates", "settings", "Invoice Templates"), ("custom_fields", "settings", "Custom Fields"), ("backup", "settings", "Back Up"),
     ("restore", "settings", "Restore"), ("attachments", "settings", "Attachments"), ("calendar", "settings", "Calendar"), ("reminders", "settings", "Reminders List"), ("help", "settings", "Help Centre"),
 ];
 

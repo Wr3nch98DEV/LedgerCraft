@@ -37,6 +37,10 @@ pub struct State {
     /// Locations: the new location (name, address), and the stock transfer being entered
     /// (item, from, to, quantity, date).
     pub loc_new: Option<(String, String)>,
+    /// Custom fields: the definition being added (record type, name, kind), and values being
+    /// typed on a record (field id → text).
+    pub cf_new: Option<(&'static str, String, &'static str)>,
+    pub cf_vals: BTreeMap<i64, String>,
     /// Revenue recognition: the invoice, months and start date for a new schedule, and the run-to date.
     pub rr_invoice: Option<Opt>,
     pub rr_months: String,
@@ -115,6 +119,7 @@ pub enum Msg {
     /// Payment reminders: on/off, a new level's days, add, switch a level on/off, delete, send due reminders now.
     PrNew(bool), PrField(usize, String), PrItem(Opt), PrLevel(Opt), PrSave, PrDelete(i64),
     LotItem(Opt), LotMode(&'static str), LotExpiry(i64, String, String), LotExpirySave(i64, String),
+    CfNew(Option<&'static str>), CfName(String), CfKind(&'static str), CfSave, CfDelete(i64), CfValue(i64, String), CfSaveValues(&'static str, i64),
     RrInvoice(Opt), RrMonths(String), RrStart(String), RrTo(String), RrCreate, RrRun,
     LocNew(bool), LocField(u8, String), LocSave, LocDelete(i64), TrItem(Opt), TrFrom(Opt), TrTo(Opt), TrQty(String), TrDate(String), TrMove,
     DunOn(bool), DunDays(String), DunAdd, DunActive(i64, i64, bool), DunDelete(i64), DunRun,
@@ -161,6 +166,7 @@ pub fn load(app: &mut App) -> Task<Message> {
         Route::BatchPayments => call(app, "batch.list", json!({})),
         Route::Locations => call(app, "locations.stock", json!({})),
         Route::Lots => call(app, "lots.list", json!({})),
+        Route::CustomFields => call(app, "customFields.list", json!({})),
         Route::RevenueRecognition => {
             let be = app.be.clone();
             Task::perform(async move {
@@ -234,6 +240,24 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             let p = json!({"line_ids": x.rc_sel.iter().collect::<Vec<_>>(), "account_id": x.rc_to_account.as_ref().map(|o| o.id), "tax_rate_id": x.rc_to_tax.as_ref().map(|o| o.id)});
             app.extras.busy = true;
             app.be.call("recode.apply", p, |r| Message::Extras(Msg::Done(r.map(|v| { let n = v["transactions"].as_i64().unwrap_or(0); json!({"n": n}) }), "Recoded — the transactions were reposted")))
+        }
+        // ---- custom fields ----
+        Msg::CfNew(e) => { app.extras.cf_new = e.map(|e| (e, String::new(), "TEXT")); Task::none() }
+        Msg::CfName(v) => { if let Some(n) = app.extras.cf_new.as_mut() { n.1 = v; } Task::none() }
+        Msg::CfKind(v) => { if let Some(n) = app.extras.cf_new.as_mut() { n.2 = v; } Task::none() }
+        Msg::CfSave => {
+            let Some((entity, name, kind)) = app.extras.cf_new.take() else { return Task::none() };
+            app.be.call("customFields.save", json!({"entity": entity, "name": name, "kind": kind}), |r| Message::Extras(Msg::Done(r, "Custom field added")))
+        }
+        Msg::CfDelete(id) => app.be.call("customFields.delete", json!({"id": id}), |r| Message::Extras(Msg::Done(r, "Custom field removed"))),
+        Msg::CfValue(id, v) => { app.extras.cf_vals.insert(id, v); Task::none() }
+        Msg::CfSaveValues(entity, id) => {
+            let vals: serde_json::Map<String, Value> = std::mem::take(&mut app.extras.cf_vals).into_iter().map(|(k, v)| {
+                // Dates are typed in the company's date style; the engine keeps them as YYYY-MM-DD.
+                let v = ui::to_iso(&v, style).filter(|_| v.contains('/') || v.contains(' ')).unwrap_or(v);
+                (k.to_string(), json!(v))
+            }).collect();
+            app.be.call("customFields.setValues", json!({"entity": entity, "entity_id": id, "values": vals}), |r| Message::Extras(Msg::Done(r, "Custom fields saved")))
         }
         // ---- revenue recognition ----
         Msg::RrInvoice(o) => { app.extras.rr_invoice = Some(o); Task::none() }
@@ -1058,6 +1082,62 @@ pub fn price_rules_section(app: &App) -> Element<'_, Message> {
     }).collect();
     col = col.push(ui::table(&[ui::col("Rule", 16), ui::col("Item", 18), ui::col("Customers", 16), ui::col("Quantity", 10), ui::col("Change", 9), ui::col("Dates", 20), ui::col("", 9)], rows, "No price rules yet."));
     col.push(ui::muted("The lowest matching price wins. Rules apply after the customer's price level, when an item goes on a sale or its quantity changes.")).into()
+}
+
+// ---------------- Custom fields ----------------
+
+const CF_ENTITIES: [(&str, &str); 3] = [("contact", "Customers & vendors"), ("item", "Products & services"), ("employee", "Employees")];
+const CF_KINDS: [(&str, &str); 4] = [("TEXT", "Text"), ("NUMBER", "Number"), ("DATE", "Date"), ("YESNO", "Yes / No")];
+
+/// Define custom fields for each kind of record.
+pub fn custom_fields(app: &App) -> Element<'_, Message> {
+    let Some(d) = &app.data else { return loading() };
+    let x = &app.extras;
+    let fields = d.as_array().cloned().unwrap_or_default();
+    let mut body = column![].spacing(14);
+    for (entity, title) in CF_ENTITIES {
+        let mut col = column![row![ui::h2(title), iced::widget::Space::new().width(Length::Fill), ui::btn("Add field", Some(Message::Extras(Msg::CfNew(Some(entity)))))].align_y(Alignment::Center)].spacing(6);
+        let mine: Vec<&Value> = fields.iter().filter(|f| f["entity"] == entity).collect();
+        if mine.is_empty() { col = col.push(ui::muted("No custom fields yet.")); }
+        for f in mine {
+            let id = f["id"].as_i64().unwrap_or(0);
+            col = col.push(row![text(f["name"].as_str().unwrap_or("").to_string()).size(14).width(Length::Fill), text(label_of(&CF_KINDS, f["kind"].as_str().unwrap_or(""))).size(13).color(t().muted).width(120),
+                ui::link("Remove", Message::Extras(Msg::CfDelete(id)))].spacing(10).align_y(Alignment::Center));
+        }
+        if let Some((e, name, kind)) = &x.cf_new {
+            if *e == entity {
+                col = col.push(row![input("FIELD NAME", name, 260.0, |v| Message::Extras(Msg::CfName(v))),
+                    column![lbl("TYPE"), pick_list(CF_KINDS.iter().map(|k| k.1).collect::<Vec<_>>(), Some(label_of(&CF_KINDS, kind)), |l: &'static str| Message::Extras(Msg::CfKind(code_of(&CF_KINDS, l))))
+                        .padding([5, 7]).text_size(13).style(theme::pick).width(140)].spacing(3),
+                    iced::widget::Space::new().width(Length::Fill), ui::btn("Cancel", Some(Message::Extras(Msg::CfNew(None)))), ui::btn_primary("Save field", Some(Message::Extras(Msg::CfSave)))].spacing(10).align_y(Alignment::End));
+            }
+        }
+        body = body.push(ui::card(col));
+    }
+    body = body.push(ui::muted("Custom fields show on each customer, vendor and item when you edit it."));
+    ui::page(ui::h1(if crate::vocab::acumatica() { "User-Defined Fields" } else { "Custom fields" }), vec![], body.max_width(900).into())
+}
+
+/// A record's custom fields to fill in (shown on Edit Customer/Vendor and Edit Item).
+pub fn custom_values_card<'a>(app: &'a App, entity: &'static str, id: i64, fields: &'a [Value]) -> Element<'a, Message> {
+    if fields.is_empty() { return iced::widget::Space::new().into(); }
+    let x = &app.extras;
+    let mut col = column![ui::h2("Custom fields")].spacing(8);
+    for f in fields {
+        let fid = f["id"].as_i64().unwrap_or(0);
+        let saved = f["value"].as_str().unwrap_or("").to_string();
+        let kind = f["kind"].as_str().unwrap_or("TEXT");
+        let shown = x.cf_vals.get(&fid).cloned().unwrap_or_else(|| if kind == "DATE" && !saved.is_empty() { app.d(&saved) } else { saved.clone() });
+        let field: Element<Message> = if kind == "YESNO" {
+            pick_list(vec!["Yes", "No"], (!shown.is_empty()).then_some(if shown == "Yes" { "Yes" } else { "No" }), move |v: &'static str| Message::Extras(Msg::CfValue(fid, v.to_string())))
+                .placeholder("—").padding([5, 7]).text_size(13).style(theme::pick).width(Length::Fixed(140.0)).into()
+        } else {
+            text_input(match kind { "NUMBER" => "0", "DATE" => "Date", _ => "" }, &shown).on_input(move |v| Message::Extras(Msg::CfValue(fid, v))).padding([5, 7]).size(13).style(theme::input).width(Length::Fixed(260.0)).into()
+        };
+        col = col.push(row![text(f["name"].as_str().unwrap_or("").to_string()).size(14).width(200), field].spacing(10).align_y(Alignment::Center));
+    }
+    col = col.push(row![iced::widget::Space::new().width(Length::Fill), ui::btn("Save custom fields", if x.cf_vals.is_empty() { None } else { Some(Message::Extras(Msg::CfSaveValues(entity, id))) })]);
+    ui::card(col)
 }
 
 // ---------------- Revenue recognition ----------------
