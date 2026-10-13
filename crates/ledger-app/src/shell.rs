@@ -127,6 +127,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::FixedAssets => crate::extras::fixed_assets(app),
         Route::AuditLog => crate::extras::audit_log(app),
         Route::Currencies => crate::extras::currencies(app),
+        Route::Budgets => crate::extras::budgets(app),
         Route::EnterTime => crate::desktop::enter_time(app),
         Route::Doc { .. } => doc::view(app),
         Route::ReceivePayment(_) | Route::PayBills | Route::Spend(_) | Route::Check(_) | Route::BankTx(_) | Route::Deposit => payments::view(app),

@@ -3119,3 +3119,27 @@ fn audit_details_are_readable() {
     assert_eq!(describe(&json!({"status": "AUTHORISED", "total": 5000, "type": "ACCRECCREDIT"})), "status: AUTHORISED · total: 50.00 · type: ACCRECCREDIT");
     assert_eq!(describe(&serde_json::Value::Null), "");
 }
+
+#[test]
+fn budgets_grid_edit_copy_across_and_new() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = desktop_app("budgets");
+    let t = app.update(Message::Nav(Route::Budgets)); settle(&mut app, t);
+    let b = app.data.as_ref().unwrap()["budget"].clone();
+    assert!(b["id"].is_number(), "demo budget shown");
+    let sales = app.lk.accounts.iter().find(|a| a["code"] == "200").unwrap()["id"].as_i64().unwrap();
+    // The demo budget's first month for 200 Sales is 14,000; change it and copy across.
+    let first = b["lines"].as_array().unwrap().iter().filter(|l| l["account_id"].as_i64() == Some(sales)).map(|l| l["period"].as_str().unwrap().to_string()).min().unwrap();
+    let _ = app.update(Message::Extras(X::BudCell(sales, first.clone(), "15000".into())));
+    let _ = app.update(Message::Extras(X::BudCopyAcross(sales)));
+    press(&mut app, "Save");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let after = app.be.call_now("budgets.get", json!({"id": b["id"]})).unwrap();
+    let sales_lines: Vec<i64> = after["lines"].as_array().unwrap().iter().filter(|l| l["account_id"].as_i64() == Some(sales)).map(|l| l["amount"].as_i64().unwrap()).collect();
+    assert!(sales_lines.len() >= 12 && sales_lines.iter().all(|a| *a == 1_500_000), "{sales_lines:?}");
+    // A new budget.
+    let _ = app.update(Message::Extras(X::BudNew(Some("Stretch".into()))));
+    let t = app.update(Message::Extras(X::BudCreate)); settle(&mut app, t);
+    assert_eq!(app.data.as_ref().unwrap()["budget"]["name"], "Stretch");
+    let _ = std::fs::remove_dir_all(dir);
+}

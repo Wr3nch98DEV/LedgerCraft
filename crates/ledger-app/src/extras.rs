@@ -27,6 +27,12 @@ pub struct State {
     pub fx_rate: Option<(String, String, String)>,
     pub fx_reval_date: String,
     pub busy: bool,
+    /// Budgets: the budget shown, the financial year (its first month, YYYY-MM), cells typed
+    /// (account id, period) → amount, and the name of a new budget being created.
+    pub bud_sel: Option<i64>,
+    pub bud_start: Option<String>,
+    pub bud_cells: BTreeMap<(i64, String), String>,
+    pub bud_new: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -35,6 +41,7 @@ pub enum Msg {
     FaDepDate(String), FaRun, FaDisposeOpen(i64), FaDisposeField(u8, String), FaDisposeProceeds(Opt), FaDisposeGain(Opt), FaDispose,
     AuditEntity(&'static str),
     FxEnable(String, bool), FxRateOpen(String), FxRateField(u8, String), FxRateSave, FxRevalDate(String), FxRevalue, FxFetch,
+    BudPick(i64), BudYear(i32), BudCell(i64, String, String), BudCopyAcross(i64), BudNew(Option<String>), BudCreate, BudSave, BudCreated(Reply),
     Done(Reply, &'static str),
 }
 
@@ -56,6 +63,18 @@ pub fn load(app: &mut App) -> Task<Message> {
             call(app, "audit.list", json!({"limit": 500, "entity": entity}))
         }
         Route::Currencies => call(app, "currencies.list", json!({})),
+        Route::Budgets => {
+            let be = app.be.clone();
+            let sel = app.extras.bud_sel;
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                    let list = be.call_now("budgets.list", json!({}))?;
+                    let id = sel.or_else(|| list.as_array().and_then(|a| a.first()).and_then(|b| b["id"].as_i64()));
+                    let budget = match id { Some(id) => be.call_now("budgets.get", json!({"id": id}))?, None => Value::Null };
+                    Ok(json!({"list": list, "budget": budget}))
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, move |r| Message::Loaded(g, r))
+        }
         _ => Task::none(),
     }
 }
@@ -147,12 +166,45 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.be.call("fx.revalue", json!({"date": date}), |r| Message::Extras(Msg::Done(r, "Foreign currency balances revalued")))
         }
         Msg::FxFetch => app.be.call("rates.fetch", json!({}), |r| Message::Extras(Msg::Done(r, "Exchange rates updated from the European Central Bank"))),
+        // ---- budgets ----
+        Msg::BudPick(id) => { app.extras.bud_sel = Some(id); app.extras.bud_cells.clear(); app.load() }
+        Msg::BudYear(step) => {
+            let start = budget_start(app);
+            let y: i32 = start[..4].parse().unwrap_or(2026);
+            app.extras.bud_start = Some(format!("{}{}", y + step, &start[4..]));
+            Task::none()
+        }
+        Msg::BudCell(acct, period, v) => { app.extras.bud_cells.insert((acct, period), v); Task::none() }
+        Msg::BudCopyAcross(acct) => {
+            let months = budget_months(app);
+            let first = cell_value(app, acct, &months[0]);
+            for m in &months[1..] { app.extras.bud_cells.insert((acct, m.clone()), first.clone()); }
+            Task::none()
+        }
+        Msg::BudNew(v) => { app.extras.bud_new = v; Task::none() }
+        Msg::BudCreate => {
+            let name = app.extras.bud_new.clone().unwrap_or_default().trim().to_string();
+            if name.is_empty() { return app.toast("Enter a name for the budget", true); }
+            app.be.call("budgets.save", json!({"name": name, "lines": []}), |r| Message::Extras(Msg::BudCreated(r)))
+        }
+        Msg::BudCreated(r) => match r {
+            Ok(v) => { app.extras.bud_new = None; app.extras.bud_sel = v["id"].as_i64(); app.extras.bud_cells.clear(); let t1 = app.toast("Budget created", false); Task::batch([t1, app.load()]) }
+            Err(e) => app.toast(e, true),
+        },
+        Msg::BudSave => {
+            let Some(b) = app.data.as_ref().map(|d| d["budget"].clone()).filter(|b| !b.is_null()) else { return app.toast("Create a budget first", true) };
+            let lines: Vec<Value> = app.extras.bud_cells.iter().map(|((a, p), v)| json!({"account_id": a, "period": p, "amount": if v.trim().is_empty() { "0".to_string() } else { v.replace(',', "") }})).collect();
+            if lines.is_empty() { return app.toast("Nothing has changed", true); }
+            if let Some(((_, p), v)) = app.extras.bud_cells.iter().find(|(_, v)| !v.trim().is_empty() && ui::parse_money(v).is_none()) { return app.toast(format!("{p}: \"{v}\" isn't an amount"), true); }
+            app.extras.busy = true;
+            app.be.call("budgets.save", json!({"id": b["id"], "name": b["name"], "tracking_option_id": b["tracking_option_id"], "lines": lines}), |r| Message::Extras(Msg::Done(r, "Budget saved")))
+        }
         // ---- common ----
         Msg::Done(r, what) => {
             app.extras.busy = false;
             match r {
                 Ok(_) => {
-                    app.extras.fa_new = None; app.extras.fa_dispose = None;
+                    app.extras.fa_new = None; app.extras.fa_dispose = None; app.extras.bud_cells.clear();
                     let t1 = if what.is_empty() { Task::none() } else { app.toast(what, false) };
                     Task::batch([t1, app.load(), app.load_lookups()])
                 }
@@ -274,6 +326,95 @@ pub fn audit_log(app: &App) -> Element<'_, Message> {
         filter,
         ui::table(&[ui::col("Date", 14), ui::col("User", 12), ui::col("Event", 10), ui::col("What", 16), ui::col("Details", 48)], rows, "Nothing has been recorded yet."),
         ui::muted("Every change is recorded with who made it and when; the log can't be edited."),
+    ].spacing(12).into())
+}
+
+// ---------------- Budgets ----------------
+
+/// First month (YYYY-MM) of the financial year shown: the chosen one, else the current one.
+fn budget_start(app: &App) -> String {
+    if let Some(s) = &app.extras.bud_start { return s.clone(); }
+    let end_month: u32 = app.setting("fy_end_month").parse().ok().filter(|m| (1..=12).contains(m)).unwrap_or(12);
+    let start_month = end_month % 12 + 1;
+    let today = ui::today_iso();
+    let (y, m): (i32, u32) = (today[..4].parse().unwrap_or(2026), today[5..7].parse().unwrap_or(1));
+    let year = if m >= start_month { y } else { y - 1 };
+    format!("{year}-{start_month:02}")
+}
+
+/// The 12 months (YYYY-MM) of the year shown.
+fn budget_months(app: &App) -> Vec<String> {
+    let start = budget_start(app);
+    let (y, m): (i32, u32) = (start[..4].parse().unwrap_or(2026), start[5..7].parse().unwrap_or(1));
+    (0..12).map(|i| { let t = (m - 1 + i) as i32; format!("{}-{:02}", y + t / 12, t % 12 + 1) }).collect()
+}
+
+/// A cell's amount as shown: what was typed, else what's saved.
+fn cell_value(app: &App, acct: i64, period: &str) -> String {
+    if let Some(v) = app.extras.bud_cells.get(&(acct, period.to_string())) { return v.clone(); }
+    app.data.as_ref().and_then(|d| d["budget"]["lines"].as_array().cloned()).unwrap_or_default().iter()
+        .find(|l| l["account_id"].as_i64() == Some(acct) && l["period"] == period).and_then(|l| l["amount"].as_i64()).filter(|a| *a != 0).map(ui::plain).unwrap_or_default()
+}
+
+/// Planning & Budgeting: income and expense accounts × the 12 months of a financial year.
+pub fn budgets(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = app.data.as_ref().filter(|d| d["list"].is_array()) else { return loading() };
+    let list: Vec<Opt> = d["list"].as_array().cloned().unwrap_or_default().iter().map(|b| Opt { id: b["id"].as_i64().unwrap_or(0), label: b["name"].as_str().unwrap_or("").to_string() }).collect();
+    let cur = d["budget"]["id"].as_i64().and_then(|id| list.iter().find(|o| o.id == id).cloned());
+    let months = budget_months(app);
+    let mon = |p: &str| { let m: usize = p[5..7].parse().unwrap_or(1); ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1].to_string() + " " + &p[2..4] };
+    let year_label = format!("{} – {}", mon(&months[0]), mon(&months[11]));
+    let mut top = row![
+        text("Budget").size(13), pick_list(list.clone(), cur.clone(), |o| Message::Extras(Msg::BudPick(o.id))).placeholder("No budgets yet").padding([5, 7]).text_size(13).style(theme::pick).width(240),
+        ui::btn("‹", Some(Message::Extras(Msg::BudYear(-1)))), text(year_label).size(13).font(BOLD), ui::btn("›", Some(Message::Extras(Msg::BudYear(1)))),
+        ui::hspace(),
+    ].spacing(10).align_y(Alignment::Center);
+    top = match &app.extras.bud_new {
+        Some(n) => top.push(text_input("New budget name", n).on_input(|v| Message::Extras(Msg::BudNew(Some(v)))).on_submit(Message::Extras(Msg::BudCreate)).padding([5, 7]).size(13).style(theme::input).width(220))
+            .push(ui::btn_primary("Create", Some(Message::Extras(Msg::BudCreate)))).push(ui::btn("Cancel", Some(Message::Extras(Msg::BudNew(None))))),
+        None => top.push(ui::btn("New budget", Some(Message::Extras(Msg::BudNew(Some(String::new())))))),
+    };
+    if cur.is_none() {
+        return ui::page(ui::h1("Budgets"), vec![], column![top, ui::card(ui::muted("Create a budget to plan income and expenses month by month, then compare with Budget vs. Actuals."))].spacing(12).into());
+    }
+    // Header row: account, 12 months, total.
+    let w_acct = 220.0; let w_cell = 78.0;
+    let mut head = row![text("ACCOUNT").size(11).font(BOLD).color(k.muted).width(Length::Fixed(w_acct))].spacing(4);
+    for m in &months { head = head.push(text(mon(m).to_uppercase()).size(11).font(BOLD).color(k.muted).width(Length::Fixed(w_cell)).align_x(iced::alignment::Horizontal::Right)); }
+    head = head.push(text("TOTAL").size(11).font(BOLD).color(k.muted).width(Length::Fixed(96.0)).align_x(iced::alignment::Horizontal::Right));
+    let mut grid = column![container(head).padding([6, 8]).style(theme::header_row)].spacing(0);
+    let pl = app.lk.accounts.iter().filter(|a| a["status"] == "ACTIVE" && matches!(a["class"].as_str(), Some("REVENUE" | "EXPENSE"))).cloned().collect::<Vec<_>>();
+    let (mut tin, mut tex) = (0i64, 0i64);
+    for (section, class) in [("Income", "REVENUE"), ("Expenses", "EXPENSE")] {
+        grid = grid.push(container(text(section).size(13).font(BOLD)).padding([8, 8]));
+        for a in pl.iter().filter(|a| a["class"] == class) {
+            let id = a["id"].as_i64().unwrap_or(0);
+            let mut r = row![row![iced::widget::button(text("→").size(11)).style(theme::ghost).padding([0, 4]).on_press(Message::Extras(Msg::BudCopyAcross(id))),
+                text(format!("{} {}", a["code"].as_str().unwrap_or(""), a["name"].as_str().unwrap_or(""))).size(12)].spacing(4).align_y(Alignment::Center).width(Length::Fixed(w_acct))].spacing(4).align_y(Alignment::Center);
+            let mut total = 0i64;
+            for m in &months {
+                let v = cell_value(app, id, m);
+                total += ui::parse_money(&v).unwrap_or(0);
+                let (acct, period) = (id, m.clone());
+                r = r.push(text_input("", &v).on_input(move |x| Message::Extras(Msg::BudCell(acct, period.clone(), x))).padding([3, 4]).size(12)
+                    .align_x(iced::alignment::Horizontal::Right).style(theme::cell_input).width(Length::Fixed(w_cell)));
+            }
+            if class == "REVENUE" { tin += total } else { tex += total }
+            r = r.push(text(if total == 0 { String::new() } else { ui::money(total) }).size(12).font(BOLD).width(Length::Fixed(96.0)).align_x(iced::alignment::Horizontal::Right));
+            grid = grid.push(container(r).padding([1, 8]));
+        }
+    }
+    let summary = row![text(format!("Income {}", ui::money(tin))).size(13), text(format!("Expenses {}", ui::money(tex))).size(13),
+        text(format!("Net {}", ui::money(tin - tex))).size(13).font(BOLD).color(if tin >= tex { k.ok } else { k.bad }), ui::hspace(),
+        ui::btn("Budget vs. Actuals", Some(Message::Nav(Route::Report("budget-variance".into())))),
+        ui::btn_primary("Save", if app.extras.busy { None } else { Some(Message::Extras(Msg::BudSave)) })].spacing(16).align_y(Alignment::Center);
+    ui::page(ui::h1("Budgets"), vec![], column![
+        top,
+        container(iced::widget::scrollable(grid).direction(iced::widget::scrollable::Direction::Both { vertical: Default::default(), horizontal: Default::default() }).style(theme::scroll).height(Length::Fill))
+            .style(theme::card).height(Length::Fill).clip(true),
+        summary,
+        ui::muted("Tip: → copies a row's first month across the year."),
     ].spacing(12).into())
 }
 

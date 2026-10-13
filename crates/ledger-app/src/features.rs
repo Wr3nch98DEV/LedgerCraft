@@ -85,6 +85,7 @@ pub static FEATURES: &[Feature] = &[
     Feature { id: "chart", go: || nav(Route::Chart), online: ("accounting", "Chart of accounts"), xero: ("accounting", "Chart of accounts"), desktop: ("Lists", "Chart of Accounts") },
     Feature { id: "fixed_assets", go: || nav(Route::FixedAssets), online: ("accounting", "Fixed assets"), xero: ("accounting", "Fixed assets"), desktop: ("Lists", "Fixed Asset Item List") },
     Feature { id: "audit_log", go: || nav(Route::AuditLog), online: ("gear:Tools", "Audit log"), xero: ("accounting", "History and notes"), desktop: ("Reports", "Audit Trail") },
+    Feature { id: "budgets", go: || nav(Route::Budgets), online: ("gear:Tools", "Budgeting"), xero: ("accounting", "Budget manager"), desktop: ("Company", "Planning & Budgeting: Set Up Budgets") },
     Feature { id: "currencies", go: || nav(Route::Currencies), online: ("gear:Lists", "Currencies"), xero: ("settings", "Currencies"), desktop: ("Lists", "Currency List") },
     Feature { id: "find", go: || nav(Route::Find), online: ("accounting", "Advanced search"), xero: ("accounting", "Find and recode"), desktop: ("Edit", "Find…") },
     Feature { id: "taxes", go: || nav(Route::Taxes), online: ("taxes", "Sales tax"), xero: ("accounting", "Tax returns"), desktop: ("Vendors", "Sales Tax: Manage Sales Tax…") },

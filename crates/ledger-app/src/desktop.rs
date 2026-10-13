@@ -989,6 +989,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::FixedAssets => "Fixed Asset Manager".into(),
         Route::AuditLog => "Audit Trail".into(),
         Route::Currencies => "Currency List".into(),
+        Route::Budgets => "Set Up Budgets".into(),
         Route::BankTx(_) => if app.pay.as_ref().is_some_and(|s| !s.check) { "Enter Credit Card Charges".into() } else { "Write Checks".into() },
         Route::EditContact(id) => if app.lk.contacts.iter().find(|c| c["id"].as_i64() == Some(*id)).is_some_and(|c| c["is_supplier"].as_i64() == Some(1) && c["is_customer"].as_i64() != Some(1)) { "Edit Vendor".into() } else { "Edit Customer".into() },
         Route::EnterTime => "Time/Enter Single Activity".into(),
@@ -1051,7 +1052,7 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
         }
         "Company" => vec![e("Home Page", "", nav(Route::Dashboard)), e("Company Snapshot", "", Some(Message::Desk(Msg::Insights(true)))), sep(), e("My Company", "", nav(Route::Settings)),
             e("Company Information…", "", nav(Route::Settings)), e("Set Up Users and Roles…", "", Some(Message::Desk(Msg::OpenPrefs("Users & Roles")))), e("Set Closing Date…", "", Some(Message::Desk(Msg::OpenPrefs("Accounting")))), sep(), e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)),
-            e("Make General Journal Entries…", "", nav(Route::Journal)), e("Enter Vehicle Mileage…", "", nav(Route::Mileage)), e("Calendar", "", nav(Route::Calendar)), e("Reminders", "", nav(Route::Reminders)), e("Documents", "", nav(Route::DocCenter))],
+            e("Make General Journal Entries…", "", nav(Route::Journal)), e("Planning & Budgeting: Set Up Budgets", "", nav(Route::Budgets)), e("Enter Vehicle Mileage…", "", nav(Route::Mileage)), e("Calendar", "", nav(Route::Calendar)), e("Reminders", "", nav(Route::Reminders)), e("Documents", "", nav(Route::DocCenter))],
         "Inventory" => vec![e("Inventory Center", "", nav(Route::InventoryCenter)), e("Item List", "", nav(Route::Products)), sep(), e("Create Purchase Orders", "", doc_new("PO")),
             e("Purchase Orders List", "", nav(Route::PurchaseOrders)), e("Receive Items", "", Some(Message::ReceiveItems)), e("Enter Bills Against Inventory", "", nav(Route::PurchaseOrders)), e("Adjust Quantity/Value on Hand…", "", nav(Route::AdjustInventory)), sep(), e("Build Assemblies…", "", nav(Route::BuildAssemblies))],
         "Customers" => vec![e("Customer Center", "Ctrl+J", nav(Route::Customers)), e("Job Costing Center", "", nav(Route::Projects)), sep(), e("Create Estimates", "", doc_new("QUOTE")), e("Create Sales Orders", "", doc_new("SALESORDER")),
