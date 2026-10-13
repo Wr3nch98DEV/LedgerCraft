@@ -66,6 +66,7 @@ pub static PLACES: &[(&str, &str, &str, &str)] = &[
     ("price_levels", "sales_orders", "Preferences", "Sales Prices"),
     ("purchase_order", "purchases", "Transactions", "Purchase Orders"),
     ("receive_items", "purchases", "Transactions", "Purchase Receipts"),
+    ("landed_costs", "purchases", "Transactions", "Landed Costs"),
     ("purchase_orders", "purchases", "Inquiries", "Purchase Orders List"),
     ("products", "inventory", "Profiles", "Stock and Non-Stock Items"),
     ("adjust_inventory", "inventory", "Transactions", "Adjustments"),

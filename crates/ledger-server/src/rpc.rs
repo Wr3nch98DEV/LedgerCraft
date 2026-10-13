@@ -250,6 +250,12 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
             let delayed: Vec<i64> = if p["close_delayed"].is_array() { de(&p["close_delayed"])? } else { vec![] };
             Ok(json!({"id": l.save_invoice_with_delayed(oi(p, "id"), &input, &delayed)?}))
         }
+        "landed.list" => { need("purchases:read")?; Ok(json!(l.list_landed_costs()?)) }
+        "landed.apply" => {
+            need("purchases:write")?;
+            let receipts: Vec<i64> = serde_json::from_value(p["receipts"].clone()).unwrap_or_default();
+            Ok(json!({"id": l.apply_landed_cost(i(p, "bill_id")?, &receipts, p["method"].as_str().unwrap_or("VALUE"))?}))
+        }
         "customFields.list" => Ok(json!(l.list_custom_fields(p["entity"].as_str())?)),
         "customFields.save" => { need("settings:write")?; Ok(json!({"id": l.save_custom_field(oi(p, "id"), s(p, "entity"), s(p, "name"), p["kind"].as_str().unwrap_or("TEXT"))?})) }
         "customFields.delete" => { need("settings:write")?; l.delete_custom_field(id(p)?)?; ok() }

@@ -41,6 +41,10 @@ pub struct State {
     /// typed on a record (field id → text).
     pub cf_new: Option<(&'static str, String, &'static str)>,
     pub cf_vals: BTreeMap<i64, String>,
+    /// Landed costs: the cost bill, the receipt bills ticked, and how to spread it.
+    pub lc_bill: Option<Opt>,
+    pub lc_receipts: std::collections::BTreeSet<i64>,
+    pub lc_qty: bool,
     /// Revenue recognition: the invoice, months and start date for a new schedule, and the run-to date.
     pub rr_invoice: Option<Opt>,
     pub rr_months: String,
@@ -119,6 +123,7 @@ pub enum Msg {
     /// Payment reminders: on/off, a new level's days, add, switch a level on/off, delete, send due reminders now.
     PrNew(bool), PrField(usize, String), PrItem(Opt), PrLevel(Opt), PrSave, PrDelete(i64),
     LotItem(Opt), LotMode(&'static str), LotExpiry(i64, String, String), LotExpirySave(i64, String),
+    LcBill(Opt), LcReceipt(i64), LcByQty(bool), LcApply,
     CfNew(Option<&'static str>), CfName(String), CfKind(&'static str), CfSave, CfDelete(i64), CfValue(i64, String), CfSaveValues(&'static str, i64),
     RrInvoice(Opt), RrMonths(String), RrStart(String), RrTo(String), RrCreate, RrRun,
     LocNew(bool), LocField(u8, String), LocSave, LocDelete(i64), TrItem(Opt), TrFrom(Opt), TrTo(Opt), TrQty(String), TrDate(String), TrMove,
@@ -167,6 +172,23 @@ pub fn load(app: &mut App) -> Task<Message> {
         Route::Locations => call(app, "locations.stock", json!({})),
         Route::Lots => call(app, "lots.list", json!({})),
         Route::CustomFields => call(app, "customFields.list", json!({})),
+        Route::LandedCosts => {
+            let be = app.be.clone();
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                    let applied = be.call_now("landed.list", json!({}))?;
+                    let bills: Vec<Value> = be.call_now("docs.list", json!({"type": "ACCPAY", "limit": 500}))?["rows"].as_array().cloned().unwrap_or_default()
+                        .into_iter().filter(|d| d["type"] == "ACCPAY" && matches!(d["status"].as_str(), Some("AUTHORISED" | "PAID"))).collect();
+                    // Bills that brought stock in.
+                    let mut with_stock = vec![];
+                    for b in &bills {
+                        let d = be.call_now("docs.get", json!({"id": b["id"]}))?;
+                        if d["lines"].as_array().is_some_and(|ls| ls.iter().any(|l| l["item_id"].is_i64())) { with_stock.push(b["id"].clone()); }
+                    }
+                    Ok(json!({"applied": applied, "bills": bills, "stock_bills": with_stock}))
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, move |r| Message::Loaded(g, r))
+        }
         Route::RevenueRecognition => {
             let be = app.be.clone();
             Task::perform(async move {
@@ -240,6 +262,17 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             let p = json!({"line_ids": x.rc_sel.iter().collect::<Vec<_>>(), "account_id": x.rc_to_account.as_ref().map(|o| o.id), "tax_rate_id": x.rc_to_tax.as_ref().map(|o| o.id)});
             app.extras.busy = true;
             app.be.call("recode.apply", p, |r| Message::Extras(Msg::Done(r.map(|v| { let n = v["transactions"].as_i64().unwrap_or(0); json!({"n": n}) }), "Recoded — the transactions were reposted")))
+        }
+        // ---- landed costs ----
+        Msg::LcBill(o) => { app.extras.lc_bill = Some(o); Task::none() }
+        Msg::LcReceipt(id) => { if !app.extras.lc_receipts.remove(&id) { app.extras.lc_receipts.insert(id); } Task::none() }
+        Msg::LcByQty(v) => { app.extras.lc_qty = v; Task::none() }
+        Msg::LcApply => {
+            let Some(bill) = app.extras.lc_bill.as_ref().map(|o| o.id) else { return app.toast("Choose the freight, duty or insurance bill", true) };
+            if app.extras.lc_receipts.is_empty() { return app.toast("Tick the bills for the stock it belongs to", true) }
+            let p = json!({"bill_id": bill, "receipts": app.extras.lc_receipts.iter().collect::<Vec<_>>(), "method": if app.extras.lc_qty { "QTY" } else { "VALUE" }});
+            app.extras.lc_bill = None; app.extras.lc_receipts.clear();
+            app.be.call("landed.apply", p, |r| Message::Extras(Msg::Done(r, "Landed cost added to the stock")))
         }
         // ---- custom fields ----
         Msg::CfNew(e) => { app.extras.cf_new = e.map(|e| (e, String::new(), "TEXT")); Task::none() }
@@ -1082,6 +1115,42 @@ pub fn price_rules_section(app: &App) -> Element<'_, Message> {
     }).collect();
     col = col.push(ui::table(&[ui::col("Rule", 16), ui::col("Item", 18), ui::col("Customers", 16), ui::col("Quantity", 10), ui::col("Change", 9), ui::col("Dates", 20), ui::col("", 9)], rows, "No price rules yet."));
     col.push(ui::muted("The lowest matching price wins. Rules apply after the customer's price level, when an item goes on a sale or its quantity changes.")).into()
+}
+
+// ---------------- Landed costs ----------------
+
+/// Spread a freight, duty or insurance bill over the stock it brought in.
+pub fn landed_costs(app: &App) -> Element<'_, Message> {
+    let Some(d) = &app.data else { return loading() };
+    let x = &app.extras;
+    let stock_ids: Vec<i64> = d["stock_bills"].as_array().cloned().unwrap_or_default().iter().filter_map(|v| v.as_i64()).collect();
+    let used: Vec<i64> = d["applied"].as_array().cloned().unwrap_or_default().iter().filter_map(|l| l["source_bill_id"].as_i64()).collect();
+    let bills = d["bills"].as_array().cloned().unwrap_or_default();
+    let label = |b: &Value| format!("{} — {} — {}", b["number"].as_str().unwrap_or(""), b["contact_name"].as_str().unwrap_or(""), ui::money(b["total"].as_i64().unwrap_or(0)));
+    let cost_bills: Vec<Opt> = bills.iter().filter(|b| b["id"].as_i64().is_some_and(|id| !stock_ids.contains(&id) && !used.contains(&id)))
+        .map(|b| Opt { id: b["id"].as_i64().unwrap_or(0), label: label(b) }).collect();
+    let mut receipts = column![lbl("STOCK IT BELONGS TO")].spacing(4);
+    let stock_bills: Vec<&Value> = bills.iter().filter(|b| b["id"].as_i64().is_some_and(|id| stock_ids.contains(&id))).collect();
+    if stock_bills.is_empty() { receipts = receipts.push(ui::muted("No bills with stock items yet.")); }
+    for b in stock_bills {
+        let id = b["id"].as_i64().unwrap_or(0);
+        receipts = receipts.push(iced::widget::checkbox(x.lc_receipts.contains(&id)).label(label(b)).on_toggle(move |_| Message::Extras(Msg::LcReceipt(id))).text_size(13));
+    }
+    let form = ui::card(column![
+        ui::h2("Add a landed cost"),
+        column![lbl("FREIGHT, DUTY OR INSURANCE BILL"), pick_list(cost_bills, x.lc_bill.clone(), |o| Message::Extras(Msg::LcBill(o))).placeholder("Choose a bill").padding([5, 7]).text_size(13).style(theme::pick).width(420)].spacing(3),
+        receipts,
+        row![iced::widget::checkbox(x.lc_qty).label("Spread by quantity (otherwise by value)").on_toggle(|v| Message::Extras(Msg::LcByQty(v))).text_size(13),
+            iced::widget::Space::new().width(Length::Fill), ui::btn_primary("Add to stock cost", Some(Message::Extras(Msg::LcApply)))].align_y(Alignment::Center),
+        ui::muted("The bill's cost moves from its expense account into inventory, raising the cost of the items it's spread over."),
+    ].spacing(10));
+    let rows = d["applied"].as_array().cloned().unwrap_or_default().iter().map(|l| {
+        let spread = l["lines"].as_array().cloned().unwrap_or_default().iter().map(|x| format!("{} {}", x["code"].as_str().unwrap_or(""), ui::money(x["amount"].as_i64().unwrap_or(0)))).collect::<Vec<_>>().join(", ");
+        (vec![ui::cell(app.d(l["date"].as_str().unwrap_or(""))), ui::cell(format!("{} — {}", l["number"].as_str().unwrap_or(""), l["contact_name"].as_str().unwrap_or(""))),
+            ui::cell_muted(if l["method"] == "QTY" { "By quantity" } else { "By value" }), ui::cell_money(l["amount"].as_i64().unwrap_or(0)), ui::cell_muted(spread)], None)
+    }).collect();
+    let body = column![form, ui::table(&[ui::col("Date", 12), ui::col("Bill", 24), ui::col("Spread", 12), ui::coln("Amount", 12), ui::col("Added to", 40)], rows, "No landed costs yet.")].spacing(14);
+    ui::page(ui::h1(if app.desktop() { "Landed Cost" } else { "Landed costs" }), vec![], body.max_width(1150).into())
 }
 
 // ---------------- Custom fields ----------------

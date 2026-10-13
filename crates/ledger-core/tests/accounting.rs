@@ -993,3 +993,28 @@ fn revenue_recognition_schedule() {
     assert_eq!(bal(&l, deferred), 0);
     assert_invariants(&l);
 }
+
+#[test]
+fn landed_costs_raise_stock_cost() {
+    let l = org();
+    let mk = |code: &str| l.create_item(&ItemInput { code: code.into(), name: code.into(), is_tracked: true, sale_price: Some("50".into()), sale_account_id: Some(acct(&l, "200")),
+        purchase_account_id: Some(acct(&l, "310")), purchase_price: Some("1".into()), ..Default::default() }).unwrap();
+    let (a, b) = (mk("A"), mk("B"));
+    let stock = l.save_document(None, &DocInput { kind: "ACCPAY".into(), contact_name: Some("Supplier".into()), date: "2026-06-01".into(), line_amount_type: Some("NOTAX".into()),
+        lines: vec![LineInput { item_id: Some(a), quantity: Some("10".into()), unit_price: Some("10".into()), ..Default::default() },
+                    LineInput { item_id: Some(b), quantity: Some("5".into()), unit_price: Some("20".into()), ..Default::default() }], status: Some("AUTHORISED".into()), ..Default::default() }).unwrap();
+    let freight_acct = acct(&l, "429");
+    let freight = l.save_document(None, &DocInput { kind: "ACCPAY".into(), contact_name: Some("Shipper".into()), date: "2026-06-02".into(), line_amount_type: Some("NOTAX".into()),
+        lines: vec![line(freight_acct, None, "1", "50")], status: Some("AUTHORISED".into()), ..Default::default() }).unwrap();
+    let inv = l.sys_account("INVENTORY").unwrap();
+    let inv_before = bal(&l, inv);
+    l.apply_landed_cost(freight, &[stock], "VALUE").unwrap();
+    assert!(l.apply_landed_cost(freight, &[stock], "VALUE").is_err(), "only once");
+    assert_eq!(bal(&l, inv) - inv_before, 5_000);
+    assert_eq!(bal(&l, freight_acct), 0, "the freight moved out of expenses");
+    assert_eq!(l.get_item(a).unwrap()["total_cost"].as_i64().unwrap(), 12_500);
+    assert_eq!(l.get_item(b).unwrap()["total_cost"].as_i64().unwrap(), 12_500);
+    // Selling all of A now costs 125.
+    assert_eq!(l.inventory_cost_out(a, 100_000).unwrap(), 12_500);
+    assert_invariants(&l);
+}

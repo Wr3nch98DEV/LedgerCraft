@@ -4136,3 +4136,29 @@ fn custom_fields_on_contacts_and_items() {
     assert_eq!(app.be.call_now("items.get", json!({"id": item})).unwrap()["custom_fields"][0]["value"], "24");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn landed_cost_in_the_app() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = desktop_app("landed");
+    // A bill that brings stock in.
+    let item = app.lk.items.iter().find(|i| i["is_tracked"] == 1).cloned().expect("a tracked item");
+    let vendor = app.lk.contact_opts(false)[0].id;
+    let stock = app.be.call_now("docs.save", json!({"doc": {"type": "ACCPAY", "contact_id": vendor, "date": "2026-10-01", "line_amount_type": "NOTAX", "status": "AUTHORISED",
+        "lines": [{"item_id": item["id"], "quantity": "10", "unit_price": "4"}]}})).unwrap()["id"].as_i64().unwrap();
+    let t = app.update(Message::Nav(Route::LandedCosts)); settle(&mut app, t);
+    let d = app.data.as_ref().unwrap().clone();
+    assert!(d["stock_bills"].as_array().unwrap().iter().any(|v| v.as_i64() == Some(stock)));
+    let cost_bill = d["bills"].as_array().unwrap().iter().find(|b| !d["stock_bills"].as_array().unwrap().contains(&b["id"])).unwrap()["id"].as_i64().unwrap();
+    let before = app.be.call_now("items.get", json!({"id": item["id"]})).unwrap()["total_cost"].as_i64().unwrap();
+    let _ = app.update(Message::Extras(X::LcBill(crate::app::Opt { id: cost_bill, label: "x".into() })));
+    let _ = app.update(Message::Extras(X::LcReceipt(stock)));
+    press(&mut app, "Add to stock cost");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let after = app.be.call_now("items.get", json!({"id": item["id"]})).unwrap()["total_cost"].as_i64().unwrap();
+    assert!(after > before, "{before} -> {after}");
+    assert_eq!(app.data.as_ref().unwrap()["applied"].as_array().unwrap().len(), 1);
+    let tb = app.be.call_now("reports.run", json!({"name": "trial-balance", "params": {"date": "2099-12-31"}})).unwrap();
+    assert_eq!(tb["balanced"], true);
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -188,7 +188,7 @@ The first task of step 4 is to verify this column feature by feature; the table 
 | FIFO and LIFO costing (not only average) | QB, Sage | Have: average or FIFO, chosen in settings (LIFO isn't allowed under IFRS, so it's left out) |
 | Multiple locations / warehouses / bins | all | Have: locations (stock per location, transfers, a location on bills/invoices/credits, Stock by Location report); bins still to add |
 | Lot and serial numbers, expiry | QB, Sage, Acumatica | Have: items tracked by lot or serial; lots/serials on bills, invoices and credits (checked against stock); expiry dates; Lots report. Moving lot stock between locations still to add |
-| Landed costs (freight, duty, insurance) | QB, Acumatica | Missing |
+| Landed costs (freight, duty, insurance) | QB, Acumatica | Have: spread a freight/duty/insurance bill over received stock by value or quantity; raises item cost (also FIFO layers) |
 | Item receipts separate from bills (Enhanced Inventory Receiving) | QB | Missing |
 | Backorders, drop shipping | Acumatica | Missing |
 | Barcode scanning, pick/pack/ship, physical counts | QB, Acumatica | Missing (needs the Android app, step 5) |
