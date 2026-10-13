@@ -168,18 +168,18 @@ The first task of step 4 is to verify this column feature by feature; the table 
 | Feature | From | Now |
 |---|---|---|
 | Recurring invoices and bills, subscription billing | all | Have (memorized/repeating) |
-| Dunning and automatic payment reminders | Sage, Acumatica | Partial: email reminders; dunning levels missing |
+| Dunning and automatic payment reminders | Sage, Acumatica | Have: Payment reminders screen with levels (days after/before due), on/off, send now |
 | Pay-now links on invoices (Stripe, PayPal, card, ACH) | Sage, Xero | Partial: plugin interface, no gateway bundled |
 | Approval workflows for bills, POs and expenses | Acumatica, Sage, Xero | Partial: Draft → Awaiting approval; routing rules missing |
 | Batch payments and bank payment files (ABA/ACH/EFT) | all | Partial: batch payments; pay-run bank files (ABA/BACS/NACHA); supplier payment files missing |
 | Customer prepayments/deposits on sales orders (liability) | QB | Partial: prepayments; SO deposits missing |
-| Credit limits and credit holds | Acumatica | Partial: field only |
-| Invoice profitability (margin per line) | QB | Missing |
-| Estimates → sales orders → invoices, estimate inactivation, progress invoicing | QB, Sage, Acumatica | Partial: no progress invoicing |
+| Credit limits and credit holds | Acumatica | Have: limit and hold on the contact page; over-limit asks "Save anyway", hold blocks approval |
+| Invoice profitability (margin per line) | QB | Have: cost of items, gross margin and % on sales documents |
+| Estimates → sales orders → invoices, estimate inactivation, progress invoicing | QB, Sage, Acumatica | Have: progress invoices by % with invoiced-so-far; estimate closes at 100% |
 | Receipt capture with OCR and auto-matching | Sage, Xero, Acumatica | Partial: PDF reading; photo OCR needs Tesseract |
 | Expense claims, mileage, reimbursements | Sage, Xero | Have (native receipts, mileage, submit/approve) |
 | 1099 / W-2 | Sage, QB | Partial: 1099 summary; W-2 missing |
-| Advanced price rules (customer type, category, quantity breaks, dates) | QB, Acumatica | Partial: fixed-% price levels |
+| Advanced price rules (customer type, category, quantity breaks, dates) | QB, Acumatica | Have: price levels plus price rules (item, level, quantity breaks, dates); item categories still to add |
 
 ### Inventory, warehouse and manufacturing
 | Feature | From | Now |

@@ -13,6 +13,23 @@
 > * Background jobs (repeating invoices, email, backups) now run in the native app too. Your company file is updated automatically (two new tables: price levels, assemblies).
 > * Light/dark: this computer's saved preference is currently **light** (Alt+T or View ▸ Dark Mode switches back); the Desktop Home bands are toned down in dark mode.
 
+> **Update — 13 Oct 2026 (afternoon): five layouts, and new features in all of them.** See `NEXT_STEPS_PLAN.md` for the status of each step.
+> * **Every feature in every layout** (step 1): Fixed assets, Audit log, Currencies, Budgets, Expense claims, Bank rules, Import/export, Custom reports, Payroll settings, two-step verification and more are native screens. A test clicks every feature in every layout. Nothing needs the web version any more.
+> * **Xero-style and QuickBooks Online-style closer to the real products** (step 2):
+>   * Xero: invoice summary boxes and a Repeating tab; Approve & email / Submit for approval; Reconcile with Match / Create / Transfer / Discuss; a contact page with History & notes; Find and recode; Organisation settings tiles.
+>   * QuickBooks Online: the Action column; customer page tabs; Standard / Custom reports with Favorites; Account and settings tabs.
+> * **Two new layouts** (step 3), picked in Settings or at first setup:
+>   * **MYOB Acumatica-style**: a workspace menu, record screens with a toolbar, On Hold → Balanced → Release, and column filters.
+>   * **Sage Accounting-style**: a black top bar with Sales / Purchases / Banking / Reporting menus and Sage's words.
+> * **New features** (step 4):
+>   * Credit limits and credit holds.
+>   * Invoice profitability (cost and margin).
+>   * Progress invoicing from estimates.
+>   * Payment reminder (dunning) levels.
+>   * Price rules with quantity breaks and dates.
+>
+>   Your company file updates itself (two new tables/columns).
+
 **Start here:** double-click **`start.bat`**. First run builds everything (a few minutes). Then click **"Just show me the demo company"** to explore 12 months of sample data, or set up your own business.
 
 LedgerCraft opens in its own window in **dark mode**. Toggle light/dark with the sun/moon icon (top right) or **Alt+T**.
