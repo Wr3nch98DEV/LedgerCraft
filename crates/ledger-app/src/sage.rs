@@ -26,7 +26,7 @@ pub static PLACES: &[(&str, &str, &str)] = &[
     ("credit_memo", "sales", "New Sales Credit Note"), ("receive_payment", "sales", "Customer Receipts"), ("sales_receipt", "sales", "Cash Sale"),
     ("sales_order", "sales", "Sales Orders"), ("delayed_charge", "sales", "Pending Charges"), ("delayed_credit", "sales", "Pending Credits"),
     ("batch_invoices", "sales", "Batch Invoicing"), ("print_forms", "sales", "Print & Email Invoices"), ("finance_charges", "sales", "Late Payment Charges"),
-    ("reminders", "sales", "Payment Reminders"), ("projects", "sales", "Projects"),
+    ("payment_reminders", "sales", "Payment Reminders"), ("projects", "sales", "Projects"),
     // Purchases
     ("bills", "purchases", "Purchase Invoices"), ("bill", "purchases", "New Purchase Invoice"), ("vendor_credit", "purchases", "New Purchase Credit Note"),
     ("pay_bills", "purchases", "Supplier Payments"), ("purchase_orders", "purchases", "Purchase Orders"), ("purchase_order", "purchases", "New Purchase Order"),
@@ -53,7 +53,7 @@ pub static PLACES: &[(&str, &str, &str)] = &[
     // Settings (gear)
     ("settings", "settings", "Business Settings"), ("users", "settings", "Manage Users"), ("import_data", "settings", "Import Data"),
     ("export_data", "settings", "Export Data"), ("templates", "settings", "Invoice Templates"), ("backup", "settings", "Back Up"),
-    ("restore", "settings", "Restore"), ("attachments", "settings", "Attachments"), ("calendar", "settings", "Calendar"), ("help", "settings", "Help Centre"),
+    ("restore", "settings", "Restore"), ("attachments", "settings", "Attachments"), ("calendar", "settings", "Calendar"), ("reminders", "settings", "Reminders List"), ("help", "settings", "Help Centre"),
 ];
 
 /// A menu's entries in table order.

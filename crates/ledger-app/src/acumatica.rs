@@ -34,7 +34,7 @@ pub static PLACES: &[(&str, &str, &str, &str)] = &[
     ("statements", "receivables", "Processes", "Prepare Statements"),
     ("finance_charges", "receivables", "Processes", "Calculate Overdue Charges"),
     ("print_forms", "receivables", "Processes", "Print Invoices and Memos"),
-    ("reminders", "receivables", "Processes", "Dunning Letters and Reminders"),
+    ("payment_reminders", "receivables", "Preferences", "Dunning Levels"),
     ("invoices", "receivables", "Inquiries", "Invoices"),
     ("all_sales", "receivables", "Inquiries", "Customer Details"),
     ("credit_notes", "receivables", "Inquiries", "Credit Memos List"),
@@ -110,6 +110,7 @@ pub static PLACES: &[(&str, &str, &str, &str)] = &[
     ("restore", "configuration", "Processes", "Restore Snapshot"),
     ("attachments", "configuration", "Inquiries", "Files"),
     ("calendar", "configuration", "Inquiries", "Calendar"),
+    ("reminders", "configuration", "Inquiries", "Reminders"),
     ("help", "configuration", "Inquiries", "Help"),
 ];
 

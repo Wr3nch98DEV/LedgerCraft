@@ -3863,3 +3863,25 @@ fn progress_invoice_from_an_estimate_in_the_app() {
     assert!(!click_fails(&app, "Progress invoicing"));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn payment_reminder_levels() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = demo_app("dunning", Skin::Xero);
+    let t = app.update(Message::Nav(Route::PaymentReminders)); settle(&mut app, t);
+    let before = app.data.as_ref().unwrap()["rules"].as_array().unwrap().len();
+    let t = app.update(Message::Extras(X::DunOn(true))); settle(&mut app, t);
+    assert_eq!(app.data.as_ref().unwrap()["on"], true);
+    let _ = app.update(Message::Extras(X::DunDays("30".into())));
+    press(&mut app, "Add level");
+    let rules = app.data.as_ref().unwrap()["rules"].as_array().unwrap().clone();
+    assert_eq!(rules.len(), before + 1);
+    assert!(rules.iter().any(|r| r["days"] == 30));
+    // The demo has overdue invoices with email addresses: running queues reminders.
+    let queued = app.be.call_now("reminders.run", json!({})).unwrap()["queued"].as_i64().unwrap();
+    assert!(queued > 0, "overdue invoices get reminders");
+    // Each level goes once per invoice.
+    assert_eq!(app.be.call_now("reminders.run", json!({})).unwrap()["queued"], 0);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -30,6 +30,8 @@ pub struct State {
     pub rc_sel: std::collections::BTreeSet<i64>,
     pub rc_to_account: Option<Opt>,
     pub rc_to_tax: Option<Opt>,
+    /// Payment reminders: a new level's days after the due date, as typed.
+    pub dun_days: String,
     /// Contact page: the credit limit being typed (None = not being edited).
     pub credit_text: Option<String>,
     /// Contact page: the note being written in History & notes.
@@ -90,6 +92,8 @@ pub enum Msg {
     ContactNote(String), ContactNoteAdd(i64),
     /// Contact credit: the limit as typed, on/off hold, save the limit.
     CreditText(String), CreditHold(i64, bool), CreditSave(i64),
+    /// Payment reminders: on/off, a new level's days, add, switch a level on/off, delete, send due reminders now.
+    DunOn(bool), DunDays(String), DunAdd, DunActive(i64, i64, bool), DunDelete(i64), DunRun,
     /// Find & recode.
     RcAccount(Opt), RcTax(Opt), RcContact(Opt), RcText(&'static str, String), RcFind, RcClear, RcToggle(i64), RcAll(bool), RcToAccount(Opt), RcToTax(Opt), RcApply,
     FxEnable(String, bool), FxRateOpen(String), FxRateField(u8, String), FxRateSave, FxRevalDate(String), FxRevalue, FxFetch,
@@ -130,6 +134,16 @@ pub fn load(app: &mut App) -> Task<Message> {
         Route::CustomReports => call(app, "layouts.list", json!({})),
         Route::PayrollSettings => call(app, "payroll.settings", json!({})),
         Route::ImportExport => { app.data = Some(json!({})); Task::none() }
+        Route::PaymentReminders => {
+            let be = app.be.clone();
+            Task::perform(async move {
+                tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                    let rules = be.call_now("reminders.list", json!({}))?;
+                    let on = be.call_now("settings.get", json!({}))?["invoice_reminders_enabled"] == "1";
+                    Ok(json!({"rules": rules, "on": on}))
+                }).await.unwrap_or_else(|e| Err(e.to_string()))
+            }, move |r| Message::Loaded(g, r))
+        }
         Route::Recode => {
             let x = &app.extras;
             let style = app.date_style();
@@ -183,6 +197,17 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.extras.busy = true;
             app.be.call("recode.apply", p, |r| Message::Extras(Msg::Done(r.map(|v| { let n = v["transactions"].as_i64().unwrap_or(0); json!({"n": n}) }), "Recoded — the transactions were reposted")))
         }
+        // ---- payment reminders ----
+        Msg::DunOn(on) => app.be.call("settings.update", json!({"invoice_reminders_enabled": if on { "1" } else { "0" }}), move |r| Message::Extras(Msg::Done(r, if on { "Payment reminders are on" } else { "Payment reminders are off" }))),
+        Msg::DunDays(s) => { app.extras.dun_days = s.chars().filter(|c| c.is_ascii_digit() || *c == '-').collect(); Task::none() }
+        Msg::DunAdd => {
+            let Ok(days) = app.extras.dun_days.trim().parse::<i64>() else { return app.toast("Enter how many days after the due date", true) };
+            app.extras.dun_days.clear();
+            app.be.call("reminders.save", json!({"days": days}), |r| Message::Extras(Msg::Done(r, "Reminder level added")))
+        }
+        Msg::DunActive(id, days, on) => app.be.call("reminders.save", json!({"id": id, "days": days, "active": on}), |r| Message::Extras(Msg::Done(r, ""))),
+        Msg::DunDelete(id) => app.be.call("reminders.delete", json!({"id": id}), |r| Message::Extras(Msg::Done(r, "Reminder level removed"))),
+        Msg::DunRun => app.be.call("reminders.run", json!({}), |r| Message::Extras(Msg::Done(r.map(|v| v), "Reminders due today were queued in the Outbox"))),
         // ---- contact credit ----
         Msg::CreditText(s) => { app.extras.credit_text = Some(s); Task::none() }
         Msg::CreditHold(id, on) => {
@@ -872,6 +897,43 @@ pub fn bank_rules(app: &App) -> Element<'_, Message> {
     body = body.push(ui::table(&[ui::col("Rule", 20), ui::col("Applies to", 14), ui::col("When", 34), ui::col("Then", 22), ui::col("", 8)], rows, "No bank rules yet."));
     body = body.push(ui::muted("Rules fill in matching bank statement lines for you when you review them in Banking."));
     ui::page(ui::h1("Bank rules"), vec![ui::btn_primary("New rule", Some(Message::Extras(Msg::BrNew(true))))], body.max_width(1150).into())
+}
+
+// ---------------- Payment reminders ----------------
+
+/// Payment reminders (dunning levels): emails sent to customers a set number of days after an
+/// invoice falls due, one per level, until it's paid.
+pub fn payment_reminders(app: &App) -> Element<'_, Message> {
+    let k = t();
+    let Some(d) = &app.data else { return loading() };
+    let on = d["on"] == true;
+    let rules = d["rules"].as_array().cloned().unwrap_or_default();
+    let rows = rules.iter().enumerate().map(|(n, r)| {
+        let id = r["id"].as_i64().unwrap_or(0);
+        let days = r["days"].as_i64().unwrap_or(0);
+        let active = r["active"] == 1;
+        let when = if days < 0 { format!("{} days before the due date", -days) } else if days == 0 { "On the due date".into() } else { format!("{days} days after the due date") };
+        (vec![
+            ui::cell(format!("Level {}", n + 1)), ui::cell(when), ui::cell_muted(r["template_name"].as_str().unwrap_or("Payment reminder").to_string()),
+            iced::widget::checkbox(active).label("Active").on_toggle(move |v| Message::Extras(Msg::DunActive(id, days, v))).text_size(13).into(),
+            ui::link("Remove", Message::Extras(Msg::DunDelete(id))),
+        ], None)
+    }).collect();
+    let body = column![
+        ui::card(row![
+            column![ui::h2("Send payment reminders"), text(if on { "On: customers with overdue invoices get the reminder for each level, once." } else { "Off: no reminders are sent." }).size(13).color(if on { k.ok } else { k.muted })].spacing(4).width(Length::Fill),
+            iced::widget::toggler(on).on_toggle(|v| Message::Extras(Msg::DunOn(v))),
+        ].align_y(Alignment::Center)),
+        ui::table(&[ui::col("Level", 10), ui::col("When", 30), ui::col("Email", 30), ui::col("", 14), ui::col("", 10)], rows, "No reminder levels yet."),
+        ui::card(row![
+            input("NEW LEVEL: DAYS AFTER DUE", &app.extras.dun_days, 200.0, |v| Message::Extras(Msg::DunDays(v))),
+            container(ui::btn_primary("Add level", Some(Message::Extras(Msg::DunAdd)))).padding(iced::Padding { top: 16.0, ..Default::default() }),
+            iced::widget::Space::new().width(Length::Fill),
+            container(ui::btn("Send due reminders now", if on { Some(Message::Extras(Msg::DunRun)) } else { None })).padding(iced::Padding { top: 16.0, ..Default::default() }),
+        ].spacing(12).align_y(Alignment::Center)),
+        ui::muted("Reminders go out with the daily background run, through the email settings (or to the Outbox until email is set up). Use a negative number to remind before the due date."),
+    ].spacing(14);
+    ui::page(ui::h1("Payment reminders"), vec![], body.max_width(1000).into())
 }
 
 // ---------------- Find & recode ----------------
