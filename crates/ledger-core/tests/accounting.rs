@@ -1038,3 +1038,33 @@ fn consolidation_of_two_companies() {
     let r = ledger_core::consolidation::consolidate(&[("A".into(), &a), ("B".into(), &b)], "2026-01-01", "2026-12-31", &["200".into()]).unwrap();
     assert_eq!(r["sections"][0]["total"]["values"], serde_json::json!([10_000, 25_000, -35_000, 0]));
 }
+
+#[test]
+fn item_receipts_then_bill() {
+    use ledger_core::receipts::ReceiptLine;
+    let l = org();
+    let item = l.create_item(&ItemInput { code: "PIPE".into(), name: "Pipe".into(), is_tracked: true, sale_price: Some("9".into()), sale_account_id: Some(acct(&l, "200")),
+        purchase_account_id: Some(acct(&l, "310")), purchase_price: Some("4".into()), ..Default::default() }).unwrap();
+    let supplier = l.find_or_create_contact("Pipe Supplies").unwrap();
+    let line = ReceiptLine { item_id: item, quantity: "10".into(), unit_price: "4".into(), lot: String::new() };
+    let r = l.receive_items(supplier, "2026-05-01", "PS-1", None, &[line.clone()]).unwrap();
+    let inv = l.sys_account("INVENTORY").unwrap();
+    let grni: i64 = l.conn.query_row("SELECT id FROM accounts WHERE name = 'Goods Received Not Invoiced'", [], |x| x.get(0)).unwrap();
+    assert_eq!(bal(&l, inv), 4_000);
+    assert_eq!(bal(&l, grni), -4_000);
+    assert_eq!(l.get_item(item).unwrap()["qty_on_hand_e4"], 100_000);
+    // The bill clears GRNI and doesn't add stock again.
+    let bill = l.bill_receipt(r, Some("2026-05-10")).unwrap();
+    assert!(l.bill_receipt(r, None).is_err(), "one bill per receipt");
+    l.set_document_status(bill, "AUTHORISED").unwrap();
+    assert_eq!(bal(&l, grni), 0);
+    assert_eq!(bal(&l, inv), 4_000);
+    assert_eq!(l.get_item(item).unwrap()["qty_on_hand_e4"], 100_000);
+    assert!(l.void_receipt(r).is_err(), "billed");
+    // An unbilled receipt can be voided.
+    let r2 = l.receive_items(supplier, "2026-05-02", "PS-2", None, &[line]).unwrap();
+    l.void_receipt(r2).unwrap();
+    assert_eq!(l.get_item(item).unwrap()["qty_on_hand_e4"], 100_000);
+    assert_eq!(bal(&l, grni), 0);
+    assert_invariants(&l);
+}

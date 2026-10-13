@@ -1444,10 +1444,9 @@ fn desktop_adjust_inventory_and_receive_items() {
     app.be.call_now("items.adjust", json!({"id": id, "date": crate::ui::today_iso(), "quantity": "-1", "account_id": acc, "reason": ""})).unwrap();
     let after = app.be.call_now("items.list", json!({})).unwrap().as_array().unwrap().iter().find(|x| x["id"].as_i64() == Some(id)).unwrap()["qty_on_hand_e4"].as_i64().unwrap();
     assert_eq!(after, cur - 10000);
-    // Receive Items opens Enter Bills on the Items tab.
+    // Receive Items opens the item receipt window (stock in now, bill later).
     let _ = app.update(Message::ReceiveItems);
-    assert_eq!(app.route, Route::Doc { kind: "ACCPAY".into(), id: None });
-    assert!(app.doc.as_ref().unwrap().items_tab);
+    assert_eq!(app.route, Route::ItemReceipts);
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -4180,5 +4179,32 @@ fn consolidated_reports_in_the_app() {
     let r = app.extras.co_result.clone().expect("combined");
     assert_eq!(r["columns"].as_array().unwrap().len(), 4);
     assert!(!click_fails(&app, "CONSOLIDATED") && !click_fails(&app, "Net profit"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn item_receipts_in_the_app() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = desktop_app("itemreceipts");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Online)); settle(&mut app, t);
+    let t = app.update(Message::ReceiveItems); settle(&mut app, t);
+    assert_eq!(app.route, Route::ItemReceipts);
+    let item = app.lk.items.iter().find(|i| i["is_tracked"] == 1 && i["lot_tracking"] == "NONE").cloned().expect("a tracked item");
+    let before = item["qty_on_hand_e4"].as_i64().unwrap();
+    let vendor = app.lk.contact_opts(false)[0].clone();
+    for m in [X::IrVendor(vendor), X::IrItem(0, crate::app::Opt { id: item["id"].as_i64().unwrap(), label: "x".into() }), X::IrQty(0, "6".into()), X::IrCost(0, "3".into())] { let _ = app.update(Message::Extras(m)); }
+    press(&mut app, "Receive");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert_eq!(app.be.call_now("items.get", json!({"id": item["id"]})).unwrap()["qty_on_hand_e4"].as_i64().unwrap(), before + 60_000);
+    // Enter the bill: it opens as a draft against the receipt.
+    let rid = app.data.as_ref().unwrap()[0]["id"].as_i64().unwrap();
+    let t = app.update(Message::Extras(X::IrBill(rid))); settle(&mut app, t);
+    let bill = match &app.route { Route::Doc { kind, id: Some(id) } if kind == "ACCPAY" => *id, r => panic!("{r:?}") };
+    app.be.call_now("docs.setStatus", json!({"id": bill, "status": "AUTHORISED"})).unwrap();
+    assert_eq!(app.be.call_now("items.get", json!({"id": item["id"]})).unwrap()["qty_on_hand_e4"].as_i64().unwrap(), before + 60_000, "no double stock");
+    let tb = app.be.call_now("reports.run", json!({"name": "trial-balance", "params": {"date": "2099-12-31"}})).unwrap();
+    assert_eq!(tb["balanced"], true);
+    let t = app.update(Message::Nav(Route::ItemReceipts)); settle(&mut app, t);
+    assert_eq!(app.data.as_ref().unwrap()[0]["state"], "Billed");
     let _ = std::fs::remove_dir_all(dir);
 }

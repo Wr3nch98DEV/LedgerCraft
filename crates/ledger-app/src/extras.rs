@@ -51,6 +51,13 @@ pub struct State {
     pub co_to: String,
     pub co_elim: String,
     pub co_result: Option<Value>,
+    /// Item receipts: the receipt being entered (vendor, date, reference, location, and lines of
+    /// item, quantity, unit cost, lot/serials).
+    pub ir_vendor: Option<Opt>,
+    pub ir_date: String,
+    pub ir_ref: String,
+    pub ir_loc: Option<Opt>,
+    pub ir_lines: Vec<(Option<Opt>, String, String, String)>,
     /// Revenue recognition: the invoice, months and start date for a new schedule, and the run-to date.
     pub rr_invoice: Option<Opt>,
     pub rr_months: String,
@@ -129,6 +136,7 @@ pub enum Msg {
     /// Payment reminders: on/off, a new level's days, add, switch a level on/off, delete, send due reminders now.
     PrNew(bool), PrField(usize, String), PrItem(Opt), PrLevel(Opt), PrSave, PrDelete(i64),
     LotItem(Opt), LotMode(&'static str), LotExpiry(i64, String, String), LotExpirySave(i64, String),
+    IrVendor(Opt), IrDate(String), IrRef(String), IrLoc(Opt), IrItem(usize, Opt), IrQty(usize, String), IrCost(usize, String), IrLot(usize, String), IrAddLine, IrReceive, IrBill(i64), IrBilled(Reply), IrVoid(i64),
     CoFile(String), CoFrom(String), CoTo(String), CoElim(String), CoRun, CoDone(Reply),
     LcBill(Opt), LcReceipt(i64), LcByQty(bool), LcApply,
     CfNew(Option<&'static str>), CfName(String), CfKind(&'static str), CfSave, CfDelete(i64), CfValue(i64, String), CfSaveValues(&'static str, i64),
@@ -180,6 +188,7 @@ pub fn load(app: &mut App) -> Task<Message> {
         Route::Lots => call(app, "lots.list", json!({})),
         Route::CustomFields => call(app, "customFields.list", json!({})),
         Route::Consolidation => call(app, "orgs.list", json!({})),
+        Route::ItemReceipts => call(app, "itemReceipts.list", json!({})),
         Route::LandedCosts => {
             let be = app.be.clone();
             Task::perform(async move {
@@ -271,6 +280,39 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.extras.busy = true;
             app.be.call("recode.apply", p, |r| Message::Extras(Msg::Done(r.map(|v| { let n = v["transactions"].as_i64().unwrap_or(0); json!({"n": n}) }), "Recoded — the transactions were reposted")))
         }
+        // ---- item receipts ----
+        Msg::IrVendor(o) => { app.extras.ir_vendor = Some(o); Task::none() }
+        Msg::IrDate(v) => { let old = if app.extras.ir_date.is_empty() { app.d(&ui::today_iso()) } else { app.extras.ir_date.clone() }; app.extras.ir_date = ui::date_keys(&old, &v, style); Task::none() }
+        Msg::IrRef(v) => { app.extras.ir_ref = v; Task::none() }
+        Msg::IrLoc(o) => { app.extras.ir_loc = (o.id != 0).then_some(o); Task::none() }
+        Msg::IrItem(i, o) => {
+            let cost = app.lk.item(o.id).and_then(|it| it["purchase_unit_e2"].as_i64()).map(|c| format!("{:.2}", c as f64 / 10_000.0)).unwrap_or_default();
+            while app.extras.ir_lines.len() <= i { app.extras.ir_lines.push(Default::default()); }
+            let l = &mut app.extras.ir_lines[i];
+            l.0 = Some(o);
+            if l.2.is_empty() { l.2 = cost; }
+            if l.1.is_empty() { l.1 = "1".into(); }
+            Task::none()
+        }
+        Msg::IrQty(i, v) => { while app.extras.ir_lines.len() <= i { app.extras.ir_lines.push(Default::default()); } app.extras.ir_lines[i].1 = v; Task::none() }
+        Msg::IrCost(i, v) => { while app.extras.ir_lines.len() <= i { app.extras.ir_lines.push(Default::default()); } app.extras.ir_lines[i].2 = v; Task::none() }
+        Msg::IrLot(i, v) => { while app.extras.ir_lines.len() <= i { app.extras.ir_lines.push(Default::default()); } app.extras.ir_lines[i].3 = v; Task::none() }
+        Msg::IrAddLine => { let n = app.extras.ir_lines.len().max(1); app.extras.ir_lines.resize(n + 1, Default::default()); Task::none() }
+        Msg::IrReceive => {
+            let x = &app.extras;
+            let Some(vendor) = x.ir_vendor.as_ref().map(|o| o.id) else { return app.toast("Choose the vendor", true) };
+            let shown = if x.ir_date.is_empty() { app.d(&ui::today_iso()) } else { x.ir_date.clone() };
+            let Some(date) = ui::to_iso(&shown, style) else { return app.toast("Check the date", true) };
+            let lines: Vec<Value> = x.ir_lines.iter().filter_map(|l| l.0.as_ref().map(|o| json!({"item_id": o.id, "quantity": l.1.replace(',', ""), "unit_price": l.2.replace(',', ""), "lot": l.3}))).collect();
+            let p = json!({"contact_id": vendor, "date": date, "reference": x.ir_ref, "location_id": x.ir_loc.as_ref().map(|o| o.id), "lines": lines});
+            app.be.call("itemReceipts.create", p, |r| Message::Extras(Msg::Done(r, "Items received; enter the bill when it arrives")))
+        }
+        Msg::IrBill(id) => app.be.call("itemReceipts.bill", json!({"id": id}), |r| Message::Extras(Msg::IrBilled(r))),
+        Msg::IrBilled(r) => match r {
+            Ok(v) => { let t1 = app.toast("Bill created from the receipt; check it and approve", false); let t2 = app.go(Route::Doc { kind: "ACCPAY".into(), id: v["id"].as_i64() }); Task::batch([t1, t2]) }
+            Err(e) => app.toast(e, true),
+        },
+        Msg::IrVoid(id) => app.be.call("itemReceipts.void", json!({"id": id}), |r| Message::Extras(Msg::Done(r, "Receipt voided"))),
         // ---- consolidation ----
         Msg::CoFile(f) => { if !app.extras.co_files.remove(&f) { app.extras.co_files.insert(f); } Task::none() }
         Msg::CoFrom(v) => { let old = app.extras.co_from.clone(); app.extras.co_from = ui::date_keys(&old, &v, style); Task::none() }
@@ -797,6 +839,7 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.extras.busy = false;
             match r {
                 Ok(_) => {
+                    if app.route == Route::ItemReceipts { app.extras.ir_vendor = None; app.extras.ir_ref.clear(); app.extras.ir_lines.clear(); }
                     app.extras.fa_new = None; app.extras.fa_dispose = None; app.extras.bud_cells.clear(); app.extras.cl_new = None; app.extras.br_new = None; app.extras.cr_new = None; app.extras.ps_cal = None; app.extras.ps_leave = None;
                     if app.route == Route::ImportExport { app.extras.ie_file = None; app.extras.ie_preview = None; }
                     let t1 = if what.is_empty() { Task::none() } else { app.toast(what, false) };
@@ -1139,6 +1182,59 @@ pub fn price_rules_section(app: &App) -> Element<'_, Message> {
     }).collect();
     col = col.push(ui::table(&[ui::col("Rule", 16), ui::col("Item", 18), ui::col("Customers", 16), ui::col("Quantity", 10), ui::col("Change", 9), ui::col("Dates", 20), ui::col("", 9)], rows, "No price rules yet."));
     col.push(ui::muted("The lowest matching price wins. Rules apply after the customer's price level, when an item goes on a sale or its quantity changes.")).into()
+}
+
+// ---------------- Item receipts ----------------
+
+/// Receive stock before its bill arrives, then enter the bill for the receipt.
+pub fn item_receipts(app: &App) -> Element<'_, Message> {
+    let Some(d) = &app.data else { return loading() };
+    let x = &app.extras;
+    let items: Vec<Opt> = app.lk.items.iter().filter(|i| i["is_tracked"] == 1).map(|i| Opt { id: i["id"].as_i64().unwrap_or(0), label: i["name"].as_str().unwrap_or("").to_string() }).collect();
+    let date_shown = if x.ir_date.is_empty() { app.d(&ui::today_iso()) } else { x.ir_date.clone() };
+    let mut head = row![
+        column![lbl(if app.skin == crate::theme::Skin::Xero { "SUPPLIER" } else { "VENDOR" }), pick_list(app.lk.contact_opts(false), x.ir_vendor.clone(), |o| Message::Extras(Msg::IrVendor(o))).placeholder("Choose").padding([5, 7]).text_size(13).style(theme::pick).width(260)].spacing(3),
+        input("DATE", &date_shown, 120.0, |v| Message::Extras(Msg::IrDate(v))), input("REFERENCE / PACKING SLIP", &x.ir_ref, 200.0, |v| Message::Extras(Msg::IrRef(v))),
+    ].spacing(12).align_y(Alignment::End);
+    if !app.lk.locations.is_empty() {
+        let cur = x.ir_loc.clone().unwrap_or(Opt { id: 0, label: ledger_core::locations::MAIN.to_string() });
+        head = head.push(column![lbl("LOCATION"), pick_list(app.lk.location_opts(), Some(cur), |o| Message::Extras(Msg::IrLoc(o))).padding([5, 7]).text_size(13).style(theme::pick).width(180)].spacing(3));
+    }
+    let mut lines = column![row![text("ITEM").size(11).font(BOLD).width(Length::FillPortion(4)), text("QTY").size(11).font(BOLD).width(Length::FillPortion(1)),
+        text("UNIT COST").size(11).font(BOLD).width(Length::FillPortion(1)), text("LOT / SERIALS").size(11).font(BOLD).width(Length::FillPortion(3))].spacing(8)].spacing(6);
+    let rows_n = x.ir_lines.len().max(1);
+    for i in 0..rows_n {
+        let l = x.ir_lines.get(i).cloned().unwrap_or_default();
+        let lot_mode = l.0.as_ref().and_then(|o| app.lk.item(o.id)).and_then(|it| it["lot_tracking"].as_str()).unwrap_or("NONE").to_string();
+        let lot_cell: Element<Message> = if lot_mode == "NONE" { text("-").size(13).color(t().faint).into() } else {
+            text_input(if lot_mode == "SERIAL" { "Serial numbers, comma-separated" } else { "Lot number" }, &l.3).on_input(move |v| Message::Extras(Msg::IrLot(i, v))).padding([5, 7]).size(13).style(theme::input).into() };
+        lines = lines.push(row![
+            container(pick_list(items.clone(), l.0.clone(), move |o| Message::Extras(Msg::IrItem(i, o))).placeholder("Choose an item").padding([5, 7]).text_size(13).style(theme::pick).width(Length::Fill)).width(Length::FillPortion(4)),
+            container(text_input("1", &l.1).on_input(move |v| Message::Extras(Msg::IrQty(i, v))).padding([5, 7]).size(13).style(theme::input)).width(Length::FillPortion(1)),
+            container(text_input("0.00", &l.2).on_input(move |v| Message::Extras(Msg::IrCost(i, v))).padding([5, 7]).size(13).style(theme::input)).width(Length::FillPortion(1)),
+            container(lot_cell).width(Length::FillPortion(3)),
+        ].spacing(8).align_y(Alignment::Center));
+    }
+    let form = ui::card(column![ui::h2("Receive items"), head, lines,
+        row![ui::btn("Add line", Some(Message::Extras(Msg::IrAddLine))), iced::widget::Space::new().width(Length::Fill), ui::btn_primary("Receive", Some(Message::Extras(Msg::IrReceive)))].spacing(8),
+        ui::muted("The stock goes into inventory now; its cost waits in Goods Received Not Invoiced until you enter the bill."),
+    ].spacing(12));
+    let qty = |q: i64| { let s = format!("{:.4}", q as f64 / 10_000.0); s.trim_end_matches('0').trim_end_matches('.').to_string() };
+    let rows = d.as_array().cloned().unwrap_or_default().iter().map(|r| {
+        let id = r["id"].as_i64().unwrap_or(0);
+        let state = r["state"].as_str().unwrap_or("").to_string();
+        let what = r["lines"].as_array().cloned().unwrap_or_default().iter().map(|l| format!("{} x {}", l["code"].as_str().unwrap_or(""), qty(l["qty_e4"].as_i64().unwrap_or(0)))).collect::<Vec<_>>().join(", ");
+        let action: Element<Message> = match state.as_str() {
+            "Not billed" => row![ui::link("Enter bill", Message::Extras(Msg::IrBill(id))), ui::link("Void", Message::Extras(Msg::IrVoid(id)))].spacing(10).into(),
+            "Billed" => ui::link("Open bill", Message::Nav(Route::Doc { kind: "ACCPAY".into(), id: r["bill_id"].as_i64() })),
+            _ => ui::cell(""),
+        };
+        let color = crate::lists::status_color(match state.as_str() { "Billed" => "Closed", "Voided" => "Voided", _ => "Open" });
+        (vec![ui::cell(app.d(r["date"].as_str().unwrap_or(""))), ui::cell(r["contact_name"].as_str().unwrap_or("").to_string()), ui::cell_muted(r["reference"].as_str().unwrap_or("").to_string()),
+            ui::cell_muted(what), ui::cell_money(r["total"].as_i64().unwrap_or(0)), ui::chip(&state, color), action], None)
+    }).collect();
+    let body = column![form, ui::table(&[ui::col("Date", 10), ui::col("Vendor", 16), ui::col("Reference", 12), ui::col("Items", 24), ui::coln("Cost", 10), ui::col("Status", 10), ui::col("", 14)], rows, "No item receipts yet.")].spacing(14);
+    ui::page(ui::h1(if app.desktop() { "Receive Items" } else if crate::vocab::acumatica() { "Purchase Receipts" } else { "Item receipts" }), vec![], body.into())
 }
 
 // ---------------- Consolidation ----------------

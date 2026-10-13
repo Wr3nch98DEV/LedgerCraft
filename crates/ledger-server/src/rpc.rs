@@ -266,6 +266,14 @@ fn dispatch(l: &mut Ledger, method: &str, p: &Value, need: &dyn Fn(&str) -> Resu
             let delayed: Vec<i64> = if p["close_delayed"].is_array() { de(&p["close_delayed"])? } else { vec![] };
             Ok(json!({"id": l.save_invoice_with_delayed(oi(p, "id"), &input, &delayed)?}))
         }
+        "itemReceipts.list" => { need("purchases:read")?; Ok(json!(l.list_item_receipts()?)) }
+        "itemReceipts.create" => {
+            need("purchases:write")?;
+            let lines: Vec<ledger_core::receipts::ReceiptLine> = de(&p["lines"])?;
+            Ok(json!({"id": l.receive_items(i(p, "contact_id")?, s(p, "date"), s(p, "reference"), oi(p, "location_id"), &lines)?}))
+        }
+        "itemReceipts.bill" => { need("purchases:write")?; Ok(json!({"id": l.bill_receipt(id(p)?, p["date"].as_str())?})) }
+        "itemReceipts.void" => { need("purchases:write")?; l.void_receipt(id(p)?)?; ok() }
         "landed.list" => { need("purchases:read")?; Ok(json!(l.list_landed_costs()?)) }
         "landed.apply" => {
             need("purchases:write")?;

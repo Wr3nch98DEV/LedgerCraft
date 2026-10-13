@@ -1014,6 +1014,7 @@ pub fn title(app: &App, r: &Route) -> String {
         Route::CustomFields => "Custom Fields".into(),
         Route::LandedCosts => "Landed Cost".into(),
         Route::Consolidation => "Combine Reports from Multiple Companies".into(),
+        Route::ItemReceipts => "Receive Items".into(),
         Route::CustomReports => "Custom Reports".into(),
         Route::PayrollSettings => "Payroll Setup".into(),
         Route::BankTx(_) => if app.pay.as_ref().is_some_and(|s| !s.check) { "Enter Credit Card Charges".into() } else { "Write Checks".into() },
@@ -1080,14 +1081,14 @@ pub(crate) fn menu_items(app: &App, name: &str) -> Vec<(String, &'static str, Op
             e("Company Information…", "", nav(Route::Settings)), e("Set Up Users and Roles…", "", Some(Message::Desk(Msg::OpenPrefs("Users & Roles")))), e("Set Closing Date…", "", Some(Message::Desk(Msg::OpenPrefs("Accounting")))), sep(), e("Chart of Accounts", "Ctrl+A", nav(Route::Chart)),
             e("Make General Journal Entries…", "", nav(Route::Journal)), e("Batch Reclassify Transactions…", "", nav(Route::Recode)), e("Revenue Recognition…", "", nav(Route::RevenueRecognition)), e("Planning & Budgeting: Set Up Budgets", "", nav(Route::Budgets)), e("Enter Vehicle Mileage…", "", nav(Route::Mileage)), e("Calendar", "", nav(Route::Calendar)), e("Reminders", "", nav(Route::Reminders)), e("Documents", "", nav(Route::DocCenter))],
         "Inventory" => vec![e("Inventory Center", "", nav(Route::InventoryCenter)), e("Item List", "", nav(Route::Products)), e("Inventory Site List", "", nav(Route::Locations)), e("Lot Numbers & Serial Numbers", "", nav(Route::Lots)), sep(), e("Create Purchase Orders", "", doc_new("PO")),
-            e("Purchase Orders List", "", nav(Route::PurchaseOrders)), e("Receive Items", "", Some(Message::ReceiveItems)), e("Enter Bills Against Inventory", "", nav(Route::PurchaseOrders)), e("Adjust Quantity/Value on Hand…", "", nav(Route::AdjustInventory)), sep(), e("Build Assemblies…", "", nav(Route::BuildAssemblies))],
+            e("Purchase Orders List", "", nav(Route::PurchaseOrders)), e("Receive Items", "", Some(Message::ReceiveItems)), e("Enter Bills Against Inventory", "", nav(Route::ItemReceipts)), e("Adjust Quantity/Value on Hand…", "", nav(Route::AdjustInventory)), sep(), e("Build Assemblies…", "", nav(Route::BuildAssemblies))],
         "Customers" => vec![e("Customer Center", "Ctrl+J", nav(Route::Customers)), e("Job Costing Center", "", nav(Route::Projects)), sep(), e("Create Estimates", "", doc_new("QUOTE")), e("Create Sales Orders", "", doc_new("SALESORDER")),
             e("Create Invoices", "Ctrl+I", doc_new("ACCREC")), e("Create Batch Invoices", "", nav(Route::BatchInvoices)), e("Enter Sales Receipts", "", doc_new("SALESRECEIPT")), e("Enter Statement Charges", "", doc_new("DELAYEDCHARGE")),
             e("Create Statements…", "", nav(Route::Statements)), e("Assess Finance Charges…", "", nav(Route::FinanceCharges)), e("Payment Reminders…", "", nav(Route::PaymentReminders)), sep(), e("Receive Payments", "", nav(Route::ReceivePayment(None))),
             e("Create Credit Memos/Refunds", "", doc_new("ACCRECCREDIT")), sep(), e("Income Tracker", "", nav(Route::AllSales)), e("Item List", "", nav(Route::Products))],
         "Vendors" => vec![e("Vendor Center", "", nav(Route::Vendors)), sep(), e("Enter Bills", "", doc_new("ACCPAY")), e("Pay Bills", "", nav(Route::PayBills)), e("Batch Payments & Bank Files…", "", nav(Route::BatchPayments)), e("Landed Cost…", "", nav(Route::LandedCosts)), e("Bill Tracker", "", nav(Route::Bills)),
             sep(), e("Sales Tax: Manage Sales Tax…", "", nav(Route::Taxes)), e("Sales Tax: Pay Sales Tax…", "", nav(Route::PaySalesTax)), sep(), e("Create Purchase Orders", "", doc_new("PO")), e("Purchase Orders List", "", nav(Route::PurchaseOrders)),
-            sep(), e("Print/E-file 1099s: 1099 Summary", "", rep("contractor-1099")), e("Enter Bills for Received Items", "", nav(Route::PurchaseOrders))],
+            sep(), e("Print/E-file 1099s: 1099 Summary", "", rep("contractor-1099")), e("Enter Bills for Received Items", "", nav(Route::ItemReceipts))],
         "Employees" => vec![e("Employee Center", "", nav(Route::Payroll)), e("Payroll Center", "", nav(Route::Payroll)), sep(), e("Pay Employees", "", nav(Route::Payroll)),
             e("Pay Liabilities", "", nav(Route::PayLiabilities)), e("Payroll Setup", "", nav(Route::PayrollSettings)), e("Process Payroll Forms", "", nav(Route::PayrollForms)), sep(), e("Enter Time", "", nav(Route::EnterTime)), e("Expense Claims", "", nav(Route::ExpenseClaims))],
         "Banking" => vec![e("Write Checks", "Ctrl+W", nav(Route::Check(None))), e("Order Checks & Envelopes", "", None), e("Enter Credit Card Charges", "", nav(Route::Spend(None))), sep(),
@@ -3228,7 +3229,7 @@ pub fn home(app: &App) -> Element<'_, Message> {
         return scrollable(column![tabs, insights(app)].spacing(12).padding(Padding { top: 10.0, left: 20.0, right: 20.0, bottom: 24.0 }).max_width(1400)).style(theme::scroll).height(Fill).into();
     }
     let vendors = band("VENDORS", vec![
-        row![node("box", "Purchase Orders", doc_new("PO")), arrow(), node("truck", "Receive Inventory", Some(Message::ReceiveItems)), arrow(), node("expenses", "Enter Bills Against Inventory", nav(Route::PurchaseOrders)), gap(), node("taxes", "Manage Sales Tax", nav(Route::Taxes))].align_y(Alignment::Start).into(),
+        row![node("box", "Purchase Orders", doc_new("PO")), arrow(), node("truck", "Receive Inventory", Some(Message::ReceiveItems)), arrow(), node("expenses", "Enter Bills Against Inventory", nav(Route::ItemReceipts)), gap(), node("taxes", "Manage Sales Tax", nav(Route::Taxes))].align_y(Alignment::Start).into(),
         row![node("expenses", "Enter Bills", doc_new("ACCPAY")), arrow(), node("check-write", "Pay Bills", nav(Route::PayBills)), gap(), node("file", "1099 Summary", rep("contractor-1099"))].align_y(Alignment::Start).into(),
     ]);
     let customers = band("CUSTOMERS", vec![
