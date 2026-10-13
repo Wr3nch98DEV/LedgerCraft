@@ -152,7 +152,7 @@ The first task of step 4 is to verify this column feature by feature; the table 
 | Feature | From | Now |
 |---|---|---|
 | Multi-currency, live rates, revaluation, realised/unrealised gains | Xero, Sage, Acumatica | Have (native Currencies screen: rates, fetch, revalue) |
-| Multi-entity consolidation, intercompany eliminations, combined reports | Xero, Sage, Acumatica, QB | Missing |
+| Multi-entity consolidation, intercompany eliminations, combined reports | Xero, Sage, Acumatica, QB | Have: combine company files' P&L and balance sheet by account code, eliminate chosen intercompany accounts; currency translation still to add (flagged when currencies differ) |
 | Segmented chart of accounts / dimensions (department, location, project) | Sage, Acumatica | Partial: 2 tracking categories (Class List) |
 | Fixed assets: depreciation, disposal, leases | Acumatica, QB | Partial: native register, depreciation and disposal; leases missing |
 | Deferred revenue / revenue recognition schedules (IFRS 15 / ASC 606) | Acumatica | Have: defer an invoice over N months (to a Deferred Revenue liability), recognise up to a date, Deferred Revenue report; multi-element allocation still to add |

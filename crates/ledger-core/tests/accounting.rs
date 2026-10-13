@@ -1018,3 +1018,23 @@ fn landed_costs_raise_stock_cost() {
     assert_eq!(l.inventory_cost_out(a, 100_000).unwrap(), 12_500);
     assert_invariants(&l);
 }
+
+#[test]
+fn consolidation_of_two_companies() {
+    let (a, b) = (org(), org());
+    for (l, amt) in [(&a, "100"), (&b, "250")] {
+        let sales = acct(l, "200");
+        l.save_document(None, &DocInput { kind: "ACCREC".into(), contact_name: Some("Acme".into()), date: "2026-03-01".into(), line_amount_type: Some("NOTAX".into()),
+            lines: vec![line(sales, None, "1", amt)], status: Some("AUTHORISED".into()), ..Default::default() }).unwrap();
+    }
+    let r = ledger_core::consolidation::consolidate(&[("A".into(), &a), ("B".into(), &b)], "2026-01-01", "2026-12-31", &[]).unwrap();
+    assert_eq!(r["columns"], serde_json::json!(["A", "B", "Eliminations", "Consolidated"]));
+    let income = &r["sections"][0]["total"]["values"];
+    assert_eq!(income, &serde_json::json!([10_000, 25_000, 0, 35_000]));
+    // The consolidated balance sheet balances.
+    let total = |n: usize| r["sections"][n]["total"]["values"][3].as_i64().unwrap();
+    assert_eq!(total(3), total(4) + total(5), "assets = liabilities + equity");
+    // Eliminating the sales account nets it to nothing.
+    let r = ledger_core::consolidation::consolidate(&[("A".into(), &a), ("B".into(), &b)], "2026-01-01", "2026-12-31", &["200".into()]).unwrap();
+    assert_eq!(r["sections"][0]["total"]["values"], serde_json::json!([10_000, 25_000, -35_000, 0]));
+}

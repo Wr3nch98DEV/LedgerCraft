@@ -118,6 +118,22 @@ pub fn handle(st: &AppState, token: Option<&str>, method: &str, p: Value) -> R {
             _ => Ok(crate::jobs::run_once(st)),
         };
     }
+    if method == "consolidate" {
+        // Reads other company files, so it's handled here with the data folder.
+        if !session.perms.iter().any(|x| x == "reports:read") { return Err(ApiError::Forbidden("you don't have permission (reports:read)".into())); }
+        let files: Vec<String> = de(&p["files"])?;
+        if files.len() < 2 { return Err(ApiError::Bad("choose at least two companies".into())); }
+        let mut opened = Vec::new();
+        for f in &files {
+            if f.contains('/') || f.contains('\\') || f.contains("..") { return Err(ApiError::Bad("invalid file".into())); }
+            let l2 = Ledger::open(&st.orgs_dir().join(f))?;
+            let name = l2.setting("org_name")?.unwrap_or_else(|| f.clone());
+            opened.push((name, l2));
+        }
+        let refs: Vec<(String, &Ledger)> = opened.iter().map(|(n, l)| (n.clone(), l)).collect();
+        let elim: Vec<String> = serde_json::from_value(p["eliminate"].clone()).unwrap_or_default();
+        return Ok(ledger_core::consolidation::consolidate(&refs, s(&p, "from"), s(&p, "to"), &elim)?);
+    }
     let need = |perm: &str| -> Result<(), ApiError> {
         if session.perms.iter().any(|p| p == perm) { Ok(()) } else { Err(ApiError::Forbidden(format!("you don't have permission ({perm})"))) }
     };

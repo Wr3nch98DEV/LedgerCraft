@@ -4162,3 +4162,23 @@ fn landed_cost_in_the_app() {
     assert_eq!(tb["balanced"], true);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn consolidated_reports_in_the_app() {
+    use crate::extras::Msg as X;
+    let (mut app, dir) = desktop_app("consol");
+    let first = app.be.call_now("orgs.list", json!({})).unwrap()[0]["file"].as_str().unwrap().to_string();
+    // A second company (creating it opens it), then back to the first.
+    let second = app.be.call_now("orgs.create", json!({"org_name": "Sister Co", "country": "US", "demo": true, "owner_name": "Alex"})).unwrap()["file"].as_str().unwrap().to_string();
+    app.be.call_now("orgs.open", json!({"file": first})).unwrap();
+    let t = app.update(Message::Nav(Route::Consolidation)); settle(&mut app, t);
+    let _ = app.update(Message::Extras(X::CoFile(first.clone())));
+    let _ = app.update(Message::Extras(X::CoFile(second.clone())));
+    let _ = app.update(Message::Extras(X::CoFrom(app.d("2025-01-01"))));
+    let t = app.update(Message::Extras(X::CoRun)); settle(&mut app, t);
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    let r = app.extras.co_result.clone().expect("combined");
+    assert_eq!(r["columns"].as_array().unwrap().len(), 4);
+    assert!(!click_fails(&app, "CONSOLIDATED") && !click_fails(&app, "Net profit"));
+    let _ = std::fs::remove_dir_all(dir);
+}

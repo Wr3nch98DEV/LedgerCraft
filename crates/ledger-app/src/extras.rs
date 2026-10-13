@@ -45,6 +45,12 @@ pub struct State {
     pub lc_bill: Option<Opt>,
     pub lc_receipts: std::collections::BTreeSet<i64>,
     pub lc_qty: bool,
+    /// Consolidation: companies ticked, dates and intercompany account codes, and the result.
+    pub co_files: std::collections::BTreeSet<String>,
+    pub co_from: String,
+    pub co_to: String,
+    pub co_elim: String,
+    pub co_result: Option<Value>,
     /// Revenue recognition: the invoice, months and start date for a new schedule, and the run-to date.
     pub rr_invoice: Option<Opt>,
     pub rr_months: String,
@@ -123,6 +129,7 @@ pub enum Msg {
     /// Payment reminders: on/off, a new level's days, add, switch a level on/off, delete, send due reminders now.
     PrNew(bool), PrField(usize, String), PrItem(Opt), PrLevel(Opt), PrSave, PrDelete(i64),
     LotItem(Opt), LotMode(&'static str), LotExpiry(i64, String, String), LotExpirySave(i64, String),
+    CoFile(String), CoFrom(String), CoTo(String), CoElim(String), CoRun, CoDone(Reply),
     LcBill(Opt), LcReceipt(i64), LcByQty(bool), LcApply,
     CfNew(Option<&'static str>), CfName(String), CfKind(&'static str), CfSave, CfDelete(i64), CfValue(i64, String), CfSaveValues(&'static str, i64),
     RrInvoice(Opt), RrMonths(String), RrStart(String), RrTo(String), RrCreate, RrRun,
@@ -172,6 +179,7 @@ pub fn load(app: &mut App) -> Task<Message> {
         Route::Locations => call(app, "locations.stock", json!({})),
         Route::Lots => call(app, "lots.list", json!({})),
         Route::CustomFields => call(app, "customFields.list", json!({})),
+        Route::Consolidation => call(app, "orgs.list", json!({})),
         Route::LandedCosts => {
             let be = app.be.clone();
             Task::perform(async move {
@@ -263,6 +271,22 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             app.extras.busy = true;
             app.be.call("recode.apply", p, |r| Message::Extras(Msg::Done(r.map(|v| { let n = v["transactions"].as_i64().unwrap_or(0); json!({"n": n}) }), "Recoded — the transactions were reposted")))
         }
+        // ---- consolidation ----
+        Msg::CoFile(f) => { if !app.extras.co_files.remove(&f) { app.extras.co_files.insert(f); } Task::none() }
+        Msg::CoFrom(v) => { let old = app.extras.co_from.clone(); app.extras.co_from = ui::date_keys(&old, &v, style); Task::none() }
+        Msg::CoTo(v) => { let old = app.extras.co_to.clone(); app.extras.co_to = ui::date_keys(&old, &v, style); Task::none() }
+        Msg::CoElim(v) => { app.extras.co_elim = v; Task::none() }
+        Msg::CoRun => {
+            let x = &app.extras;
+            if x.co_files.len() < 2 { return app.toast("Tick at least two companies", true); }
+            let today = ui::today_iso();
+            let from = if x.co_from.is_empty() { Some(format!("{}-01-01", &today[..4])) } else { ui::to_iso(&x.co_from, style) };
+            let to = if x.co_to.is_empty() { Some(today) } else { ui::to_iso(&x.co_to, style) };
+            let (Some(from), Some(to)) = (from, to) else { return app.toast("Check the dates", true) };
+            let elim: Vec<String> = x.co_elim.split(|c: char| c == ',' || c.is_whitespace()).map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect();
+            app.be.call("consolidate", json!({"files": x.co_files.iter().collect::<Vec<_>>(), "from": from, "to": to, "eliminate": elim}), |r| Message::Extras(Msg::CoDone(r)))
+        }
+        Msg::CoDone(r) => match r { Ok(v) => { app.extras.co_result = Some(v); Task::none() } Err(e) => app.toast(e, true) },
         // ---- landed costs ----
         Msg::LcBill(o) => { app.extras.lc_bill = Some(o); Task::none() }
         Msg::LcReceipt(id) => { if !app.extras.lc_receipts.remove(&id) { app.extras.lc_receipts.insert(id); } Task::none() }
@@ -1115,6 +1139,60 @@ pub fn price_rules_section(app: &App) -> Element<'_, Message> {
     }).collect();
     col = col.push(ui::table(&[ui::col("Rule", 16), ui::col("Item", 18), ui::col("Customers", 16), ui::col("Quantity", 10), ui::col("Change", 9), ui::col("Dates", 20), ui::col("", 9)], rows, "No price rules yet."));
     col.push(ui::muted("The lowest matching price wins. Rules apply after the customer's price level, when an item goes on a sale or its quantity changes.")).into()
+}
+
+// ---------------- Consolidation ----------------
+
+/// Combine several companies' statements: tick the companies, choose dates and intercompany accounts.
+pub fn consolidation(app: &App) -> Element<'_, Message> {
+    let Some(d) = &app.data else { return loading() };
+    let x = &app.extras;
+    let k = t();
+    let mut pick = column![lbl("COMPANIES")].spacing(4);
+    for o in d.as_array().cloned().unwrap_or_default() {
+        let file = o["file"].as_str().unwrap_or("").to_string();
+        let f2 = file.clone();
+        pick = pick.push(iced::widget::checkbox(x.co_files.contains(&file)).label(format!("{}  ({file})", o["name"].as_str().unwrap_or(""))).on_toggle(move |_| Message::Extras(Msg::CoFile(f2.clone()))).text_size(13));
+    }
+    let today = ui::today_iso();
+    let from_ph = app.d(&format!("{}-01-01", &today[..4]));
+    let to_ph = app.d(&today);
+    let form = ui::card(column![
+        pick,
+        row![
+            column![lbl("FROM"), text_input(&from_ph, &x.co_from).on_input(|v| Message::Extras(Msg::CoFrom(v))).padding([5, 7]).size(13).style(theme::input).width(130)].spacing(3),
+            column![lbl("TO"), text_input(&to_ph, &x.co_to).on_input(|v| Message::Extras(Msg::CoTo(v))).padding([5, 7]).size(13).style(theme::input).width(130)].spacing(3),
+            input("INTERCOMPANY ACCOUNT CODES TO ELIMINATE", &x.co_elim, 320.0, |v| Message::Extras(Msg::CoElim(v))),
+            iced::widget::Space::new().width(Length::Fill), ui::btn_primary("Combine", Some(Message::Extras(Msg::CoRun))),
+        ].spacing(12).align_y(Alignment::End),
+    ].spacing(12));
+    let mut body = column![form].spacing(14);
+    if let Some(r) = &x.co_result {
+        let cols: Vec<String> = r["columns"].as_array().cloned().unwrap_or_default().iter().map(|c| c.as_str().unwrap_or("").to_string()).collect();
+        let w = cols.len();
+        let cell = |t: String, head: bool, bold: bool, right: bool, portion: u16| -> Element<'_, Message> {
+            let tx = text(if head { t.to_uppercase() } else { t }).size(if head { 11 } else { 13 }).font(if head || bold { BOLD } else { iced::Font::DEFAULT }).color(if head { k.muted } else { k.text });
+            container(if right { tx.align_x(iced::alignment::Horizontal::Right).width(Length::Fill) } else { tx.width(Length::Fill) }).width(Length::FillPortion(portion)).into()
+        };
+        let mut head = row![cell(String::new(), true, false, false, 26)].spacing(8);
+        for c in &cols { head = head.push(cell(c.clone(), true, false, true, 12)); }
+        let mut grid = column![container(head.padding([8, 12])).style(theme::header_row).width(Length::Fill)];
+        for sec in r["sections"].as_array().cloned().unwrap_or_default() {
+            if let Some(t) = sec["title"].as_str().filter(|t| !t.is_empty()) { grid = grid.push(container(text(t.to_string()).size(14).font(BOLD)).padding([8, 12])); }
+            for row_v in sec["rows"].as_array().cloned().unwrap_or_default() {
+                let mut line = row![cell(row_v["label"].as_str().unwrap_or("").to_string(), false, false, false, 26)].spacing(8);
+                for n in 0..w { line = line.push(cell(ui::money(row_v["values"][n].as_i64().unwrap_or(0)), false, false, true, 12)); }
+                grid = grid.push(container(line).padding([4, 12]));
+            }
+            let tot = &sec["total"];
+            let mut line = row![cell(tot["label"].as_str().unwrap_or("").to_string(), false, true, false, 26)].spacing(8);
+            for n in 0..w { line = line.push(cell(ui::money(tot["values"][n].as_i64().unwrap_or(0)), false, true, true, 12)); }
+            grid = grid.push(column![ui::hr(), container(line).padding([6, 12])]);
+        }
+        body = body.push(container(grid).style(theme::card).width(Length::Fill));
+        for n in r["notes"].as_array().cloned().unwrap_or_default() { body = body.push(ui::muted(n.as_str().unwrap_or("").to_string())); }
+    }
+    ui::page(ui::h1(if app.desktop() { "Combine Reports from Multiple Companies" } else { "Consolidated reports" }), vec![], body.into())
 }
 
 // ---------------- Landed costs ----------------

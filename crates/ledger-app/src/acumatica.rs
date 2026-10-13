@@ -102,6 +102,7 @@ pub static PLACES: &[(&str, &str, &str, &str)] = &[
     ("reports", "finance", "Reports", "Financial Reports"),
     ("memorized_reports", "finance", "Reports", "Saved Report Versions"),
     ("custom_reports", "finance", "Reports", "Report Designer"),
+    ("consolidation", "finance", "Reports", "Consolidation"),
     ("insights", "finance", "Inquiries", "Company Dashboard"),
     ("find", "finance", "Inquiries", "Transaction Search"),
     // Configuration

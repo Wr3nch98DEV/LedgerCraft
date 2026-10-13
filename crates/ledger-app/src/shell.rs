@@ -143,6 +143,7 @@ fn page(app: &App) -> Element<'_, Message> {
         Route::RevenueRecognition => crate::extras::revenue_recognition(app),
         Route::CustomFields => crate::extras::custom_fields(app),
         Route::LandedCosts => crate::extras::landed_costs(app),
+        Route::Consolidation => crate::extras::consolidation(app),
         Route::CustomReports => crate::extras::custom_reports(app),
         Route::PayrollSettings => crate::extras::payroll_settings(app),
         Route::EnterTime => crate::desktop::enter_time(app),
