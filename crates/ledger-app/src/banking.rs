@@ -17,6 +17,11 @@ pub struct State {
     pub cat_tax: Option<Opt>,
     pub payee: String,
     pub busy: bool,
+    /// Xero reconcile: the tab open on a statement line (match, create, transfer, discuss).
+    pub xtab: Option<(i64, &'static str)>,
+    /// Xero reconcile: the other bank account for a transfer, and the note being written.
+    pub transfer_to: Option<Opt>,
+    pub note: String,
     /// A CSV whose columns are being matched by hand.
     pub map: Option<CsvMap>,
 }
@@ -56,6 +61,13 @@ pub enum Msg {
     Undo(i64),
     /// Exclude a line from review (or restore it).
     Exclude(i64, bool),
+    /// Xero reconcile: open a tab on a statement line.
+    XTab(i64, &'static str),
+    TransferTo(Opt),
+    /// Reconcile the line as a transfer to/from the chosen bank account.
+    Transfer(i64),
+    Note(String),
+    SaveNote(i64),
     AcceptAll,
     Done(Result<Value, String>, &'static str),
     /// Pick a statement file (CSV, OFX/QFX, QIF, CAMT.053, MT940) and import it.
@@ -143,6 +155,24 @@ pub fn update(app: &mut App, m: Msg) -> Task<Message> {
             let _ = update(app, Msg::Expand(line));
             update(app, Msg::Add(line))
         }
+        Msg::XTab(line, tab) => {
+            app.bank.xtab = Some((line, tab));
+            match tab {
+                // Create uses the same pre-filled form as the expanded row.
+                "create" => { app.bank.expanded = None; let _ = update(app, Msg::Expand(line)); }
+                "discuss" => app.bank.note = line_by_id(app, line).map(|l| l["notes"].as_str().unwrap_or("").to_string()).unwrap_or_default(),
+                _ => {}
+            }
+            Task::none()
+        }
+        Msg::TransferTo(o) => { app.bank.transfer_to = Some(o); Task::none() }
+        Msg::Transfer(line) => {
+            let Some(o) = app.bank.transfer_to.clone() else { return app.toast("Choose the other bank account", true) };
+            app.bank.busy = true;
+            app.be.call("rec.transfer", json!({"id": line, "account_id": o.id}), |r| Message::Bank(Msg::Done(r, "Transfer recorded")))
+        }
+        Msg::Note(s) => { app.bank.note = s; Task::none() }
+        Msg::SaveNote(line) => app.be.call("statements.note", json!({"id": line, "note": app.bank.note}), |r| Message::Bank(Msg::Done(r, "Note saved"))),
         Msg::Undo(line) => app.be.call("rec.unreconcile", json!({"id": line}), |r| Message::Bank(Msg::Done(r, "Moved back to review"))),
         Msg::Exclude(line, on) => app.be.call("statements.exclude", json!({"id": line, "on": on}), move |r| Message::Bank(Msg::Done(r, if on { "Excluded" } else { "Moved back to review" }))),
         Msg::AcceptAll => {
@@ -447,20 +477,47 @@ fn xero_cards<'a>(app: &'a App, lines: &'a [Value]) -> Element<'a, Message> {
             row![column![text(title_case(l["payee"].as_str().unwrap_or(""))).size(15).font(BOLD), ui::muted(l["description"].as_str().unwrap_or("").to_string())].spacing(2).width(Fill),
                 text(ui::money(amount.abs())).size(17).font(BOLD).color(if amount < 0 { k.text } else { k.ok })].align_y(Alignment::Center),
         ].spacing(6)).padding(14).width(Fill).style(theme::card);
-        let action = primary_action(l);
+        let mut action = primary_action(l);
         let (sugg, is_match) = suggestion_text(app, l);
-        let right: Element<Message> = if action.is_some() {
-            container(column![
-                text(if is_match { "Match" } else { "Create (bank rule)" }).size(11).font(BOLD).color(k.ok),
-                text(sugg).size(14),
-                text(ui::money(amount.abs())).size(13).color(k.muted),
-            ].spacing(4)).padding(14).width(Fill).style(theme::accent_soft).into()
-        } else if app.bank.expanded == Some(id) {
-            detail(app, l)
-        } else {
-            container(column![ui::muted("No match found."), row![ui::btn("Create", Some(Message::Bank(Msg::Expand(id)))), ui::btn("Find & match", Some(Message::Bank(Msg::Expand(id))))].spacing(8)].spacing(8))
-                .padding(14).width(Fill).style(theme::soft).into()
+        // Xero's four tabs on the right of each line: Match (the default), Create, Transfer, Discuss.
+        let open = match app.bank.xtab { Some((x, tb)) if x == id => tb, _ if app.bank.expanded == Some(id) => "create", _ => "match" };
+        let tabs = row(["Match", "Create", "Transfer", "Discuss"].into_iter().map(|label| {
+            let key: &'static str = match label { "Match" => "match", "Create" => "create", "Transfer" => "transfer", _ => "discuss" };
+            let active = open == key;
+            button(text(label).size(13).font(if active { BOLD } else { iced::Font::DEFAULT })).style(theme::tab(active)).padding([5, 10]).on_press(Message::Bank(Msg::XTab(id, key))).into()
+        })).spacing(2);
+        let panel: Element<Message> = match open {
+            "create" => column![cat_form(app, l), row![ui::hspace(), ui::btn("Delete statement line", if app.bank.busy { None } else { Some(Message::Bank(Msg::Exclude(id, true))) })]].spacing(8).into(),
+            "transfer" => {
+                let others: Vec<Opt> = app.data.as_ref().and_then(|d| d["banks"].as_array()).cloned().unwrap_or_default().iter()
+                    .filter(|b| b["id"].as_i64() != l["account_id"].as_i64()).map(|b| Opt { id: i(&b["id"]), label: b["name"].as_str().unwrap_or("").to_string() }).collect();
+                row![
+                    column![ui::label(if amount < 0 { "Transferred to" } else { "Transferred from" }), pick_list(others, app.bank.transfer_to.clone(), |o| Message::Bank(Msg::TransferTo(o))).placeholder("Choose a bank account").padding([7, 10]).text_size(14).style(theme::pick).width(Fill)].spacing(5).width(Fill),
+                    column![Space::new().height(18), ui::btn_primary("Transfer & reconcile", if app.bank.busy { None } else { Some(Message::Bank(Msg::Transfer(id))) })].width(iced::Shrink),
+                ].spacing(12).align_y(Alignment::End).into()
+            }
+            "discuss" => column![
+                ui::muted("Leave a note on this line for whoever reconciles it."),
+                text_input("Add a note", &app.bank.note).on_input(|s| Message::Bank(Msg::Note(s))).on_submit(Message::Bank(Msg::SaveNote(id))).padding([7, 10]).size(14).style(theme::input),
+                row![ui::hspace(), ui::btn_primary("Save note", Some(Message::Bank(Msg::SaveNote(id))))],
+            ].spacing(8).into(),
+            _ => {
+                if action.is_some() {
+                    container(column![
+                        text(if is_match { "Match" } else { "Create (bank rule)" }).size(11).font(BOLD).color(k.ok),
+                        text(sugg).size(14),
+                        text(ui::money(amount.abs())).size(13).color(k.muted),
+                    ].spacing(4)).padding(12).width(Fill).style(theme::accent_soft).into()
+                } else if let Some(m) = match_list(app, l) {
+                    column![ui::muted("Choose a transaction to match:"), m].spacing(8).into()
+                } else {
+                    ui::muted("No match found. Create a transaction, or record it as a transfer.")
+                }
+            }
         };
+        if open != "match" { action = None; }
+        let note: Element<Message> = match l["notes"].as_str().filter(|s| !s.is_empty()) { Some(n) => text(format!("Note: {n}")).size(12).color(k.muted).into(), None => Space::new().into() };
+        let right: Element<Message> = container(column![tabs, panel, note].spacing(10)).padding(12).width(Fill).style(theme::soft).into();
         let ok: Element<Message> = match action {
             Some(a) => container(button(text("OK").size(15).font(BOLD).align_x(iced::alignment::Horizontal::Center).width(Fill)).style(theme::primary).padding([18, 0]).width(90)
                 .on_press_maybe(if app.bank.busy { None } else { Some(Message::Bank(a)) })).padding([0, 10]).into(),
@@ -471,24 +528,30 @@ fn xero_cards<'a>(app: &'a App, lines: &'a [Value]) -> Element<'a, Message> {
     col.into()
 }
 
-/// Expanded row: categorise (create a transaction) or pick a different match.
-fn detail<'a>(app: &'a App, l: &'a Value) -> Element<'a, Message> {
-    let k = t();
+/// Create a transaction from a statement line: payee, account, tax.
+fn cat_form<'a>(app: &'a App, l: &'a Value) -> Element<'a, Message> {
     let id = i(&l["id"]);
     let qb = app.skin == Skin::QuickBooks;
     let amount = i(&l["amount"]);
     let accounts = app.lk.account_opts(|a| a["type"] != "BANK");
     let taxes = app.lk.tax_opts();
-    let cat = row![
+    row![
         column![ui::label(if amount < 0 { "Payee" } else { "Received from" }), text_input("", &app.bank.payee).on_input(|p| Message::Bank(Msg::Payee(p))).padding([7, 10]).size(14).style(theme::input)].spacing(5).width(Fill),
         column![ui::label(if qb { "Category" } else { "Account" }), pick_list(accounts, app.bank.cat_account.clone(), |a| Message::Bank(Msg::CatAccount(a))).placeholder("Choose a category").padding([7, 10]).text_size(14).style(theme::pick).width(Fill)].spacing(5).width(Fill),
         column![ui::label("Tax"), pick_list(taxes, app.bank.cat_tax.clone(), |t| Message::Bank(Msg::CatTax(t))).placeholder("Tax").padding([7, 10]).text_size(14).style(theme::pick).width(Fill)].spacing(5).width(Fill),
         column![Space::new().height(18), ui::btn_primary(if qb { "Add" } else { "Create & reconcile" }, if app.bank.busy { None } else { Some(Message::Bank(Msg::Add(id))) })].width(iced::Shrink),
-    ].spacing(12).align_y(Alignment::End);
-    // Other possible matches.
+    ].spacing(12).align_y(Alignment::End).into()
+}
+
+/// Other transactions and open invoices/bills a statement line could match, or None.
+fn match_list<'a>(app: &'a App, l: &'a Value) -> Option<Element<'a, Message>> {
+    let id = i(&l["id"]);
+    let amount = i(&l["amount"]);
     let s = &l["suggest"];
     let mut matches = column![].spacing(6);
+    let mut any = false;
     for d in s["documents"].as_array().cloned().unwrap_or_default().into_iter().take(4) {
+        any = true;
         let amt = amount.abs().min(i(&d["amount_due"]));
         matches = matches.push(row![
             text(format!("{} {} · {} · due {}", if d["type"] == "ACCREC" { "Invoice" } else { "Bill" }, d["number"].as_str().unwrap_or(""), d["contact"].as_str().unwrap_or(""), app.d(d["due_date"].as_str().unwrap_or("")))).size(13).width(Fill),
@@ -497,14 +560,24 @@ fn detail<'a>(app: &'a App, l: &'a Value) -> Element<'a, Message> {
         ].spacing(10).align_y(Alignment::Center));
     }
     for m in s["matches"].as_array().cloned().unwrap_or_default().into_iter().take(4) {
+        any = true;
         matches = matches.push(row![
             text(format!("{} · {} · {}", m["description"].as_str().unwrap_or(""), m["contact"].as_str().unwrap_or(""), app.d(m["date"].as_str().unwrap_or("")))).size(13).width(Fill),
             text(ui::money(i(&m["amount"]))).size(13).width(110),
             ui::btn("Match", Some(Message::Bank(Msg::MatchTx(id, m["kind"].as_str().unwrap_or("").into(), i(&m["id"]))))),
         ].spacing(10).align_y(Alignment::Center));
     }
+    any.then(|| matches.into())
+}
+
+/// Expanded row: categorise (create a transaction) or pick a different match.
+fn detail<'a>(app: &'a App, l: &'a Value) -> Element<'a, Message> {
+    let k = t();
+    let id = i(&l["id"]);
+    let qb = app.skin == Skin::QuickBooks;
+    let matches = match_list(app, l).unwrap_or_else(|| ui::muted("No other matches."));
     container(column![
-        text(if qb { "Categorize" } else { "Create a transaction" }).size(13).font(BOLD).color(k.muted), cat,
+        text(if qb { "Categorize" } else { "Create a transaction" }).size(13).font(BOLD).color(k.muted), cat_form(app, l),
         text(if qb { "Or find a match" } else { "Or match an existing transaction" }).size(13).font(BOLD).color(k.muted), matches,
         row![ui::hspace(), ui::btn(if qb { "Exclude" } else { "Delete statement line" }, if app.bank.busy { None } else { Some(Message::Bank(Msg::Exclude(id, true))) })],
     ].spacing(10)).padding([14, 16]).style(theme::soft).width(Fill).into()

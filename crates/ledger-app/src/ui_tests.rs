@@ -3533,3 +3533,26 @@ fn xero_invoice_submit_for_approval_then_approve() {
     assert_eq!(app.be.call_now("docs.get", json!({"id": id})).unwrap()["status"], "AUTHORISED");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn xero_reconcile_tabs_transfer_and_discuss() {
+    use crate::banking::Msg as B;
+    let (mut app, dir) = demo_app("xero-rec", Skin::Xero);
+    let t = app.update(Message::Nav(Route::Banking(None))); settle(&mut app, t);
+    let lines = app.data.as_ref().unwrap()["lines"].as_array().unwrap().clone();
+    let line = lines.iter().find(|l| l["payee"].as_str().unwrap_or("").to_lowercase().contains("officeworks")).expect("unmatched line")["id"].as_i64().unwrap();
+    // Discuss: a note stays on the line.
+    let _ = app.update(Message::Bank(B::XTab(line, "discuss")));
+    let _ = app.update(Message::Bank(B::Note("Check the receipt".into())));
+    press(&mut app, "Save note");
+    let l = app.data.as_ref().unwrap()["lines"].as_array().unwrap().iter().find(|l| l["id"] == line).cloned().unwrap();
+    assert_eq!(l["notes"], "Check the receipt");
+    // Transfer: reconciled as a transfer to the other bank account.
+    let _ = app.update(Message::Bank(B::XTab(line, "transfer")));
+    let saver = app.data.as_ref().unwrap()["banks"].as_array().unwrap().iter().find(|b| b["id"] != l["account_id"]).cloned().unwrap();
+    let _ = app.update(Message::Bank(B::TransferTo(crate::app::Opt { id: saver["id"].as_i64().unwrap(), label: "Saver".into() })));
+    press(&mut app, "Transfer & reconcile");
+    assert!(app.toasts.iter().all(|t| !t.2), "{:?}", app.toasts);
+    assert!(app.data.as_ref().unwrap()["lines"].as_array().unwrap().iter().all(|l| l["id"] != line), "line reconciled");
+    let _ = std::fs::remove_dir_all(dir);
+}
