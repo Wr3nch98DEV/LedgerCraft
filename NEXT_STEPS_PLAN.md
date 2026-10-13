@@ -29,6 +29,16 @@ Written 13 Oct 2026 from your six-step list and the four feature guides (QuickBo
 
 **Done when** an automated test walks the feature registry in every layout and finds every feature reachable from that layout's own navigation, with no placeholder and no disabled entry.
 
+**Status (13 Oct, afternoon): done** — except 1.2 (the per-layout view split), which moves to the start of step 3 where the new layouts need it.
+- The feature registry (`crates/ledger-app/src/features.rs`) builds the QuickBooks Online-style and Xero-style menus. Every Desktop feature is in both, with each product's wording, and the test `every_feature_in_every_layout` clicks each one in each layout.
+- Placeholders are gone: Help, My accountant and Apps are real screens.
+- New native screens: Fixed assets, Audit log, Currencies, Budgets, Expense claims and mileage, Bank rules, Import and export, Custom reports, Payroll settings, and project tasks/time/costs.
+- Added to existing screens: payslips and bank payment files, two-step verification, user passwords, matching CSV columns by hand, and a second tracking category.
+- Nothing points to the web version any more.
+- Bugs found and fixed:
+  - In Online/Xero, the edit-customer/item/account screens showed the journal form.
+  - Setting a staff member's first password signed the current session out.
+
 ---
 
 ## Step 2 — Xero-style and QuickBooks Online-style as close to 1:1 as possible
