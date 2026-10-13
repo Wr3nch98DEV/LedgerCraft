@@ -3677,3 +3677,19 @@ fn xero_organisation_settings_tiles() {
     assert_eq!(app.settings.cat, None);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn xero_projects_tabs_and_pay_run_wording() {
+    let (mut app, dir) = desktop_app("xero-projtabs");
+    let t = app.update(Message::SetLayout(crate::theme::Layout::Xero)); settle(&mut app, t);
+    let t = app.update(Message::Nav(Route::Projects)); settle(&mut app, t);
+    assert!(!click_fails(&app, "Pinecrest brand refresh"));
+    press(&mut app, "Closed");
+    assert_eq!(app.list_tab, "closed");
+    assert!(click_fails(&app, "Pinecrest brand refresh"), "in-progress project hidden on Closed");
+    press(&mut app, "In progress");
+    assert!(!click_fails(&app, "Pinecrest brand refresh"));
+    let t = app.update(Message::Nav(Route::Payroll)); settle(&mut app, t);
+    assert!(!click_fails(&app, "Add pay run"));
+    let _ = std::fs::remove_dir_all(dir);
+}

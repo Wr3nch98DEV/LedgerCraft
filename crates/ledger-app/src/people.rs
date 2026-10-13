@@ -152,7 +152,7 @@ pub fn payroll(app: &App) -> Element<'_, Message> {
         ui::h2("Employees"),
         ui::table(&[col("Name", 26), col("Pay type", 12), col("Rate", 16), col("Pay schedule", 16), col("Status", 10)], emps, "No employees yet."),
     ].spacing(14);
-    ui::page(ui::h1("Payroll"), vec![ui::btn_primary("Run payroll", if app.people.busy { None } else { Some(Message::People(Msg::RunPayroll)) })], body.into())
+    ui::page(ui::h1(if app.skin == crate::theme::Skin::Xero { "Pay runs" } else { "Payroll" }), vec![ui::btn_primary(if app.skin == crate::theme::Skin::Xero { "Add pay run" } else { "Run payroll" }, if app.people.busy { None } else { Some(Message::People(Msg::RunPayroll)) })], body.into())
 }
 
 pub fn pay_run(app: &App) -> Element<'_, Message> {
@@ -281,7 +281,13 @@ pub fn projects(app: &App) -> Element<'_, Message> {
     if let Some(e) = loading(app, "Projects") { return e; }
     let d = app.data.as_ref().unwrap();
     let k = t();
-    let rows = d["projects"].as_array().cloned().unwrap_or_default().iter().map(|p| {
+    // Status tabs: Xero "In progress / Closed"; QuickBooks "In progress / Not started / Completed".
+    let xero = app.skin == crate::theme::Skin::Xero;
+    let tabs: Vec<(&'static str, String)> = if xero { vec![("all", "All".into()), ("inprogress", "In progress".into()), ("closed", "Closed".into())] }
+        else { vec![("all", "All".into()), ("inprogress", "In progress".into()), ("draft", "Not started".into()), ("closed", "Completed".into())] };
+    let want = match app.list_tab { "inprogress" => Some("INPROGRESS"), "closed" => Some("CLOSED"), "draft" => Some("DRAFT"), _ => None };
+    let rows = d["projects"].as_array().cloned().unwrap_or_default().iter()
+        .filter(|p| want.is_none_or(|w| if w == "DRAFT" { !matches!(p["status"].as_str(), Some("INPROGRESS" | "CLOSED")) } else { p["status"] == w })).map(|p| {
         let s = &p["summary"];
         let id = i(&p["id"]);
         let to_invoice = i(&s["to_invoice"]);
@@ -295,6 +301,7 @@ pub fn projects(app: &App) -> Element<'_, Message> {
     }).collect();
     ui::page(ui::h1("Projects"), vec![ui::btn_primary("New project", Some(Message::Extras(crate::extras::Msg::PjNew(true))))], column![
         crate::extras::project_new(app),
+        crate::lists::tab_row(app, &tabs),
         ui::table(&[col("Project", 22), col("Customer", 18), col("Status", 12), coln("Time", 9), coln("Costs", 11), coln("Unbilled", 11), coln("Profit", 11), col("", 8)], rows, "No projects yet."),
         crate::extras::project_panel(app),
     ].spacing(14).into())

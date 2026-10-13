@@ -98,7 +98,7 @@ pub(crate) fn search_and_tabs<'a>(app: &'a App, tabs: &[(&'static str, String)])
 }
 
 /// Tabs without the search box (contact pages).
-fn tab_row<'a>(app: &'a App, tabs: &[(&'static str, String)]) -> Element<'a, Message> {
+pub(crate) fn tab_row<'a>(app: &'a App, tabs: &[(&'static str, String)]) -> Element<'a, Message> {
     let k = t();
     let mut r = row![].spacing(2).align_y(Alignment::Center);
     for (key, label) in tabs {
