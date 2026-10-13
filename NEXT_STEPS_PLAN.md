@@ -71,6 +71,30 @@ Written 13 Oct 2026 from your six-step list and the four feature guides (QuickBo
 
 **Done when** every checklist screen has been compared side by side (screenshot vs ours), and the differences that remain are listed and agreed with you as acceptable.
 
+**Status (13 Oct, 15:30): first pass done from public documentation.** Waiting on your reference screenshots for the side-by-side comparison.
+
+Xero-style:
+- Invoice and bill lists have the summary boxes (Draft, Awaiting approval, Awaiting payment, Overdue), a Repeating tab, and Import / Export / Send statements / New credit note / New repeating.
+- Invoice editor:
+  - Save draft / Submit for approval / Approve / Approve & email.
+  - "Sales overview › Invoices" breadcrumb.
+  - Xero's field names: To/From, Date, Invoice number.
+- Reconcile: each line has Match / Create / Transfer / Discuss tabs.
+- Contact page: details on the left; Money in / Money out, recent activity, and History & notes on the right.
+- Find and recode.
+- Reports: Favourites (starred, kept per company), search, and a Custom tab.
+- Organisation settings tiles.
+- Projects: In progress / Closed tabs. Payroll: "Pay runs / Add pay run".
+
+QuickBooks Online-style:
+- Sales and expense lists: Action column.
+- Customer and vendor pages: Transaction list / Statements / Details / Notes tabs.
+- Reports: Standard / Custom tabs, Favorites with stars, and search.
+- Account and settings: Company / Sales / Users / Advanced / Layout tabs.
+- Reclassify transactions.
+
+Light mode was checked on the new screens; dark stays the default.
+
 ---
 
 ## Step 3 — MYOB Acumatica-style and Sage-style layouts
