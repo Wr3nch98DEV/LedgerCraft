@@ -127,8 +127,12 @@ fn money_bar<'a>(parts: Vec<(&'a str, String, i64, Color)>) -> Element<'a, Messa
 /// Each box opens its tab.
 fn xero_summary<'a>(app: &App, counts: &serde_json::Value) -> Element<'a, Message> {
     let k = t();
-    let boxes = [("draft", "Draft", "draft", "draft_total", k.muted), ("submitted", "Awaiting approval", "submitted", "submitted_total", k.warn),
-        ("awaiting", "Awaiting payment", "awaiting", "awaiting_total", k.info), ("overdue", "Overdue", "overdue", "overdue_total", k.bad)];
+    let boxes = if vocab::sage() {
+        vec![("draft", "Draft", "draft", "draft_total", k.muted), ("awaiting", "Outstanding", "awaiting", "awaiting_total", k.info), ("overdue", "Overdue", "overdue", "overdue_total", k.bad)]
+    } else {
+        vec![("draft", "Draft", "draft", "draft_total", k.muted), ("submitted", "Awaiting approval", "submitted", "submitted_total", k.warn),
+            ("awaiting", "Awaiting payment", "awaiting", "awaiting_total", k.info), ("overdue", "Overdue", "overdue", "overdue_total", k.bad)]
+    };
     row(boxes.into_iter().map(|(tab, label, n, total, c)| {
         let active = app.list_tab == tab;
         let n = i(&counts[n]);
@@ -147,7 +151,7 @@ pub fn docs(app: &App) -> Element<'_, Message> {
         Route::Invoices => (app.term("invoices"), "ACCREC"),
         Route::Quotes => (app.term("quotes"), "QUOTE"),
         Route::CreditNotes => (app.term("credit_notes"), "ACCRECCREDIT"),
-        Route::Bills => (if app.skin == Skin::QuickBooks { "Bills" } else { "Bills to pay" }, "ACCPAY"),
+        Route::Bills => (if app.skin == Skin::QuickBooks { app.term("bills") } else if vocab::sage() { "Purchase Invoices" } else { "Bills to pay" }, "ACCPAY"),
         Route::Expenses => ("Expense transactions", "ACCPAY"),
         Route::PurchaseOrders => (app.term("pos"), "PO"),
         _ => ("Transactions", "ACCREC"),
@@ -169,9 +173,9 @@ pub fn docs(app: &App) -> Element<'_, Message> {
             actions.push(ui::btn("Send statements", Some(Message::Nav(Route::Statements))));
             actions.push(ui::btn("New credit note", Some(Message::Nav(Route::Doc { kind: "ACCRECCREDIT".into(), id: None }))));
         } else {
-            actions.push(ui::btn("New credit note", Some(Message::Nav(Route::Doc { kind: "ACCPAYCREDIT".into(), id: None }))));
+            actions.push(ui::btn(if vocab::sage() { "New purchase credit note" } else { "New credit note" }, Some(Message::Nav(Route::Doc { kind: "ACCPAYCREDIT".into(), id: None }))));
         }
-        actions.push(ui::btn(if new_kind == "ACCREC" { "New repeating invoice" } else { "New repeating bill" }, Some(Message::Nav(Route::Memorized))));
+        actions.push(ui::btn(match (vocab::sage(), new_kind == "ACCREC") { (true, true) => "New recurring invoice", (true, false) => "New recurring purchase", (_, true) => "New repeating invoice", _ => "New repeating bill" }, Some(Message::Nav(Route::Memorized))));
     }
     if !purchases && new_kind == "ACCREC" && !xero_list { actions.push(ui::btn(app.term("receive_payment"), Some(Message::Nav(Route::ReceivePayment(None))))); }
     if matches!(app.route, Route::Expenses) { actions.push(ui::btn("New expense", Some(Message::Nav(Route::Spend(None))))); }
@@ -199,6 +203,9 @@ pub fn docs(app: &App) -> Element<'_, Message> {
     let tabs: Vec<(&'static str, String)> = match app.skin {
         Skin::QuickBooks if vocab::acumatica() => [("all", "All"), ("draft", "On Hold"), ("awaiting", "Open"), ("overdue", "Past due"), ("paid", "Closed")].into_iter().map(|(k, l)| (k, l.to_string())).collect(),
         Skin::QuickBooks => [("all", "All"), ("awaiting", "Unpaid"), ("overdue", "Overdue"), ("paid", "Paid"), ("draft", "Draft")].into_iter().map(|(k, l)| (k, l.to_string())).collect(),
+        // Sage: Draft / Outstanding / Overdue / Paid, and Recurring.
+        Skin::Xero if vocab::sage() => [("all", "All"), ("draft", "Draft"), ("awaiting", "Outstanding"), ("overdue", "Overdue"), ("paid", "Paid")].into_iter().map(|(k, l)| (k, l.to_string()))
+            .chain(xero_list.then(|| ("repeating", "Recurring".to_string()))).collect(),
         // Xero shows how many are waiting on the tabs that need action, e.g. "Awaiting payment (5)".
         Skin::Xero => [("all", "All"), ("draft", "Draft"), ("submitted", "Awaiting approval"), ("awaiting", "Awaiting payment"), ("paid", "Paid")].into_iter().map(|(k, l)| {
             let n = if matches!(k, "draft" | "submitted" | "awaiting") { i(&counts[k]) } else { 0 };
@@ -207,7 +214,7 @@ pub fn docs(app: &App) -> Element<'_, Message> {
     };
     let cols = match app.skin {
         Skin::QuickBooks => vec![col("Date", 10), col("Type", 10), col("No.", 9), col(if purchases { "Payee" } else { "Customer" }, 20), col("Due date", 10), coln("Balance", 11), coln("Total", 11), col("Status", 10), col("Action", 12)],
-        Skin::Xero => vec![col("Number", 10), col("Ref", 10), col("To", 22), col("Date", 11), col("Due date", 11), coln("Paid", 11), coln("Due", 11), col("Status", 12)],
+        Skin::Xero => vec![col("Number", 10), col("Ref", 10), col(if purchases { "From" } else { "To" }, 22), col("Date", 11), col("Due date", 11), coln("Paid", 11), coln("Due", 11), col("Status", 12)],
     };
     // Acumatica generic inquiries filter each column in place.
     let acu = vocab::acumatica();
