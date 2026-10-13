@@ -27,6 +27,7 @@
 >   * Progress invoicing from estimates.
 >   * Payment reminder (dunning) levels.
 >   * Price rules with quantity breaks and dates.
+>   * Bank files for batch supplier payments (Batch payments screen).
 >
 >   Your company file updates itself (two new tables/columns).
 
