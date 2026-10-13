@@ -357,11 +357,16 @@ fn email_card(app: &App) -> Element<'_, Message> {
 fn layout_section(app: &App) -> Element<'_, Message> {
     ui::card(column![
         ui::h2("Layout"),
-        ui::muted("Choose the layout you're used to. All three work on the same books: switching never changes your data, and each person on the team can use their own."),
+        ui::muted("Choose the layout you're used to. All five work on the same books: switching never changes your data, and each person on the team can use their own."),
         row![
             layout_card(app, crate::theme::Layout::Desktop, "Menu bar (File, Edit, Lists, Company, Customers, Vendors, Banking, Reports…), left icon bar, Home page workflow, Customer and Vendor Centers, several windows open at once, Ctrl+I / Ctrl+W shortcuts."),
             layout_card(app, crate::theme::Layout::Online, "Left-hand menu, + New with Customers / Vendors / Employees / Other, Business overview, Banking For review, US-style terms (Estimates, Vendors, Credit memos)."),
             layout_card(app, crate::theme::Layout::Xero, "Top menu bar (Business, Accounting, Contacts), dashboard with bank account cards, Reconcile, Xero terms (Quotes, Suppliers, Credit notes)."),
+        ].spacing(14),
+        row![
+            layout_card(app, crate::theme::Layout::Acumatica, "Main menu of workspaces down the left (Receivables, Payables, Banking, Finance…), each with Transactions, Processes, Inquiries and Reports; record screens with a toolbar; On Hold / Release."),
+            layout_card(app, crate::theme::Layout::Sage, "Black top bar with Sales, Purchases, Banking, Reporting and Accounting menus; Sage terms (Sales Invoices, Purchase Invoices, Customer Receipts, Outstanding)."),
+            Space::new().width(Fill),
         ].spacing(14),
     ].spacing(12))
 }

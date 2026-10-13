@@ -148,13 +148,14 @@ pub fn view(app: &App) -> Element<'_, Message> {
         row![ui::field("Company name", &s.name, |v| Message::Setup(Msg::Name(v))), ui::field("Your name", &s.owner, |v| Message::Setup(Msg::Owner(v)))].spacing(14),
         row![
             column![ui::label("Country"), pick_list(&COUNTRIES[..], Some(s.country), |c| Message::Setup(Msg::Country(c))).padding([7, 10]).text_size(14).style(theme::pick).width(Fill)].spacing(5).width(Fill),
-            column![ui::label("Layout you're used to"), layouts].spacing(5).width(Fill),
+            Space::new().width(Fill),
         ].spacing(14),
+        column![ui::label("Layout you're used to"), layouts].spacing(5),
         checkbox(s.demo).label("Fill with 12 months of sample data (for exploring)").on_toggle(|v| Message::Setup(Msg::Demo(v))).text_size(14),
         row![ui::btn("Just show me a sample company", if s.busy { None } else { Some(Message::Setup(Msg::QuickDemo)) }), ui::hspace(), ui::btn_primary("Create company", if s.busy { None } else { Some(Message::Setup(Msg::Create)) })].spacing(8),
     ].spacing(14);
 
-    let mut content = column![brand, ui::card(existing), ui::card(create), ui::muted("LedgerCraft is not affiliated with or endorsed by Intuit (QuickBooks) or Xero Limited.")].spacing(18).max_width(760);
+    let mut content = column![brand, ui::card(existing), ui::card(create), ui::muted("LedgerCraft is not affiliated with or endorsed by Intuit (QuickBooks), Xero Limited, MYOB or The Sage Group.")].spacing(18).max_width(760);
     if app.session.is_some() { content = content.push(ui::btn("Back", Some(Message::Back))); }
     scrollable(container(content).padding(40).center_x(Fill)).style(theme::scroll).height(Fill).into()
 }

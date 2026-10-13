@@ -6,7 +6,7 @@
 
 LedgerCraft covers the same ground as cloud accounting suites like Xero: invoicing, bills, bank reconciliation, reports, GST/VAT returns, multi-currency, fixed assets, projects, expense claims and payroll. It runs on your own computer as a single small program, and each business is stored in one portable file.
 
-> LedgerCraft is not affiliated with or endorsed by Xero Limited. Payroll and tax calculations must be verified by a qualified professional. Statutory e-filing (BAS lodgement, STP, MTD, RTI…) requires separate government registration; LedgerCraft prepares the figures and export files.
+> LedgerCraft is not affiliated with or endorsed by Intuit (QuickBooks), Xero Limited, MYOB or The Sage Group. Payroll and tax calculations must be verified by a qualified professional. Statutory e-filing (BAS lodgement, STP, MTD, RTI…) requires separate government registration; LedgerCraft prepares the figures and export files.
 
 ---
 
