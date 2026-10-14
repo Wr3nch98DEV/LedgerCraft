@@ -1118,3 +1118,23 @@ fn sql_queries_are_read_only() {
     l.role = "STANDARD".into();
     assert!(l.run_sql("SELECT 1").is_err(), "advisers only");
 }
+
+#[test]
+fn sales_order_deposit_applies_to_its_invoice() {
+    let l = org();
+    let sales = acct(&l, "200");
+    let order = l.save_document(None, &DocInput { kind: "SALESORDER".into(), contact_name: Some("Acme".into()), date: "2026-05-01".into(), line_amount_type: Some("NOTAX".into()),
+        lines: vec![line(sales, None, "1", "1000")], status: Some("SENT".into()), ..Default::default() });
+    let order = match order { Ok(o) => o, Err(_) => l.save_sales_order(None, &DocInput { kind: "SALESORDER".into(), contact_name: Some("Acme".into()), date: "2026-05-01".into(), line_amount_type: Some("NOTAX".into()),
+        lines: vec![line(sales, None, "1", "1000")], status: Some("SENT".into()), ..Default::default() }).unwrap() };
+    let bank: i64 = l.conn.query_row("SELECT id FROM accounts WHERE type = 'BANK' LIMIT 1", [], |r| r.get(0)).unwrap();
+    assert!(l.record_order_deposit(order, bank, "1500", "2026-05-02").is_err(), "more than the order");
+    l.record_order_deposit(order, bank, "300", "2026-05-02").unwrap();
+    assert_eq!(l.get_document(order).unwrap()["deposits"][0]["remaining_credit"], 30_000);
+    let inv = l.copy_document(order, "ACCREC", Some("2026-05-20")).unwrap();
+    l.set_document_status(inv, "AUTHORISED").unwrap();
+    let d = l.get_document(inv).unwrap();
+    assert_eq!(d["amount_due"], 70_000, "deposit applied");
+    assert_eq!(l.get_document(order).unwrap()["deposits"][0]["remaining_credit"], 0);
+    assert_invariants(&l);
+}

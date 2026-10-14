@@ -344,6 +344,8 @@ impl Ledger {
             let jid = self.post_document(id)?;
             self.conn.execute("UPDATE documents SET status = 'AUTHORISED', journal_id = ?2 WHERE id = ?1", params![id, jid])?;
             if !reposting { self.add_note("document", id, "HISTORY", &format!("{} approved", capitalise(name)))?; }
+            // An invoice made from a sales order takes the order's deposits.
+            if !reposting && kind == "ACCREC" { self.apply_order_deposits(id)?; }
             return Ok(());
         }
         if to == "VOIDED" {
@@ -491,6 +493,7 @@ impl Ledger {
         d["attachments"] = json!(util::query_json(&self.conn, "SELECT id, filename, mime, size, created_at FROM attachments WHERE entity = 'document' AND entity_id = ?1", [id])?);
         // Estimates: how much has been invoiced from them so far (progress invoicing).
         if d["type"] == "QUOTE" { d["progress_invoiced"] = json!(self.progress_invoiced(id)?); }
+        if d["type"] == "SALESORDER" { d["deposits"] = json!(self.order_deposits(id)?); }
         Ok(d)
     }
 
