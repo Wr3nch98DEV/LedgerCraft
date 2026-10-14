@@ -1,112 +1,132 @@
 # LedgerCraft
 
-> **New:** LedgerCraft now has a native desktop app (100% Rust, [iced](https://iced.rs)) with switchable **QuickBooks-style** and **Xero-style** layouts over the same books. Run `start.bat` (native) or `start.bat web` (previous web version, full feature set during the transition). Plan and status: [UI_REWRITE_PLAN.md](UI_REWRITE_PLAN.md).
+**Local desktop accounting software with a choice of familiar layouts.**
 
-**Open-source, offline-first accounting for small businesses and their advisers** — part of the *Craft* suite of open alternatives to commercial software.
+LedgerCraft is an open-source alternative to commercial accounting software for small businesses and their advisers. It runs on your own computer and stores your books locally, with one company file per business. It is part of the *Craft* suite of open alternatives to commercial software.
 
-LedgerCraft covers the same ground as cloud accounting suites like Xero: invoicing, bills, bank reconciliation, reports, GST/VAT returns, multi-currency, fixed assets, projects, expense claims and payroll. It runs on your own computer as a single small program, and each business is stored in one portable file.
+The idea is simple: use the accounting layout you are comfortable with, without having to relearn everything to manage your books in a different program. Several interface styles share the same accounting engine and company data.
 
-> LedgerCraft is not affiliated with or endorsed by Intuit (QuickBooks), Xero Limited, MYOB or The Sage Group. Payroll and tax calculations must be verified by a qualified professional. Statutory e-filing (BAS lodgement, STP, MTD, RTI…) requires separate government registration; LedgerCraft prepares the figures and export files.
+> **Work in progress:** LedgerCraft is under active development. Features, screens and workflows are still being refined, and bugs or incomplete behaviour may remain. Start with the demo company, keep backups, and verify results before relying on it for live business accounts. Payroll tax calculations include approximations; statutory filing requires separate arrangements.
 
----
+## Choose your layout
 
-## Quick start (Windows)
-
-1. Install **Rust** (<https://rustup.rs>) and **Node.js LTS** (<https://nodejs.org>) — one time only.
-2. Double-click **`start.bat`**.
-
-The first build takes a few minutes; after that it starts in seconds. LedgerCraft opens in its own window (Edge/Chrome app mode) at `http://127.0.0.1:4180`.
-
-| Command | What it does |
+| Layout | What it feels like |
 |---|---|
-| `start.bat` | Build if needed and open LedgerCraft in its own window |
-| `start.bat browser` | Open in your normal browser instead |
-| `start.bat test` | Run the accounting test-suite |
-| `start.bat clean` | Wipe build output and rebuild |
+| **QuickBooks Desktop-style** | Classic menu bar, icon bar, Home workflow, customer/vendor centres and multiple open windows. The default on first launch. |
+| **QuickBooks Online-style** | Sidebar navigation, a **+ New** menu and familiar online-accounting terminology. |
+| **Xero-style** | Top navigation, bank account dashboard cards, reconciliation and Xero-style terminology. |
+| **MYOB Acumatica-style** | Workspaces, record toolbars and On Hold / Release workflows. |
+| **Sage Accounting-style** | Top menus for sales, purchases, banking, reporting and accounting. |
 
-On first launch choose **Just show me the demo company** to explore twelve months of realistic data, or create your own organisation (AU, NZ, UK, IE, CA, US or generic VAT/GST).
+Choose a layout during setup or change it in **Settings / Preferences**. The Desktop layout also provides a **View** menu. Switching layouts keeps the same books; it changes the presentation and terminology. Light and dark themes are available (**Alt+T** toggles them).
 
-Your data lives in `%APPDATA%\LedgerCraft\orgs\*.lcdb` (one SQLite file per organisation). **Settings → Backup** downloads a copy at any time.
+These are independently developed interface styles inspired by familiar products. LedgerCraft is not affiliated with or endorsed by Intuit, Xero Limited, MYOB or The Sage Group.
 
-**Dark mode is the default.** Toggle light/dark from the sun/moon button in the top bar or press **Alt+T**.
+## What you can do
 
-macOS / Linux: `cd ui && npm install && npm run build && cd .. && cargo run --release -p ledger-server -- --open`
+The current code includes:
 
----
+- **Sales and purchases:** customers and suppliers, invoices, quotes/estimates, bills, purchase orders, credit notes, payments and repeating transactions.
+- **Banking:** statement imports, reconciliation, bank rules, transfers and batch payment files.
+- **Accounting and reports:** double-entry bookkeeping, chart of accounts, journals, opening balances, budgets, profit and loss, balance sheet, trial balance and aged receivables/payables.
+- **Business tools:** inventory, fixed assets, multi-currency, projects, time tracking and expense claims.
+- **Payroll and tax:** pay runs, payslips, leave and tax return preparation, with jurisdiction-specific limitations.
+- **Data and administration:** multiple companies, users and roles, audit history, CSV imports/exports, backups and a local API.
 
-## Feature matrix
+Some integrations need configuration or plugins. Email uses your SMTP server, live bank feeds need a provider/plugin, and government tax or payroll submissions are not automatically lodged. Core bookkeeping is local; optional online services require an internet connection.
 
-✅ implemented · 🟡 implemented with a documented limitation · ⬜ not yet
+## Get started on Windows
 
-| Area | Xero feature | LedgerCraft |
-|---|---|---|
-| **Setup** | Multiple organisations & switcher | ✅ |
-| | Country chart of accounts & tax rates (AU, NZ, UK, IE, CA, US, generic) | ✅ |
-| | Financial year, tax basis, tax period, default terms | ✅ |
-| | Conversion (opening) balances | ✅ |
-| | Lock dates (all users / non-advisers) — enforced by the database | ✅ |
-| | Users & roles (Adviser, Standard, Invoice only, Read only, Cashbook, Payroll admin, custom) | ✅ |
-| | Passwords (Argon2), TOTP two-step authentication | ✅ |
-| **Dashboard** | Bank account widgets, invoices owed, bills to pay, cash in/out, watchlist, P&L | ✅ |
-| | Short-term cash flow with what-if | ✅ |
-| | Business snapshot | ✅ |
-| **Sales** | Invoices (items, qty, price, discount, account, tax, 2 tracking categories, inclusive/exclusive/no tax) | ✅ |
-| | Approvals workflow (draft → awaiting approval → approved) | ✅ |
-| | Quotes (sent / accepted / declined → invoice) | ✅ |
-| | Credit notes, allocation, refunds | ✅ |
-| | Repeating invoices with [Month]/[Year] placeholders, auto-approve, auto-email | ✅ |
-| | Online invoice link, online quote accept/decline | ✅ · card "Pay now" via plugin 🟡 |
-| | Email invoices, statements, templates, reminders | ✅ SMTP sending (your mail server) with the invoice attached as a printable HTML file · Outbox · .eml download |
-| | Customer statements (outstanding & activity) | ✅ |
-| | Branding themes with logo | ✅ |
-| | Print / PDF | ✅ (print-to-PDF) |
-| **Purchases** | Bills, approvals, supplier credits, repeating bills | ✅ |
-| | Purchase orders → bill | ✅ |
-| | Batch payments + ABA / BACS / NACHA / SEPA files, remittance advice emails | ✅ |
-| | Files inbox / bill capture | 🟡 PDF text extraction built in; photos need an OCR plugin (Tesseract) |
-| | Expense claims (receipts & mileage) | ✅ |
-| **Banking** | Bank, credit card, payment-service, cash accounts | ✅ |
-| | Statement import: CSV (mapping wizard), OFX, QFX, QIF, CAMT.053, MT940 + duplicate detection | ✅ |
-| | Live bank feeds | 🟡 plugin interface (no aggregator bundled) |
-| | Reconcile: suggested matches, find & match (many-to-one, partial payments), batch payments as one line, create, transfer, discuss, OK, bank fee/rounding adjustments | ✅ |
-| | Bank rules (any/all conditions, fixed & % allocations, transfer rules) | ✅ |
-| | Spend / receive money, overpayments, prepayments, transfers | ✅ |
-| | Cash coding (bulk) | ✅ |
-| | Bank reconciliation report | ✅ |
-| **Contacts** | Customers/suppliers, people, groups, defaults, timeline, merge, archive, CSV import/export | ✅ |
-| **Products** | Untracked & tracked inventory (average cost, COGS, adjustments, low stock) | ✅ |
-| **Accounting** | Chart of accounts (CRUD, archive, bulk tax, import/export) | ✅ |
-| | Manual journals (auto-reversing), repeating journals | ✅ |
-| | Tracking categories (2 active, unlimited options) | ✅ |
-| | Budgets (overall / per tracking option) + budget variance | ✅ |
-| | Find & recode | ✅ |
-| | Multi-currency (160+ currencies), realised & unrealised FX, revaluation | ✅ (manual rates or one-click ECB reference rates) |
-| | Fixed assets (SL, DV 100/150/200%, full, none; book & tax; runs, rollback, disposal) | ✅ |
-| | GST/VAT returns: AU BAS, NZ GST101, UK VAT100 (MTD JSON), IE VAT3, CA GST/HST, US sales tax, generic | ✅ (lodgement by you) |
-| | Assurance dashboard, audit log, history & notes everywhere | ✅ |
-| | Workpapers | ✅ |
-| **Reports** | P&L (comparisons, monthly, budget, % of income, tracking, cash/accrual), Balance Sheet (cash/accrual), Statement of Cash Flows, Trial Balance, GL summary & detail, Account Transactions, Journal Report, Aged AR/AP, Cash Summary, Bank Summary, Executive Summary, Sales/Purchases by Item & Contact, Tax Reconciliation, Invoice detail, Contact transactions, Inventory, Fixed asset register/reconciliation/schedule, Project profitability, Expense claims, Payroll activity, Leave balances, FX gains | ✅ |
-| | Drill-down, CSV / Excel / print-to-PDF export | ✅ |
-| | Custom report builder (layouts, formulas) & report packs | ✅ |
-| **Projects** | Projects, tasks (hourly/fixed/non-chargeable), timer, costs with markup, invoice from project, profitability | ✅ |
-| **Payroll** | Employees, calendars, pay items, timesheets, leave, pay runs, payslips, journals, net-pay bank transaction, wages bank file (ABA/BACS/NACHA/SEPA) | ✅ |
-| | Tax tables AU / UK / NZ / US / generic | 🟡 approximations — verify |
-| | STP / RTI / IR filing | 🟡 export file only |
-| **Platform** | Global search, command palette (Ctrl+K), keyboard shortcuts, notifications | ✅ |
-| | Import from Xero / QBO / MYOB / Wave CSV (contacts, accounts, items, invoices, bills, journals, trial balance) with dry run | ✅ |
-| | Full export (CSV + JSON archive), backup | ✅ |
-| | Local REST API (token auth, OpenAPI), signed webhooks with background delivery | ✅ |
-| | Dark & light themes | ✅ |
+The repository currently uses a **build-from-source** launcher.
 
----
+1. Install [Rust](https://rustup.rs). On Windows, the Rust setup may also require Microsoft C++ build tools and the Windows SDK; follow the toolchain setup prompts.
+2. Download this repository using GitHub's **Code → Download ZIP** and extract it, or clone it:
 
-## How it's built
+   ```powershell
+   git clone https://github.com/Wr3nch98DEV/LedgerCraft.git
+   cd LedgerCraft
+   ```
 
-* **ledger-core** (Rust): the accounting engine — double-entry journals with database-enforced invariants, documents, payments, banking, reports, tax returns, payroll, assets, projects. No UI code; 46 tests including a property test that random sequences of operations always leave the ledger balanced.
-* **ledger-server** (Rust, axum): serves the UI and a JSON API on `127.0.0.1` only.
-* **ui** (Svelte 5 + Tailwind 4 + Vite): the interface, embedded into the server binary at build time.
+3. Double-click **start.bat** in the extracted/cloned folder. From PowerShell, use:
 
-See [ARCHITECTURE.md](ARCHITECTURE.md), [ACCOUNTING.md](ACCOUNTING.md) (posting rules), [PLUGINS.md](PLUGINS.md), [API.md](API.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+   ```powershell
+   .\start.bat
+   ```
+
+The launcher builds the native Rust desktop app and opens its own window. The first build can take several minutes and needs internet access to download dependencies. Later builds reuse the compiler cache. Node.js is only needed for the optional web interface.
+
+### Your first company
+
+1. Choose **Just show me the demo company** to explore sample transactions, or create your own company.
+2. For a new company, choose your country and preferred layout, then review the company settings, chart of accounts and tax rates.
+3. Add customers/suppliers and bank accounts. Enter opening balances if you are bringing existing books across.
+4. Create invoices and bills, record payments, and import bank statements to reconcile transactions.
+5. Review your reports and make a backup regularly.
+
+Menu names differ between layouts: quotes may be called estimates, and suppliers may be called vendors.
+
+### Launcher commands
+
+Run these from the project folder; in PowerShell, prefix `start.bat` with `.\`.
+
+| Command | Action |
+|---|---|
+| `start.bat` | Build and open the native app in your saved layout. |
+| `start.bat desktop` | Open in the QuickBooks Desktop-style layout. |
+| `start.bat online` | Open in the QuickBooks Online-style layout. |
+| `start.bat xero` | Open in the Xero-style layout. |
+| `start.bat web` | Build and open the optional web interface in a browser app window. |
+| `start.bat browser` | Open the web interface in your default browser. |
+| `start.bat server` | Run the local web server without opening a window. |
+| `start.bat test` | Run the accounting engine and native app tests. |
+| `start.bat clean` | Remove generated build output and rebuild. |
+
+Select the MYOB Acumatica-style and Sage Accounting-style layouts inside the app.
+
+## Your data and backups
+
+On Windows, company files are stored in:
+
+```text
+%APPDATA%\LedgerCraft\orgs\*.lcdb
+```
+
+Each `.lcdb` file is a SQLite company database. The native app and optional web interface use the same data directory. Company data is separate from this source repository.
+
+Use the app's backup controls in **Settings / Preferences → Data and backups**, or the Desktop layout's file menu. Restore a company using **Restore a backup…** on the company selection screen. Keep backup copies in a separate location, especially before updating the program.
+
+## Optional web interface
+
+Install [Node.js LTS](https://nodejs.org) as well as Rust, then run `start.bat web` or `start.bat browser`. The interface is served locally at `http://127.0.0.1:4180`; the server runs on your computer.
+
+For a manual build (including macOS/Linux, with the appropriate platform build dependencies installed):
+
+```sh
+cd ui
+npm install
+npm run build
+cd ..
+cargo run --release -p ledger-server -- --open
+```
+
+To build and launch the native app manually:
+
+```sh
+cargo run --release -p ledger-app
+```
+
+## Development and project status
+
+LedgerCraft uses **Rust + iced** for the native desktop app, a shared **Rust accounting engine**, **SQLite** company files, and an optional **Svelte + Tailwind** web interface served by **axum**.
+
+The project is still evolving. Progress notes describe development milestones rather than a guarantee that every feature is ready for production use.
+
+- [Progress notes](PROGRESS.md)
+- [Next steps and roadmap](NEXT_STEPS_PLAN.md)
+- [Native interface development](UI_REWRITE_PLAN.md)
+- [Architecture](ARCHITECTURE.md) and [accounting rules](ACCOUNTING.md)
+- [Plugins](PLUGINS.md) and [API documentation](API.md)
+- [Contributing](CONTRIBUTING.md)
 
 ## Licence
 
