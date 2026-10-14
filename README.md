@@ -128,6 +128,10 @@ The project is still evolving. Progress notes describe development milestones ra
 - [Plugins](PLUGINS.md) and [API documentation](API.md)
 - [Contributing](CONTRIBUTING.md)
 
+## Support development
+
+If you would like to support LedgerCraft's ongoing development, [buy me a coffee](https://buymeacoffee.com/wr3nch98). Donations are appreciated and help support work on the project.
+
 ## Licence
 
 AGPL-3.0-or-later. See [LICENSE](LICENSE).
